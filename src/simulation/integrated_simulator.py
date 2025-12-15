@@ -191,6 +191,12 @@ class IntegratedSimulator:
         )
         logger.info(f"Reference path created with "
                    f"{len(config.reference_waypoints_x)} waypoints")
+
+        # Safety parameters
+        self.ego_radius = getattr(config, "ego_radius", 1.0)
+        self.ped_radius = getattr(config, "ped_radius", 0.3)
+        self.obstacle_radius = getattr(config, "obstacle_radius", self.ped_radius)
+        self.safety_buffer = getattr(config, "safety_buffer", 0.0)
         
         # 2. Initialize pedestrian simulator
         if len(config.ped_initial_states) > 0:
@@ -225,7 +231,16 @@ class IntegratedSimulator:
             max_speed=config.ego_max_speed,
             max_accel=config.ego_max_accel,
             max_curvature=config.ego_max_curvature,
-            dt=config.dt
+            dt=config.dt,
+            robot_radius=self.ego_radius,
+            obstacle_radius=self.obstacle_radius,
+            safety_buffer=self.safety_buffer,
+            k_j=getattr(config, "k_j", None),
+            k_t=getattr(config, "k_t", None),
+            k_d=getattr(config, "k_d", None),
+            k_s_dot=getattr(config, "k_s_dot", None),
+            k_lat=getattr(config, "k_lat", None),
+            k_lon=getattr(config, "k_lon", None)
         )
         
         # 6. Initialize coordinate converter
@@ -234,6 +249,11 @@ class IntegratedSimulator:
         # 7. Initialize ego vehicle state
         ego_arr = np.array(config.ego_initial_state)
         self.ego_state = EgoVehicleState.from_array(ego_arr, timestamp=0.0)
+
+        # Precompute static obstacles (expanded to point set for collision checks)
+        self.static_obstacle_points = self._expand_static_obstacles(
+            config.static_obstacles, step=0.5
+        )
         
         logger.info("Integrated simulator initialization complete")
     
@@ -281,6 +301,13 @@ class IntegratedSimulator:
         elif ped_state is not None:
             # Not enough observations yet, use current positions
             obstacles = ped_state.positions
+
+        # 2.5. Append static obstacles (expanded to points)
+        if self.static_obstacle_points.size > 0:
+            if obstacles.size == 0:
+                obstacles = self.static_obstacle_points.copy()
+            else:
+                obstacles = np.vstack([obstacles, self.static_obstacle_points])
         
         # 3. Plan path
         planned_path = self.planner.plan(
@@ -325,7 +352,10 @@ class IntegratedSimulator:
                 timestamp=self.time
             ),
             predicted_trajectories=predicted_traj,
-            planned_path=planned_path
+            planned_path=planned_path,
+            ego_radius=self.ego_radius,
+            ped_radius=self.ped_radius,
+            safety_buffer=self.safety_buffer
         )
         
         # Compute metrics
@@ -339,6 +369,35 @@ class IntegratedSimulator:
         self.step_count += 1
         
         return result
+
+    @staticmethod
+    def _expand_static_obstacles(static_obstacles, step: float = 0.5) -> np.ndarray:
+        """Expand rectangular static obstacles into boundary points for collision checks."""
+        if static_obstacles is None or len(static_obstacles) == 0:
+            return np.empty((0, 2))
+        
+        points = []
+        for rect in static_obstacles:
+            if len(rect) != 4:
+                continue
+            x_min, x_max, y_min, y_max = rect
+            xs = np.arange(x_min, x_max + step, step)
+            ys = np.arange(y_min, y_max + step, step)
+            
+            # Top and bottom edges
+            for x in xs:
+                points.append((x, y_min))
+                points.append((x, y_max))
+            # Left and right edges
+            for y in ys:
+                points.append((x_min, y))
+                points.append((x_max, y))
+        
+        if len(points) == 0:
+            return np.empty((0, 2))
+        
+        points_arr = np.unique(np.array(points), axis=0)
+        return points_arr
     
     def run(self, n_steps: Optional[int] = None) -> List[SimulationResult]:
         """Run simulation for multiple steps.
@@ -393,6 +452,41 @@ class IntegratedSimulator:
         ego_y = [r.ego_state.y for r in self.history]
         ego_v = [r.ego_state.v for r in self.history]
         min_distances = [r.metrics.get('min_distance', float('inf')) for r in self.history]
+        ttc_list = [r.metrics.get('ttc', float('inf')) for r in self.history]
+
+        ped_positions = [r.ped_state.positions for r in self.history]
+        ped_velocities = [r.ped_state.velocities for r in self.history]
+        ped_goals = [r.ped_state.goals for r in self.history]
+
+        predicted_list = [
+            r.predicted_trajectories if r.predicted_trajectories is not None else np.empty((0,))
+            for r in self.history
+        ]
+
+        planned_x = [
+            np.array(r.planned_path.x) if r.planned_path is not None else np.array([])
+            for r in self.history
+        ]
+        planned_y = [
+            np.array(r.planned_path.y) if r.planned_path is not None else np.array([])
+            for r in self.history
+        ]
+        planned_v = [
+            np.array(r.planned_path.v) if r.planned_path is not None else np.array([])
+            for r in self.history
+        ]
+        planned_a = [
+            np.array(r.planned_path.a) if r.planned_path is not None else np.array([])
+            for r in self.history
+        ]
+        planned_yaw = [
+            np.array(r.planned_path.yaw) if r.planned_path is not None else np.array([])
+            for r in self.history
+        ]
+        planned_cost = [
+            r.planned_path.cost if r.planned_path is not None else float('inf')
+            for r in self.history
+        ]
         
         np.savez(
             trajectory_file,
@@ -400,7 +494,18 @@ class IntegratedSimulator:
             ego_x=np.array(ego_x),
             ego_y=np.array(ego_y),
             ego_v=np.array(ego_v),
-            min_distances=np.array(min_distances)
+            min_distances=np.array(min_distances),
+            ttc=np.array(ttc_list),
+            ped_positions=np.array(ped_positions, dtype=object),
+            ped_velocities=np.array(ped_velocities, dtype=object),
+            ped_goals=np.array(ped_goals, dtype=object),
+            predicted_trajectories=np.array(predicted_list, dtype=object),
+            planned_x=np.array(planned_x, dtype=object),
+            planned_y=np.array(planned_y, dtype=object),
+            planned_v=np.array(planned_v, dtype=object),
+            planned_a=np.array(planned_a, dtype=object),
+            planned_yaw=np.array(planned_yaw, dtype=object),
+            planned_cost=np.array(planned_cost)
         )
         
         logger.info(f"Results saved to {trajectory_file}")

@@ -16,6 +16,12 @@ ego_target_speed: 6.0  # Target 6 m/s (~20 km/h)
 ego_max_speed: 10.0
 ego_max_accel: 2.0
 ego_max_curvature: 0.5
+ego_radius: 1.0
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.3
+obstacle_radius: 0.3
+safety_buffer: 0.2
 
 # === Reference Path ===
 # Straight road

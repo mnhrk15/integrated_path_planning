@@ -1,0 +1,60 @@
+# Scenario 04: Busy multi-wave crossing
+#
+# Situation:
+# - Straight road, multiple waves of pedestrians crossing from both sides.
+# - Higher density to stress prediction and path replanning.
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 25.0
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]
+ego_target_speed: 5.0
+ego_max_speed: 9.0
+ego_max_accel: 1.8
+ego_max_curvature: 0.6
+ego_radius: 1.0
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.3
+obstacle_radius: 0.3
+safety_buffer: 0.2
+
+# === Reference Path ===
+reference_waypoints_x: [0.0, 12.0, 24.0, 36.0, 48.0, 60.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrians (three waves) ===
+ped_initial_states:
+  # Wave 1 (early)
+  - [18.0, 6.0, 0.0, -1.0, 18.0, -6.0]
+  - [22.0, -6.5, 0.0, 1.0, 22.0, 6.5]
+  # Wave 2 (mid)
+  - [30.0, 7.0, 0.0, -0.9, 30.0, -7.0]
+  - [34.0, -7.0, 0.0, 0.9, 34.0, 7.0]
+  # Wave 3 (late)
+  - [44.0, 6.0, 0.0, -1.1, 44.0, -6.0]
+  - [48.0, -6.0, 0.0, 1.1, 48.0, 6.0]
+
+ped_groups:
+  - [0, 1]
+  - [2, 3]
+  - [4, 5]
+
+# === Static Obstacles ===
+static_obstacles: []
+
+# === Model ===
+sgan_model_path: null
+
+# === Computation ===
+device: "cpu"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_04_multi_crossing"

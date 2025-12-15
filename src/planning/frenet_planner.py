@@ -64,7 +64,11 @@ class FrenetPlanner:
         max_speed: float = MAX_SPEED,
         max_accel: float = MAX_ACCEL,
         max_curvature: float = MAX_CURVATURE,
-        dt: float = DT
+        dt: float = DT,
+        robot_radius: float = ROBOT_RADIUS,
+        obstacle_radius: float = 0.3,
+        safety_buffer: float = 0.0,
+        **kwargs
     ):
         self.csp = reference_path
         self.max_speed = max_speed
@@ -72,9 +76,22 @@ class FrenetPlanner:
         self.max_curvature = max_curvature
         self.dt = dt
         self.converter = CartesianFrenetConverter()
+        self.robot_radius = robot_radius
+        self.obstacle_radius = obstacle_radius
+        self.safety_buffer = safety_buffer
+
+        # Cost weights (default to module constants; can be overridden via kwargs)
+        self.k_j = kwargs.get("k_j", K_J)
+        self.k_t = kwargs.get("k_t", K_T)
+        self.k_d = kwargs.get("k_d", K_D)
+        self.k_s_dot = kwargs.get("k_s_dot", K_S_DOT)
+        self.k_lat = kwargs.get("k_lat", K_LAT)
+        self.k_lon = kwargs.get("k_lon", K_LON)
         
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
-                   f"max_speed={max_speed}m/s, max_accel={max_accel}m/s²")
+                   f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
+                   f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
+                   f"buffer={safety_buffer}m")
     
     def plan(
         self,
@@ -318,10 +335,10 @@ class FrenetPlanner:
         Jt = fp.t[-1]
         
         # Combine costs
-        lat_cost = K_J * Jp + K_T * Jt + K_D * Jd
-        lon_cost = K_J * Js + K_T * Jt + K_S_DOT * Jv
+        lat_cost = self.k_j * Jp + self.k_t * Jt + self.k_d * Jd
+        lon_cost = self.k_j * Js + self.k_t * Jt + self.k_s_dot * Jv
         
-        total_cost = K_LAT * lat_cost + K_LON * lon_cost
+        total_cost = self.k_lat * lat_cost + self.k_lon * lon_cost
         
         return total_cost
     
@@ -431,10 +448,15 @@ class FrenetPlanner:
         if len(obstacles) == 0:
             return True
         
+        inflated_radius = max(
+            self.robot_radius + self.obstacle_radius + self.safety_buffer,
+            1e-6
+        )
+        
         for i in range(len(fp.x)):
             for obs in obstacles:
                 dist = np.hypot(fp.x[i] - obs[0], fp.y[i] - obs[1])
-                if dist <= ROBOT_RADIUS:
+                if dist <= inflated_radius:
                     return False
         
         return True

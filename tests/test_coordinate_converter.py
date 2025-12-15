@@ -58,5 +58,19 @@ def test_coordinate_converter():
     assert obstacles.shape == (6, 2)  # 2 peds * 3 timesteps
 
 
+def test_nearest_point_at_boundaries():
+    """Nearest point should resolve endpoints correctly."""
+    x = [0.0, 10.0, 20.0]
+    y = [0.0, 0.0, 0.0]
+    csp = CubicSpline2D(x, y)
+    from src.core.coordinate_converter import CoordinateConverter
+    converter = CoordinateConverter(csp)
+
+    rs, rx, ry, rtheta, rkappa, rdkappa = converter.find_nearest_point_on_path(0.0, 5.0)
+    assert abs(rs - 0.0) < 1e-2
+    rs2, *_ = converter.find_nearest_point_on_path(20.0, 5.0)
+    assert abs(rs2 - csp.s[-1]) < 1e-2
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

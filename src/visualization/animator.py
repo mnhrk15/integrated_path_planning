@@ -347,27 +347,19 @@ class SimulationAnimator:
             self.ax_distance.autoscale_view()
     
     def _save_animation(self, save_path: Path, writer: str, fps: int):
-        """Save animation to file."""
+        """Save animation to file with minimal retries and cleanup."""
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        
+        target_ext = '.gif' if writer == 'pillow' else '.mp4'
+        if not str(save_path).endswith(target_ext):
+            save_path = save_path.with_suffix(target_ext)
+
         logger.info(f"Saving animation to {save_path} (writer={writer}, fps={fps})...")
-        
-        try:
+
+        def _attempt_save():
             if writer == 'pillow':
-                # Save as GIF
-                if not str(save_path).endswith('.gif'):
-                    save_path = save_path.with_suffix('.gif')
-                self.anim.save(
-                    str(save_path),
-                    writer='pillow',
-                    fps=fps,
-                    dpi=self.dpi
-                )
+                self.anim.save(str(save_path), writer='pillow', fps=fps, dpi=self.dpi)
             elif writer == 'ffmpeg':
-                # Save as MP4
-                if not str(save_path).endswith('.mp4'):
-                    save_path = save_path.with_suffix('.mp4')
                 self.anim.save(
                     str(save_path),
                     writer='ffmpeg',
@@ -377,14 +369,34 @@ class SimulationAnimator:
                 )
             else:
                 raise ValueError(f"Unsupported writer: {writer}")
-            
+
+        try:
+            _attempt_save()
+        except Exception as e:
+            logger.warning(f"First save attempt failed: {e}, retrying once...")
+            try:
+                # Cleanup and retry once
+                if save_path.exists():
+                    save_path.unlink(missing_ok=True)
+                plt.close('all')
+                _attempt_save()
+            except Exception as e2:
+                logger.error(f"Failed to save animation after retry: {e2}")
+                logger.info("Ensure pillow (GIF) or ffmpeg (MP4) is installed and output path is writable")
+                raise
+        finally:
+            try:
+                if hasattr(self, 'anim') and hasattr(self.anim, 'event_source'):
+                    self.anim.event_source.stop()
+            except Exception:
+                pass
+            plt.close('all')
+
+        try:
             size_mb = save_path.stat().st_size / (1024 * 1024)
             logger.info(f"✓ Animation saved successfully ({size_mb:.1f} MB)")
-            
-        except Exception as e:
-            logger.error(f"Failed to save animation: {e}")
-            logger.info("Make sure you have pillow (for GIF) or ffmpeg (for MP4) installed")
-            raise
+        except Exception:
+            logger.info("Animation saved (size unavailable)")
     
     def show(self):
         """Display the animation."""

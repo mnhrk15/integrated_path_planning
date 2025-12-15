@@ -14,6 +14,20 @@ ego_target_speed: 8.33  # Target speed [m/s] (30 km/h)
 ego_max_speed: 13.89  # Maximum speed [m/s] (50 km/h)
 ego_max_accel: 2.0  # Maximum acceleration [m/s²]
 ego_max_curvature: 1.0  # Maximum curvature [1/m]
+ego_radius: 1.0  # Collision radius for ego vehicle [m]
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.3  # Collision radius for pedestrians [m]
+obstacle_radius: 0.3  # Collision radius for generic obstacles [m]
+safety_buffer: 0.2  # Additional safety buffer [m]
+
+# === Planner Cost Weights (optional) ===
+k_j: 1.0
+k_t: 1.0
+k_d: 1.0
+k_s_dot: 1.0
+k_lat: 1.0
+k_lon: 1.0
 
 # === Reference Path (Waypoints) ===
 reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]

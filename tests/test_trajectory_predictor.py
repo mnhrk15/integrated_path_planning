@@ -39,5 +39,30 @@ def test_trajectory_predictor_without_model():
     assert pred_traj_rel.shape[0] == 12
 
 
+def test_trajectory_predictor_with_dummy_model(monkeypatch):
+    """Test predictor path when a model exists (using dummy generator)."""
+    obs_traj = torch.randn(8, 1, 2)
+    obs_traj_rel = torch.diff(obs_traj, dim=0, prepend=obs_traj[:1])
+    seq_start_end = torch.tensor([[0, 1]])
+
+    class DummyGen(torch.nn.Module):
+        def forward(self, obs_traj, obs_traj_rel, seq_start_end):
+            # Return zeros with same pred_len and batch size
+            pred_len = 12
+            batch = obs_traj.shape[1]
+            return torch.zeros(pred_len, batch, 2, device=obs_traj.device)
+
+    predictor = TrajectoryPredictor(model_path=None, pred_len=12, num_samples=1, device='cpu')
+    predictor.generator = DummyGen()
+
+    pred = predictor.predict(obs_traj, obs_traj_rel, seq_start_end)
+
+    assert pred.shape == (12, 1, 2)
+    # Since dummy returns zeros in relative coords, absolute should stay at last obs position
+    last_obs = obs_traj[-1].cpu().numpy()
+    expected = np.repeat(last_obs[None, :, :], 12, axis=0)
+    assert np.allclose(pred, expected)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

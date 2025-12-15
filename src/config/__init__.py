@@ -60,6 +60,20 @@ class SimulationConfig:
     ego_max_speed: float = 13.89  # 50 km/h
     ego_max_accel: float = 2.0
     ego_max_curvature: float = 1.0
+    ego_radius: float = 1.0
+    
+    # Obstacle / pedestrian safety parameters
+    ped_radius: float = 0.3
+    obstacle_radius: float = 0.3
+    safety_buffer: float = 0.2
+
+    # Planner cost weights (optional override)
+    k_j: float = 1.0
+    k_t: float = 1.0
+    k_d: float = 1.0
+    k_s_dot: float = 1.0
+    k_lat: float = 1.0
+    k_lon: float = 1.0
     
     # Reference path
     reference_waypoints_x: list = field(default_factory=list)

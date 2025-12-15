@@ -4,7 +4,7 @@ Tests for PedestrianSimulator with PySocialForce integration
 import pytest
 import numpy as np
 from src.simulation.integrated_simulator import PedestrianSimulator
-from src.core.state import PedestrianState
+from src.core.data_structures import SimulationResult, EgoVehicleState, PedestrianState
 
 
 @pytest.fixture
@@ -66,6 +66,30 @@ def test_pedestrian_simulator_fallback_without_pysocialforce(simple_pedestrian_s
     
     state = simulator.get_state()
     assert len(state.pedestrians) == 2
+
+
+def test_static_obstacle_collision_detection():
+    """Static obstacles should trigger collision when within radius."""
+    # Construct a simple SimulationResult with an obstacle near ego
+    ego = EgoVehicleState(x=0.0, y=0.0, yaw=0.0, v=0.0, a=0.0)
+    ped = PedestrianState(
+        positions=np.array([[0.5, 0.0]]),
+        velocities=np.array([[0.0, 0.0]]),
+        goals=np.array([[0.0, 0.0]]),
+        timestamp=0.0
+    )
+    res = SimulationResult(
+        time=0.0,
+        ego_state=ego,
+        ped_state=ped,
+        predicted_trajectories=None,
+        planned_path=None,
+        ego_radius=0.6,
+        ped_radius=0.3,
+        safety_buffer=0.2
+    )
+    metrics = res.compute_safety_metrics()
+    assert bool(metrics['collision']) is True
 
 
 if __name__ == '__main__':
