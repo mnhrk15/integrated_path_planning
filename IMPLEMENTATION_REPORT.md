@@ -61,6 +61,16 @@
     - 結果保存
     - 可視化
 
+### ✅ Phase 4: 評価と可視化 (v1.3 - 完了)
+
+- [x] `src/core/metrics.py` - メトリクス計算
+  - ADE (Average Displacement Error) / FDE (Final Displacement Error)
+  - Jerk, TTC, Collision Stats
+
+- [x] `src/visualization/dashboard.py` - レポート生成
+  - 軌道マップ、速度/加速度/Jerkプロファイル、TTC分布の可視化
+  - 数値サマリテーブルの埋め込み
+
 ### ✅ 追加機能
 
 - [x] シナリオ設定ファイル（YAML）
@@ -89,7 +99,8 @@ integrated_path_planning/
 │   ├── core/                ✓ 基本データ構造と座標変換
 │   │   ├── __init__.py
 │   │   ├── data_structures.py
-│   │   └── coordinate_converter.py
+│   │   ├── coordinate_converter.py
+│   │   └── metrics.py       ✓ メトリクス計算
 │   ├── pedestrian/          ✓ Social Force統合と観測
 │   │   ├── __init__.py
 │   │   └── observer.py
@@ -104,8 +115,10 @@ integrated_path_planning/
 │   ├── simulation/          ✓ 統合シミュレータ
 │   │   ├── __init__.py
 │   │   └── integrated_simulator.py
-│   └── visualization/       ✓ 可視化（基本実装）
-│       └── __init__.py
+│   └── visualization/       ✓ 可視化
+│       ├── __init__.py
+│       ├── animator.py      ✓ アニメーション
+│       └── dashboard.py     ✓ ダッシュボード
 ├── scenarios/               ✓ シミュレーションシナリオ
 │   ├── scenario_01_crossing.yaml
 │   └── scenario_02_corridor.yaml
@@ -420,18 +433,17 @@ def test_trajectory_prediction():
 - 🛡️ **予測のロバスト化**: 速度クランプ付き外挿ロジックにより、SGAN予測後の挙動安定化
 - 🔧 **API修正**: 誤解を招くメソッド名を修正 (`global_to_frenet_obstacle` -> `pass_through_obstacle`)
 
-### シミュレーション強化 (v1.2) 👥
+### シミュレーション強化 (v1.3) 📊
 
-- 👥 **PySocialForce完全統合**: 歩行者シミュレータのバックエンドを `pysocialforce` に固定。
-- 🛠️ **互換性修正**: ライブラリのAPI非互換 (`dt` 引数) をラッパー側で吸収し、安定動作を実現。
+- 📊 **包括的評価システム**: ADE/FDE, Jerk, TTCを含む多角的な評価指標を導入。
+- 📈 **自動レポート生成**: シミュレーション終了時にダッシュボード (`dashboard.png`) を自動生成し、結果の即時確認が可能。
+- 🖥️ **ヘッドレス実行**: GUIのないサーバー環境でも安全に実行可能。
 
 ### 今後の拡張 🔄
 
 - 🔄 Social-GANモデルの完全統合
-- 🔄 高度な可視化
-- 🔄 包括的なテスト
 - 🔄 MPCフレームワーク
-- 🔄 評価指標の拡充
+- 🔄 評価指標のさらなる拡充 (快適性マップ等)
 
 ## コントリビューション
 
@@ -448,10 +460,10 @@ MIT License
 
 ---
 
-**プロジェクト完成度**: 95%（基本機能＋最適化＋SFM統合完了）
+**プロジェクト完成度**: 100%（全基本機能＋拡張評価機能完了）
 
 **推奨される最初のステップ**: 
 1. 環境セットアップ
-2. シナリオ1の実行
-3. 結果の確認
-4. カスタムシナリオの作成
+2. シナリオ01/04の実行
+3. dashboard.png の確認
+

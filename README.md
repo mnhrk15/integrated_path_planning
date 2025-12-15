@@ -33,6 +33,11 @@
 ### シミュレーションエンジン (v1.2 Update)
 - **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動などが再現され、よりリアルな検証が可能です。
 
+### 評価と可視化 (v1.3 Update)
+- **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
+- **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
+- **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
+
 ## インストール
 
 ```bash
@@ -97,9 +102,8 @@ simulator = IntegratedSimulator(config)
 # シミュレーションの実行
 results = simulator.run(n_steps=100)
 
-# 結果の保存と可視化
+# 結果の保存と可視化（自動的にdashboard.pngが生成されます）
 simulator.save_results()
-simulator.visualize()
 ```
 
 ### コマンドラインからの実行
