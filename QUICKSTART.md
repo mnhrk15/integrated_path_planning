@@ -93,6 +93,19 @@ python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
 python examples/run_simulation.py --scenario scenarios/scenario_02_corridor.yaml
 ```
 
+### 追加シナリオ
+
+```bash
+# 曲線路合流＋歩行者すれ違い
+python examples/run_simulation.py --scenario scenarios/scenario_03_curved_merge.yaml
+
+# 多波交差の混雑
+python examples/run_simulation.py --scenario scenarios/scenario_04_multi_crossing.yaml
+
+# 静的障害で狭窄した通路
+python examples/run_simulation.py --scenario scenarios/scenario_05_blocked_corridor.yaml
+```
+
 ### カスタムオプション
 
 ```bash
@@ -104,6 +117,9 @@ python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
 
 # ログレベルを変更
 python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --log-level DEBUG
+
+# プランナ重み・安全パラメータを上書き（例: YAMLを複製して編集）
+# k_j, k_t, k_d, k_s_dot, k_lat, k_lon, ego_radius, ped_radius, obstacle_radius, safety_buffer
 ```
 
 ### アニメーション生成（NEW! 🆕）
@@ -127,6 +143,8 @@ python examples/run_simulation.py \
     --animation-format mp4 \
     --fps 20
 ```
+
+> 保存が失敗した場合は自動で1回リトライし、失敗時は後処理を行います。`pillow`(GIF) または `ffmpeg`(MP4) のインストールを確認してください。
 
 **デモスクリプト（GIF + MP4両方生成）:**
 
@@ -315,6 +333,17 @@ animator.create_animation(
 # Display
 animator.show()
 ```
+
+## 出力ファイル
+
+- `output/<scenario>/trajectory.npz`  
+  - `times`, `ego_x`, `ego_y`, `ego_v`  
+  - `min_distances`, `ttc`  
+  - `ped_positions`, `ped_velocities`, `ped_goals`  
+  - `predicted_trajectories`  
+  - `planned_x`, `planned_y`, `planned_v`, `planned_a`, `planned_yaw`, `planned_cost`  
+- `output/<scenario>/simulation.png`: 軌跡・メトリクスの静止画像  
+- `simulation.gif` / `simulation.mp4`（`--animate`指定時）: 失敗時は自動で1回リトライし、後処理を実施します。`pillow` (GIF) または `ffmpeg` (MP4) をインストールしてください。
 
 ## トラブルシューティング
 

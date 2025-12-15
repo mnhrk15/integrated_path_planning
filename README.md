@@ -177,6 +177,31 @@ integrated_path_planning/
 
 1. **scenario_01_crossing.yaml**: 歩行者との交差シナリオ
 2. **scenario_02_corridor.yaml**: 狭い通路でのすれ違いシナリオ
+3. **scenario_03_curved_merge.yaml**: 曲線路合流＋歩行者すれ違い
+4. **scenario_04_multi_crossing.yaml**: 多波交差の混雑シナリオ
+5. **scenario_05_blocked_corridor.yaml**: 静的障害で狭窄した通路を通過
+
+## 主な設定項目（YAML）
+
+- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`
+- Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature`
+- 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`, `safety_buffer`
+- プランナ重み（任意上書き）: `k_j`, `k_t`, `k_d`, `k_s_dot`, `k_lat`, `k_lon`
+- 経路: `reference_waypoints_x`, `reference_waypoints_y`
+- 歩行者: `ped_initial_states`, `ped_groups`
+- 障害物: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
+- 予測モデル: `sgan_model_path`（`null`なら定速フォールバック）
+- デバイス/出力: `device`, `output_path`, `visualization_enabled`
+
+## 保存される出力
+
+`simulator.save_results()` は以下を `trajectory.npz` に保存します（object配列含む）:
+- 時系列: `times`
+- Ego: `ego_x`, `ego_y`, `ego_v`
+- 安全指標: `min_distances`, `ttc`
+- 歩行者: `ped_positions`, `ped_velocities`, `ped_goals`
+- 予測: `predicted_trajectories`
+- 計画軌跡: `planned_x`, `planned_y`, `planned_v`, `planned_a`, `planned_yaw`, `planned_cost`
 
 ## テスト
 
