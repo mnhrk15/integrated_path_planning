@@ -229,7 +229,7 @@ ped_groups: [[0]]
 
 static_obstacles: []
 
-sgan_model_path: "models/sgan-models/eth_8.pt"  # 必須: 学習済みモデルへのパス
+sgan_model_path: "models/sgan-models/eth_8_model.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
 visualization_enabled: true
 output_path: "output/my_scenario"
@@ -356,7 +356,7 @@ animator.show()
 python scripts/download_sgan_models.py
 ```
 ```yaml
-sgan_model_path: "models/sgan-models/eth_8.pt"
+sgan_model_path: "models/sgan-models/eth_8_model.pt"
 ```
 
 ### PySocialForceがインストールされていない

@@ -59,7 +59,7 @@ bash scripts/download_sgan_models.sh
 ```
 
 ダウンロードされるモデル例：
-- `models/sgan-models/eth_8.pt` / `*_12.pt`
+- `models/sgan-models/eth_8_model.pt` / `*_12_model.pt`
 - `models/sgan-models/hotel_8.pt`
 - `models/sgan-models/univ_8.pt`
 - `models/sgan-models/zara1_8.pt`
@@ -148,7 +148,7 @@ create_simple_animation(
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-models/eth_8.pt"
+sgan_model_path: "models/sgan-models/eth_8_model.pt"
 ```
 
 ## プロジェクト構成

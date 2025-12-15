@@ -83,7 +83,7 @@ def main():
         'src/prediction/trajectory_predictor.py',
         'src/planning/frenet_planner.py',
         'src/simulation/integrated_simulator.py',
-        'src/visualization/visualizer.py',
+        'src/visualization/animator.py',
     ]
     
     for filepath in core_files:

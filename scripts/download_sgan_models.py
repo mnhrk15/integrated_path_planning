@@ -118,7 +118,7 @@ def download_sgan_models(models_dir: Path, download_pooling: bool = False):
     print("="*60 + "\n")
     
     print("Usage in configuration file:")
-    print('  sgan_model_path: "models/sgan-models/eth_8.pt"')
+    print('  sgan_model_path: "models/sgan-models/eth_8_model.pt"')
     print("\nAvailable datasets: eth, hotel, univ, zara1, zara2")
     print("Available prediction lengths: 8, 12")
     print()
