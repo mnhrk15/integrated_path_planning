@@ -69,10 +69,12 @@ class SimulationAnimator:
         self,
         show_predictions: bool = True,
         show_metrics: bool = True,
+        show_planned_path: bool = True,
         trail_length: int = 50,
         ego_color: str = 'blue',
         ped_color: str = 'red',
         pred_color: str = 'orange',
+        plan_color: str = 'green',
         save_path: Optional[Path] = None,
         writer: str = 'pillow',  # 'pillow' for GIF, 'ffmpeg' for MP4
         fps: int = 10
@@ -82,10 +84,12 @@ class SimulationAnimator:
         Args:
             show_predictions: Show predicted pedestrian trajectories
             show_metrics: Show metrics subplots
+            show_planned_path: Show planned ego vehicle path
             trail_length: Number of past positions to show as trail
             ego_color: Color for ego vehicle
             ped_color: Color for pedestrians
             pred_color: Color for predicted trajectories
+            plan_color: Color for planned path
             save_path: Path to save animation (None = don't save)
             writer: Animation writer ('pillow' for GIF, 'ffmpeg' for MP4)
             fps: Frames per second for saved animation
@@ -114,8 +118,8 @@ class SimulationAnimator:
         
         # Create artists for animation
         artists = self._create_artists(
-            show_predictions, trail_length,
-            ego_color, ped_color, pred_color
+            show_predictions, show_planned_path, trail_length,
+            ego_color, ped_color, pred_color, plan_color
         )
         
         # Create animation
@@ -123,7 +127,7 @@ class SimulationAnimator:
             self.fig,
             self._update_frame,
             init_func=lambda: self._init_animation(artists),
-            fargs=(artists, show_predictions, show_metrics, trail_length),
+            fargs=(artists, show_predictions, show_metrics, show_planned_path, trail_length),
             frames=self.n_frames,
             interval=self.interval,
             blit=False,  # Set to False for better compatibility
@@ -181,8 +185,8 @@ class SimulationAnimator:
                                 linewidth=1, alpha=0.7, label='Safety threshold')
         self.ax_distance.legend(fontsize=9)
     
-    def _create_artists(self, show_predictions, trail_length,
-                       ego_color, ped_color, pred_color):
+    def _create_artists(self, show_predictions, show_planned_path, trail_length,
+                       ego_color, ped_color, pred_color, plan_color):
         """Create matplotlib artists for animation."""
         artists = {}
         
@@ -208,6 +212,13 @@ class SimulationAnimator:
         # Predicted trajectories
         if show_predictions:
             artists['predictions'] = []
+            
+        # Planned path
+        if show_planned_path:
+            artists['planned_path'], = self.ax_main.plot(
+                [], [], '--', color=plan_color, alpha=0.8, linewidth=1.5,
+                label='Planned path'
+            )
         
         # Metric lines
         if hasattr(self, 'ax_velocity'):
@@ -239,7 +250,7 @@ class SimulationAnimator:
         """Initialize animation."""
         return list(artists.values())
     
-    def _update_frame(self, frame, artists, show_predictions, show_metrics, trail_length):
+    def _update_frame(self, frame, artists, show_predictions, show_metrics, show_planned_path, trail_length):
         """Update frame for animation."""
         result = self.results[frame]
         
@@ -248,6 +259,10 @@ class SimulationAnimator:
         
         # Update pedestrians
         self._update_pedestrians(artists, result, show_predictions)
+        
+        # Update planned path
+        if show_planned_path:
+            self._update_planned_path(artists, result)
         
         # Update metrics
         if show_metrics:
@@ -322,6 +337,13 @@ class SimulationAnimator:
                             markersize=3, linewidth=1, zorder=3
                         )
                         artists['predictions'].append(line)
+
+    def _update_planned_path(self, artists, result):
+        """Update planned path visualization."""
+        if result.planned_path is not None and len(result.planned_path.x) > 0:
+            artists['planned_path'].set_data(result.planned_path.x, result.planned_path.y)
+        else:
+            artists['planned_path'].set_data([], [])
     
     def _update_metrics(self, artists, frame):
         """Update metric plots."""
@@ -418,6 +440,7 @@ def create_simple_animation(
     show: bool = True,
     show_predictions: bool = True,
     show_metrics: bool = True,
+    show_planned_path: bool = True,
     trail_length: int = 50,
     fps: int = 10,
     **kwargs,
@@ -447,6 +470,7 @@ def create_simple_animation(
     animator.create_animation(
         show_predictions=show_predictions,
         show_metrics=show_metrics,
+        show_planned_path=show_planned_path,
         trail_length=trail_length,
         save_path=output_path,
         writer=writer,
