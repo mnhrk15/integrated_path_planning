@@ -207,6 +207,9 @@ class CoordinateConverter:
     def find_nearest_point_on_path(self, x: float, y: float) -> Tuple[float, float, float, float, float, float]:
         """Find the nearest point on the reference path.
         
+        Uses a cached local search for performance, falling back to global search
+        only when necessary.
+        
         Args:
             x, y: Position in global coordinates
             
@@ -217,22 +220,40 @@ class CoordinateConverter:
             rkappa: Curvature at nearest point
             rdkappa: Curvature rate at nearest point
         """
-        # Sample the reference path
-        s_samples = np.linspace(0, self.reference_path.s[-1], 1000)
-        min_dist = float('inf')
         best_s = 0.0
         
-        for s in s_samples:
-            px, py = self.reference_path.calc_position(s)
-            if px is None or py is None:
-                continue
-            dist = math.hypot(x - px, y - py)
-            if dist < min_dist:
-                min_dist = dist
-                best_s = s
+        # Try local search if we have a previous guess
+        if hasattr(self, '_prev_s'):
+            # Search window: +/- 10.0m from previous s
+            s_min = max(0.0, self._prev_s - 10.0)
+            s_max = min(self.reference_path.s[-1], self._prev_s + 10.0)
+            s_samples = np.linspace(s_min, s_max, 100)
+            
+            # Start strict
+            min_dist = float('inf')
+            
+            for s in s_samples:
+                px, py = self.reference_path.calc_position(s)
+                if px is None or py is None:
+                    continue
+                dist = math.hypot(x - px, y - py)
+                if dist < min_dist:
+                    min_dist = dist
+                    best_s = s
+            
+            # Heuristic: if closest point is at window edge (and not path edge), 
+            # we might be lost, trigger global search
+            at_lower_edge = (abs(best_s - s_min) < 1e-3 and s_min > 0)
+            at_upper_edge = (abs(best_s - s_max) < 1e-3 and s_max < self.reference_path.s[-1])
+            
+            if at_lower_edge or at_upper_edge:
+                logger.debug("Local search hit boundary, falling back to global search")
+                best_s = self._global_search(x, y)
+        else:
+            best_s = self._global_search(x, y)
         
-        # Refine with local search
-        ds = 0.01
+        # Refine with local search (gradient descent-like)
+        ds = 0.1
         for _ in range(10):
             s_left = max(0, best_s - ds)
             s_right = min(self.reference_path.s[-1], best_s + ds)
@@ -246,14 +267,19 @@ class CoordinateConverter:
             dist_left = math.hypot(x - px_left, y - py_left)
             dist_right = math.hypot(x - px_right, y - py_right)
             
-            if dist_left < min_dist:
-                min_dist = dist_left
+            # Check center too for current best
+            px, py = self.reference_path.calc_position(best_s)
+            dist_curr = math.hypot(x - px, y - py)
+            
+            if dist_left < dist_curr and dist_left < dist_right:
                 best_s = s_left
-            elif dist_right < min_dist:
-                min_dist = dist_right
+            elif dist_right < dist_curr and dist_right < dist_left:
                 best_s = s_right
             else:
                 ds *= 0.5
+        
+        # Cache for next time
+        self._prev_s = best_s
         
         rs = best_s
         rx, ry = self.reference_path.calc_position(rs)
@@ -263,12 +289,32 @@ class CoordinateConverter:
         
         return rs, rx, ry, rtheta, rkappa, rdkappa
     
-    def global_to_frenet_obstacle(
+    def _global_search(self, x: float, y: float) -> float:
+        """Perform global search for nearest point (expensive)."""
+        s_samples = np.linspace(0, self.reference_path.s[-1], 1000)
+        min_dist = float('inf')
+        best_s = 0.0
+        
+        for s in s_samples:
+            px, py = self.reference_path.calc_position(s)
+            if px is None or py is None:
+                continue
+            dist = math.hypot(x - px, y - py)
+            if dist < min_dist:
+                min_dist = dist
+                best_s = s
+        return best_s
+    
+    def pass_through_obstacle(
         self, 
         ped_trajectories: np.ndarray
     ) -> np.ndarray:
         """Pass-through helper for predicted pedestrian trajectories.
-
+        
+        NOTE: This does NOT convert to Frenet coordinates. It returns global
+        coordinates as-is. The FrenetPlanner currently handles dynamic obstacles
+        by checking distance in the global plane, assuming the road is locally flat.
+        
         Args:
             ped_trajectories: Predicted pedestrian trajectories [n_peds, time_horizon, 2]
             
@@ -281,9 +327,5 @@ class CoordinateConverter:
         if ped_trajectories.ndim != 3 or ped_trajectories.shape[-1] != 2:
             raise ValueError(f"Expected trajectories with shape (n_peds, time, 2), got {ped_trajectories.shape}")
 
-        logger.debug(
-            f"Passing through {ped_trajectories.shape[0]} pedestrian trajectories "
-            f"for {ped_trajectories.shape[1]} time steps"
-        )
-
+        # Removed debug log to reduce noise in high-frequency loop
         return ped_trajectories

@@ -149,6 +149,8 @@ class TrajectoryPredictor:
 
     def process_prediction(self, pred_traj: np.ndarray) -> np.ndarray:
         """Resample and extrapolate predictions to simulation resolution and planner horizon.
+        
+        Uses robust extrapolation to avoid unrealistic jumps.
 
         Args:
             pred_traj: Raw SGAN predictions [pred_len, n_peds, 2]
@@ -171,8 +173,11 @@ class TrajectoryPredictor:
 
         # Prepare output
         dense_preds = np.zeros((n_peds, len(time_target), 2), dtype=float)
+        
+        # Max walking speed for validation (approx 2.5 m/s or 9 km/h)
+        MAX_WALKING_SPEED = 2.5
 
-        # Linear interpolation within known range, linear extrapolation beyond using last two points
+        # Linear interpolation within known range, safe extrapolation beyond
         for ped_idx in range(n_peds):
             traj = pred_traj[:, ped_idx, :]  # (pred_len, 2)
 
@@ -180,21 +185,27 @@ class TrajectoryPredictor:
             for axis in range(2):
                 coords = traj[:, axis]
 
-                # If only one unique point, fill constant
-                if np.allclose(coords, coords[0]):
-                    dense_preds[ped_idx, :, axis] = coords[0]
+                # If only one unique point or zeros (warmup), fill constant
+                if np.allclose(coords, coords[0]) or np.allclose(coords, 0.0):
+                    dense_preds[ped_idx, :, axis] = coords[-1]
                     continue
 
                 # Linear interpolation with extrapolation
-                # Use manual slope for trailing extrapolation to ensure constant-velocity extension
                 interp_vals = np.interp(time_target, time_src, coords)
 
-                # Handle tail extrapolation explicitly
+                # Robust tail extrapolation
                 if len(coords) >= 2:
-                    v_tail = (coords[-1] - coords[-2]) / self.sgan_dt
+                    # Calculate tail velocity from last 3 points (or 2 if short)
+                    lookback = min(3, len(coords))
+                    v_tail = (coords[-1] - coords[-lookback]) / ((lookback - 1) * self.sgan_dt)
+                    
+                    # Clamp velocity to realistic range
+                    v_tail = max(min(v_tail, MAX_WALKING_SPEED), -MAX_WALKING_SPEED)
+                    
                     tail_mask = time_target > time_src[-1]
                     if tail_mask.any():
                         dt_tail = time_target[tail_mask] - time_src[-1]
+                        # Apply clamped velocity
                         interp_vals[tail_mask] = coords[-1] + v_tail * dt_tail
 
                 dense_preds[ped_idx, :, axis] = interp_vals

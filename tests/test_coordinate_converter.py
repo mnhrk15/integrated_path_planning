@@ -53,9 +53,14 @@ def test_coordinate_converter():
         [[15.0, -2.0], [16.0, -2.0], [17.0, -2.0]]  # Pedestrian 2
     ])  # Shape: (2, 3, 2)
     
-    obstacles = converter.global_to_frenet_obstacle(ped_traj)
+    # Test pass through
+    traj = np.zeros((1, 10, 2))
+    res = converter.pass_through_obstacle(traj)
+    assert np.allclose(traj, res)
     
-    assert obstacles.shape == (2, 3, 2)  # Preserve time dimension for dynamic obstacles
+    # Test valid input shape
+    with pytest.raises(ValueError):
+        converter.pass_through_obstacle(np.zeros((10, 2)))  # Wrong shape
 
 
 def test_nearest_point_at_boundaries():

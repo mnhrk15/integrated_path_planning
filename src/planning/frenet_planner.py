@@ -441,7 +441,7 @@ class FrenetPlanner:
         static_obstacles: np.ndarray,
         dynamic_obstacles: Optional[np.ndarray] = None
     ) -> bool:
-        """Check if path collides with obstacles (static + dynamic with time).
+        """Check if path collides with obstacles (vectorized implementation).
         
         Args:
             fp: Frenet path
@@ -451,44 +451,63 @@ class FrenetPlanner:
         Returns:
             True if no collision, False otherwise
         """
-        has_static = static_obstacles is not None and len(static_obstacles) > 0
-        has_dynamic = (
-            dynamic_obstacles is not None
-            and dynamic_obstacles.size > 0
-            and dynamic_obstacles.shape[-1] == 2
-        )
-
-        if not has_static and not has_dynamic:
+        if len(fp.x) == 0:
             return True
+        
+        # Ensure consistency between t and x/y/s
+        # x, y calculation might stop early if path goes out of bounds, 
+        # but t is pre-calculated. We must synchronize them.
+        min_len = min(len(fp.x), len(fp.t))
+        
+        path_x = np.array(fp.x[:min_len])
+        path_y = np.array(fp.y[:min_len])
+        path_t = np.array(fp.t[:min_len])
+        
+        path_points = np.stack([path_x, path_y], axis=1)  # [n_path, 2]
         
         inflated_radius = max(
             self.robot_radius + self.obstacle_radius + self.safety_buffer,
             1e-6
         )
-
-        for i in range(len(fp.x)):
-            # Check static obstacles at all times
-            if has_static:
-                for obs in static_obstacles:
-                    dist = np.hypot(fp.x[i] - obs[0], fp.y[i] - obs[1])
-                    if dist <= inflated_radius:
-                        return False
-
-            # Time-aware dynamic obstacles
-            if has_dynamic:
-                # Align obstacle index with planner time
-                obs_count, obs_steps, _ = dynamic_obstacles.shape
-                time_idx = int(round(fp.t[i] / self.dt))
-                time_idx = min(max(time_idx, 0), obs_steps - 1)
-
-                # Slice positions for this timestep: shape (obs_count, 2)
-                obs_positions = dynamic_obstacles[:, time_idx, :]
-                dx = fp.x[i] - obs_positions[:, 0]
-                dy = fp.y[i] - obs_positions[:, 1]
-                dists = np.hypot(dx, dy)
-                if np.any(dists <= inflated_radius):
-                    return False
+        sq_rubicon = inflated_radius ** 2
         
+        # 1. Static obstacles: Check all path points against all obstacles
+        # Shape: (n_path, 1, 2) - (1, n_static, 2) -> (n_path, n_static, 2)
+        if static_obstacles is not None and len(static_obstacles) > 0:
+            diff = path_points[:, None, :] - static_obstacles[None, :, :]
+            sq_dists = np.sum(diff ** 2, axis=2)
+            if np.any(sq_dists <= sq_rubicon):
+                return False
+
+        # 2. Dynamic obstacles: Check time-aligned points
+        if (dynamic_obstacles is not None and 
+            dynamic_obstacles.size > 0 and 
+            dynamic_obstacles.shape[-1] == 2):
+            
+            n_obs, n_time, _ = dynamic_obstacles.shape
+            
+            # Map each path point index to a time index in the obstacle array
+            # time_indices[i] corresponds to the time step for path point i
+            time_indices = np.round(path_t / self.dt).astype(int)
+            
+            # Clamp indices to valid range [0, n_time - 1]
+            time_indices = np.clip(time_indices, 0, n_time - 1)
+            
+            # Select relevant obstacle positions for each path point
+            # Shape: [n_path, n_obs, 2]
+            # dynamic_obstacles is [n_obs, n_time, 2] -> transpose to [n_time, n_obs, 2]
+            # Then fancy index with time_indices -> [n_path, n_obs, 2]
+            relevant_obs = dynamic_obstacles.transpose(1, 0, 2)[time_indices]
+            
+            # Vectorized distance check
+            # path_points: [n_path, 2] -> [n_path, 1, 2]
+            # relevant_obs: [n_path, n_obs, 2]
+            diff = path_points[:, None, :] - relevant_obs
+            sq_dists = np.sum(diff ** 2, axis=2)
+            
+            if np.any(sq_dists <= sq_rubicon):
+                return False
+
         return True
     
     def _select_best_path(

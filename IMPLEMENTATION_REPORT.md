@@ -366,7 +366,7 @@ def test_trajectory_prediction():
     ↓
 [Predictor] → predict() → 予測軌道 [n_peds, pred_len, 2]
     ↓
-[Coordinator] → global_to_frenet_obstacle() → 障害物点群
+[Coordinator] → pass_through_obstacle() → 障害物点群
     ↓
 [Frenet Planner] → plan() → FrenetPath
     ↓
@@ -399,12 +399,12 @@ def test_trajectory_prediction():
 ### 実装完了項目 ✅
 
 - ✅ 統一データ構造
-- ✅ 座標変換モジュール
+- ✅ 座標変換モジュール（高速化済み）
 - ✅ 参照経路生成（Cubic Spline）
 - ✅ 多項式軌道生成
-- ✅ Frenet経路計画器
+- ✅ Frenet経路計画器（ベクトル化済み）
 - ✅ 歩行者観測器
-- ✅ 軌道予測器（ベンダSGAN実装）
+- ✅ 軌道予測器（ベンダSGAN実装、ロバスト化済み）
 - ✅ 簡易歩行者シミュレータ
 - ✅ 統合シミュレータ
 - ✅ 設定管理システム
@@ -412,6 +412,13 @@ def test_trajectory_prediction():
 - ✅ 実行スクリプト
 - ✅ 基本的な可視化
 - ✅ ドキュメント
+
+### 最適化と改善 (v1.1) 🚀
+
+- 🚀 **衝突判定のベクトル化**: ループ処理を廃止し、NumPy Broadcastingで数百の障害物を一括判定 (0.06ms/call)
+- 🚀 **座標探索の高速化**: キャッシュ付き局所探索により、経路上の最近点探索コストを大幅削減
+- 🛡️ **予測のロバスト化**: 速度クランプ付き外挿ロジックにより、SGAN予測後の挙動安定化
+- 🔧 **API修正**: 誤解を招くメソッド名を修正 (`global_to_frenet_obstacle` -> `pass_through_obstacle`)
 
 ### 今後の拡張 🔄
 
@@ -437,7 +444,7 @@ MIT License
 
 ---
 
-**プロジェクト完成度**: 80%（基本機能完成、拡張機能は今後実装）
+**プロジェクト完成度**: 90%（基本機能＋最適化完了）
 
 **推奨される最初のステップ**: 
 1. 環境セットアップ

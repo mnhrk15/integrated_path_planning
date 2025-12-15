@@ -302,8 +302,8 @@ class IntegratedSimulator:
                     obs_traj, obs_traj_rel, seq_start_end
                 )
                 
-                # Preserve time dimension for dynamic collision checks
-                dynamic_obstacles = self.coord_converter.global_to_frenet_obstacle(
+                # Preserve time dimension for dynamic collision checks - NO CONVERSION
+                dynamic_obstacles = self.coord_converter.pass_through_obstacle(
                     predicted_traj
                 )
                 
