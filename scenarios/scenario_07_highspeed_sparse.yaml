@@ -1,0 +1,51 @@
+# Scenario 07: High-speed sparse pedestrians on straight road
+#
+# Situation:
+# - Ego cruises at highway-like speeds with few pedestrians near/at crossing.
+# - Tests planner at higher speed and lower density.
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 18.0
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 12.0, 0.0]
+ego_target_speed: 18.0
+ego_max_speed: 22.0
+ego_max_accel: 2.5
+ego_max_curvature: 0.4
+ego_radius: 1.0
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.3
+obstacle_radius: 0.3
+safety_buffer: 0.2
+
+# === Reference Path (straight) ===
+reference_waypoints_x: [0.0, 30.0, 60.0, 90.0, 120.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrians (sparse crossings) ===
+ped_initial_states:
+  - [50.0, 8.0, 0.0, -0.7, 50.0, -8.0]
+  - [80.0, -7.5, 0.0, 0.8, 80.0, 7.5]
+ped_groups:
+  - [0]
+  - [1]
+
+# === Static Obstacles ===
+static_obstacles: []
+
+# === Model ===
+sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
+
+# === Computation ===
+device: "mps"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_07_highspeed_sparse"
