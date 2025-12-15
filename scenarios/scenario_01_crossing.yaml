@@ -42,7 +42,7 @@ ped_groups: [[0], [1]]
 static_obstacles: []
 
 # === Model ===
-sgan_model_path: null  # Use constant velocity fallback
+sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint (required)
 
 # === Computation ===
 device: "cpu"

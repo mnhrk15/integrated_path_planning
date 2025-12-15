@@ -37,8 +37,8 @@
   - Social-GAN形式への変換
 
 - [x] `src/prediction/trajectory_predictor.py` - 軌道予測器
-  - Social-GANモデルのラッパー
-  - 定速度予測のフォールバック実装
+  - Social-GAN（ベンダ実装）ラッパー
+  - 学習済みモデル必須（未指定時はエラー）
 
 - [x] `src/planning/cubic_spline.py` - 参照経路生成
   - 1D/2D 3次スプライン補間
@@ -151,22 +151,23 @@ python examples/run_simulation.py \
 # 結果は output/scenario_01/ に保存されます
 ```
 
-### 3. Social-GANモデルの統合（オプション）
+### 3. Social-GANモデルの統合（必須）
 
-現在は定速度予測をフォールバックとして使用していますが、本格的なSocial-GANモデルを使用する場合：
+予測には学習済みSocial-GANモデルが必須です。未設定のままでは実行時にエラーで停止します。
 
 #### 3.1 モデルのダウンロード
 
 ```bash
-# 学習済みモデルをダウンロード
-mkdir -p models
-# ETHデータセットのモデル例をダウンロード
-# wget -O models/eth_8_model.pt <URL>
+# Pythonスクリプト（推奨）
+python scripts/download_sgan_models.py
+
+# プーリングモデルも含める場合
+python scripts/download_sgan_models.py --pooling
 ```
 
-#### 3.2 Social-GANパッケージの統合
+#### 3.2 モデルパスの設定
 
-`src/prediction/trajectory_predictor.py`の`TrajectoryGenerator`クラスを、
+`sgan_model_path` にダウンロードしたチェックポイントを設定してください。
 実際のSocial-GANの実装に置き換えます：
 
 ```python
@@ -387,7 +388,7 @@ def test_trajectory_prediction():
    ```
 
 3. **モデルが見つからない**
-   - `sgan_model_path: null`に設定して定速度予測を使用
+   - `sgan_model_path` にダウンロード済みチェックポイントを設定する（未設定のままでは予測不可）
 
 4. **メモリ不足**
    - `obs_len`, `pred_len`を減らす
@@ -403,7 +404,7 @@ def test_trajectory_prediction():
 - ✅ 多項式軌道生成
 - ✅ Frenet経路計画器
 - ✅ 歩行者観測器
-- ✅ 軌道予測器（フォールバック実装）
+- ✅ 軌道予測器（ベンダSGAN実装）
 - ✅ 簡易歩行者シミュレータ
 - ✅ 統合シミュレータ
 - ✅ 設定管理システム

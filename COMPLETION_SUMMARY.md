@@ -14,10 +14,7 @@
 
 - [x] Pythonダウンロードスクリプト (`download_sgan_models.py`)
 - [x] Bashダウンロードスクリプト (`download_sgan_models.sh`)
-- [x] TrajectoryPredictor更新（モデルロード機能）
-- [x] 公式sganパッケージ検出
-- [x] スタンドアロン実装フォールバック
-- [x] 定速度予測フォールバック
+- [x] TrajectoryPredictor更新（ベンダSGAN固定・モデル必須）
 - [x] テスト作成 (`test_trajectory_predictor.py`)
 - [x] ドキュメント更新
 
@@ -108,7 +105,7 @@ pip install -e .
 python scripts/download_sgan_models.py
 ```
 
-### 3. シミュレーション実行
+### 3. シミュレーション実行（モデル必須）
 
 ```bash
 # 基本実行
@@ -165,10 +162,10 @@ integrated_path_planning/
 
 ### Social-GAN統合
 
-- 公式学習済みモデル対応
+- ベンダ実装固定（公式パッケージ不要）
 - 5データセット（ETH, HOTEL, UNIV, ZARA1, ZARA2）
 - 自動ダウンロード機能
-- 3段階フォールバック
+- モデル未指定時はエラーで明示
 
 ### PySocialForce統合
 
@@ -188,11 +185,9 @@ integrated_path_planning/
 
 ## 🔧 フォールバック機能
 
-すべての追加機能はオプション。依存パッケージなしでも動作：
-
 | 機能 | 依存あり | 依存なし |
 |------|---------|---------|
-| 軌道予測 | Social-GAN | 定速度予測 ✓ |
+| 軌道予測 | Social-GAN（必須） | なし（未指定はエラー） |
 | 歩行者動力学 | PySocialForce | Simple Dynamics ✓ |
 | アニメーション | matplotlib+pillow | エラー案内 ✓ |
 
@@ -245,8 +240,8 @@ integrated_path_planning/
 
 ### ✅ 利点
 
-- **完全なフォールバック**: すべての機能がオプション
-- **段階的導入**: 必要な機能のみ有効化可能
+- **段階的導入**: 予測以外の機能は必要に応じて有効化
+- **明確な前提**: Social-GANモデル必須を明示
 - **高い互換性**: Python 3.8+, PyTorch 2.0+
 - **豊富なドキュメント**: 初心者から上級者まで対応
 

@@ -46,7 +46,7 @@ static_obstacles:
   - [28.0, 34.0, -1.5, -1.5] # Lower block segment
 
 # === Model ===
-sgan_model_path: null
+sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "cpu"

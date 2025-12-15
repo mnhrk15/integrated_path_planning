@@ -50,7 +50,7 @@ ped_groups:
 static_obstacles: []
 
 # === Model ===
-sgan_model_path: null
+sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "cpu"

@@ -54,7 +54,7 @@ brew install ffmpeg
 pip install -e .
 ```
 
-### 5. Social-GAN学習済みモデルのダウンロード（オプション）
+### 5. Social-GAN学習済みモデルのダウンロード（必須）
 
 **推奨方法:**
 
@@ -77,7 +77,7 @@ bash scripts/download_sgan_models.sh
 - 予測長: 8ステップ、12ステップ
 - 合計サイズ: 約50-100MB
 
-**注意:** モデルなしでも実行可能です（定速度予測にフォールバック）
+**注意:** `sgan_model_path` に学習済みモデルを指定することが必須です。未指定のまま実行すると `RuntimeError` で停止します。
 
 ## 基本的な使い方
 
@@ -229,7 +229,7 @@ ped_groups: [[0]]
 
 static_obstacles: []
 
-sgan_model_path: null
+sgan_model_path: "models/sgan-models/eth_8.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
 visualization_enabled: true
 output_path: "output/my_scenario"
@@ -351,19 +351,13 @@ animator.show()
 
 **症状:** モデルファイルがないというエラー
 
-**解決策:**
-1. モデルをダウンロード:
-   ```bash
-   python scripts/download_sgan_models.py
-   ```
-2. シナリオファイルでパスを指定:
-   ```yaml
-   sgan_model_path: "models/sgan-models/eth_8.pt"
-   ```
-3. または、モデルなしで実行（定速度予測）:
-   ```yaml
-   sgan_model_path: null
-   ```
+**解決策（必須）:**
+```bash
+python scripts/download_sgan_models.py
+```
+```yaml
+sgan_model_path: "models/sgan-models/eth_8.pt"
+```
 
 ### PySocialForceがインストールされていない
 

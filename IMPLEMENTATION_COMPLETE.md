@@ -14,7 +14,7 @@
 2. **PySocialForce統合** - 物理ベースの歩行者シミュレーション
 3. **高度なアニメーション可視化** - matplotlib.animationによる動的可視化
 
-すべての機能は**オプション**であり、依存パッケージがない場合でもシステムは動作します（フォールバック実装あり）。
+PySocialForce/アニメーションなど多くの機能はオプションですが、軌道予測には学習済みSocial-GANモデルが必須です（定速フォールバックは廃止）。
 
 ---
 
@@ -58,20 +58,15 @@
 def load_model(self, model_path):
     checkpoint = torch.load(model_path, map_location=self.device)
     args = checkpoint['args']
-    
-    # 公式sganパッケージを優先
-    if SGAN_AVAILABLE:
-        generator = SGANGenerator(...)
-        generator.load_state_dict(checkpoint['g_best_state'])
-    else:
-        # スタンドアロン実装へフォールバック
-        generator = StandaloneTrajectoryGenerator(...)
+
+    # ベンダ実装を使用（必須）
+    generator = TrajectoryGenerator(...)
+    generator.load_state_dict(checkpoint['g_best_state'])
 ```
 
-**フォールバック階層:**
-1. 学習済みモデル（公式sganパッケージ）
-2. 学習済みモデル（スタンドアロン実装）
-3. 定速度予測
+**前提:**
+- 学習済みモデルの指定が必須 (`sgan_model_path`)
+- 未指定・ロード失敗時は例外で停止する
 
 ### 使用方法
 
@@ -87,7 +82,7 @@ python examples/run_simulation.py \
 ### テスト
 
 - ファイル: `tests/test_trajectory_predictor.py`
-- カバレッジ: 初期化、モデルなし予測、定速度フォールバック
+- カバレッジ: 初期化、モデル未ロード時の例外、ダミーモデル経路
 
 ---
 
@@ -145,7 +140,7 @@ static_obstacles:
 ### テスト
 
 - ファイル: `tests/test_pedestrian_simulator.py`
-- カバレッジ: 初期化、ステップ実行、フォールバック
+- カバレッジ: 初期化、ステップ実行、Simple Dynamicsへのフォールバック
 
 ---
 
@@ -379,17 +374,9 @@ Done!
 
 ## フォールバック機能
 
-すべての追加機能はオプションであり、フォールバック実装があります：
-
 ### 1. Social-GAN
 
-```
-学習済みモデル（公式sgan）
-  ↓ (なし)
-学習済みモデル（スタンドアロン）
-  ↓ (なし)
-定速度予測 ✓
-```
+- フォールバックなし（学習済みモデル必須）
 
 ### 2. PySocialForce
 
@@ -433,8 +420,8 @@ matplotlib + FFmpeg（MP4）
 
 ### 1. Social-GAN
 
-- 公式sganパッケージは別途インストール必要（オプション）
-- スタンドアロン実装は一部機能制限あり
+- ベンダ実装固定（公式パッケージ不要）
+- 学習済みモデルの指定が必須
 - モデルファイルサイズ: 約50-100MB
 
 ### 2. PySocialForce
@@ -480,7 +467,7 @@ matplotlib + FFmpeg（MP4）
 ✅ Social-GAN学習済みモデル統合完了  
 ✅ PySocialForce統合完了  
 ✅ 高度なアニメーション可視化完了  
-✅ フォールバック機能実装完了  
+✅ ベンダSGAN統合完了  
 ✅ ドキュメント整備完了  
 ✅ ユニットテスト作成完了  
 
@@ -495,8 +482,8 @@ matplotlib + FFmpeg（MP4）
 
 - Python 3.8+対応
 - PyTorch 2.0+対応
-- すべての依存パッケージがオプション
-- 後方互換性維持
+- 予測以外の機能は多くがオプション
+- SGANモデル指定が必須（軌道予測）
 
 ---
 

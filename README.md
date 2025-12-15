@@ -38,9 +38,9 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## 学習済みモデルのダウンロード（NEW! 🆕）
+## 学習済みモデルのダウンロード（必須）
 
-Social-GANの公式学習済みモデルを簡単にダウンロードできます：
+Social-GAN 予測には学習済みモデルが必須です（定速フォールバックはありません）。以下で入手してください：
 
 ### 方法1: Pythonスクリプト（推奨）
 
@@ -58,15 +58,14 @@ python scripts/download_sgan_models.py --pooling
 bash scripts/download_sgan_models.sh
 ```
 
-ダウンロードされるモデル：
-- `models/sgan-models/eth_8.pt` - ETHデータセット（予測長8ステップ）
-- `models/sgan-models/hotel_8.pt` - HOTELデータセット
-- `models/sgan-models/univ_8.pt` - UNIVデータセット
-- `models/sgan-models/zara1_8.pt` - ZARA1データセット
-- `models/sgan-models/zara2_8.pt` - ZARA2データセット
-- `models/sgan-models/*_12.pt` - 各データセット（予測長12ステップ）
+ダウンロードされるモデル例：
+- `models/sgan-models/eth_8.pt` / `*_12.pt`
+- `models/sgan-models/hotel_8.pt`
+- `models/sgan-models/univ_8.pt`
+- `models/sgan-models/zara1_8.pt`
+- `models/sgan-models/zara2_8.pt`
 
-モデルサイズ: 各モデル約5-10MB
+モデルサイズ: 各モデル約5-10MB（合計数十MB）
 
 ## 使用方法
 
@@ -143,14 +142,13 @@ create_simple_animation(
 )
 ```
 
-### 学習済みモデルを使用する場合
+### 学習済みモデルの指定（必須）
 
-シナリオYAMLファイルでモデルパスを指定：
+シナリオYAMLでモデルパスを指定してください。未指定のまま実行すると `RuntimeError` で停止します。
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-models/eth_8.pt"  # モデルを使用
-# sgan_model_path: null  # モデルなし（定速度予測）
+sgan_model_path: "models/sgan-models/eth_8.pt"
 ```
 
 ## プロジェクト構成
@@ -190,7 +188,7 @@ integrated_path_planning/
 - 経路: `reference_waypoints_x`, `reference_waypoints_y`
 - 歩行者: `ped_initial_states`, `ped_groups`
 - 障害物: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
-- 予測モデル: `sgan_model_path`（`null`なら定速フォールバック）
+- 予測モデル: `sgan_model_path`（必須。未設定の場合はエラー）
 - デバイス/出力: `device`, `output_path`, `visualization_enabled`
 
 ## 保存される出力
