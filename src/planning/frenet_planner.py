@@ -211,7 +211,7 @@ class FrenetPlanner:
         frenet_paths = []
         
         # Sample different time horizons
-        for Ti in np.arange(MIN_T, MAX_T, DT):
+        for Ti in np.arange(MIN_T, MAX_T, self.dt):
             # Longitudinal planning (velocity keeping)
             for tv in np.arange(
                 target_speed - D_T_S * N_S_SAMPLE,
@@ -264,7 +264,7 @@ class FrenetPlanner:
             time
         )
         
-        fp.t = [t for t in np.arange(0.0, time, DT)]
+        fp.t = [t for t in np.arange(0.0, time, self.dt)]
         fp.s = [lon_qp.calc_point(t) for t in fp.t]
         fp.s_d = [lon_qp.calc_first_derivative(t) for t in fp.t]
         fp.s_dd = [lon_qp.calc_second_derivative(t) for t in fp.t]

@@ -80,11 +80,20 @@ class PedestrianSimulator:
                 obstacles=self.obstacles,
                 config_file=self.config_file
             )
-            logger.debug("PySocialForce simulator created successfully")
         except Exception as e:
             logger.error(f"Failed to initialize PySocialForce: {e}")
             logger.warning("Falling back to simple dynamics")
             self.simulator = None
+            return
+
+        # Align simulator time step with our integration step if possible
+        try:
+            if hasattr(self.simulator, "peds"):
+                self.simulator.peds.step_width = self.dt
+        except Exception as e:
+            logger.warning(f"Could not set PySocialForce step_width: {e}")
+
+        logger.debug("PySocialForce simulator created successfully")
     
     def step(self, n: int = 1):
         """Advance simulation by n time steps.
@@ -205,7 +214,8 @@ class IntegratedSimulator:
                 initial_states=ped_states,
                 groups=config.ped_groups,
                 obstacles=config.static_obstacles,
-                dt=config.dt
+                dt=config.dt,
+                config_file=getattr(config, "social_force_config", None)
             )
         else:
             self.pedestrian_sim = None
