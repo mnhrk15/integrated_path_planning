@@ -21,28 +21,14 @@ from ..pedestrian.observer import PedestrianObserver
 from ..prediction.trajectory_predictor import TrajectoryPredictor
 
 
-# Try importing PySocialForce
-try:
-    import pysocialforce as psf
-    PYSOCIALFORCE_AVAILABLE = True
-except ImportError:
-    PYSOCIALFORCE_AVAILABLE = False
-    logger.warning("pysocialforce package not found. Using simplified dynamics.")
+import pysocialforce as psf
+PYSOCIALFORCE_AVAILABLE = True
 
 
 class PedestrianSimulator:
-    """Pedestrian simulator using Social Force model.
+    """Pedestrian simulator using Social Force model (via PySocialForce).
     
-    Automatically uses PySocialForce if available, otherwise falls back
-    to simplified constant velocity dynamics.
-    
-    Args:
-        initial_states: Initial pedestrian states [n_peds, 6]
-                       Format: [x, y, vx, vy, goal_x, goal_y]
-        groups: Pedestrian group indices (list of lists)
-        obstacles: Static obstacles (list of (x_min, x_max, y_min, y_max))
-        dt: Time step [s]
-        config_file: Optional path to pysocialforce config file
+    Acts as a wrapper around the pysocialforce library.
     """
     
     def __init__(
@@ -53,120 +39,97 @@ class PedestrianSimulator:
         dt: float = 0.1,
         config_file: Optional[str] = None
     ):
-        self.state = initial_states.copy()  # [n_peds, 6]: [x, y, vx, vy, gx, gy]
-        self.groups = groups or [[i] for i in range(len(initial_states))]
-        self.obstacles = obstacles
+        """Initialize simulator.
+        
+        Args:
+            initial_states: Initial state array [N, 6] (x, y, vx, vy, gx, gy)
+            groups: List of grouping lists (indices)
+            obstacles: List of obstacle specifications
+            dt: Simulation time step
+            config_file: Path to PySocialForce config file
+        """
         self.dt = dt
+        self.initial_states = initial_states
         self.time = 0.0
-        self.config_file = config_file
+        
+        # Check for PySocialForce availability
+        if not PYSOCIALFORCE_AVAILABLE:
+            raise ImportError(
+                "PySocialForce is required for this simulator. "
+                "Please install it via `pip install pysocialforce`."
+            )
+            
+        self._init_pysocialforce(groups, obstacles, config_file)
+
+    def _init_pysocialforce(
+        self, 
+        groups: Optional[List[List[int]]] = None, 
+        obstacles: Optional[List] = None,
+        config_file: Optional[str] = None
+    ):
+        """Initialize PySocialForce simulator."""
+        # Convert states to PySocialForce format
+        # [N, 6] -> state
+        state = self.initial_states
         
         # Initialize simulator
-        if PYSOCIALFORCE_AVAILABLE:
-            self._init_pysocialforce()
-            logger.info(f"PySocialForce simulator initialized with "
-                       f"{len(initial_states)} pedestrians, "
-                       f"{len(self.groups)} groups")
-        else:
-            self.simulator = None
-            logger.info(f"Simple dynamics simulator initialized with "
-                       f"{len(initial_states)} pedestrians (PySocialForce not available)")
-    
-    def _init_pysocialforce(self):
-        """Initialize PySocialForce simulator."""
-        try:
-            # Create simulator
-            self.simulator = psf.Simulator(
-                state=self.state,
-                groups=self.groups,
-                obstacles=self.obstacles,
-                config_file=self.config_file
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize PySocialForce: {e}")
-            logger.warning("Falling back to simple dynamics")
-            self.simulator = None
-            return
+        # PySocialForce expects obstacles as list of line segments or polygons
+        # Here we assume obstacles is a list of [x_min, x_max, y_min, y_max] box lists
+        # We need to convert them to line segments for PSF
+        psf_obstacles = []
+        if obstacles:
+            for obs in obstacles:
+                if len(obs) == 4:  # [x_min, x_max, y_min, y_max]
+                    x_min, x_max, y_min, y_max = obs
+                    # Box as 4 lines
+                    psf_obstacles.extend([
+                        [(x_min, y_min), (x_max, y_min)],
+                        [(x_max, y_min), (x_max, y_max)],
+                        [(x_max, y_max), (x_min, y_max)],
+                        [(x_min, y_max), (x_min, y_min)]
+                    ])
+        
+        self.sim = psf.Simulator(
+            state=state,
+            groups=groups,
+            obstacles=psf_obstacles if psf_obstacles else None,
+            config_file=config_file
+        )
+        
+        # Manually set dt (step_width)
+        if hasattr(self.sim, 'peds'):
+            self.sim.peds.step_width = self.dt
 
-        # Align simulator time step with our integration step if possible
-        try:
-            if hasattr(self.simulator, "peds"):
-                self.simulator.peds.step_width = self.dt
-        except Exception as e:
-            logger.warning(f"Could not set PySocialForce step_width: {e}")
-
-        logger.debug("PySocialForce simulator created successfully")
-    
     def step(self, n: int = 1):
         """Advance simulation by n time steps.
         
         Args:
             n: Number of time steps to simulate
         """
-        if self.simulator is not None and PYSOCIALFORCE_AVAILABLE:
-            # Use PySocialForce
-            self.simulator.step(n)
-            
-            # Extract state from PySocialForce
-            ped_states, _ = self.simulator.get_states()
-            current_state = ped_states[-1]  # Get latest state
-            
-            # Update our state array
-            # PySocialForce state: [x, y, vx, vy, dest_x, dest_y, tau]
-            self.state[:, 0:6] = current_state[:, 0:6]
-            self.time += self.dt * n
+        if self.sim:
+            self.sim.step(n)
+            self.time += n * self.dt
         else:
-            # Use simple dynamics
-            for _ in range(n):
-                self._step_simple()
-    
-    def _step_simple(self):
-        """Simple constant velocity dynamics (fallback)."""
-        positions = self.state[:, 0:2]
-        velocities = self.state[:, 2:4]
-        goals = self.state[:, 4:6]
-        
-        # Calculate desired direction
-        to_goal = goals - positions
-        dist_to_goal = np.linalg.norm(to_goal, axis=1, keepdims=True)
-        desired_direction = np.where(
-            dist_to_goal > 0.1,
-            to_goal / (dist_to_goal + 1e-6),
-            np.zeros_like(to_goal)
-        )
-        
-        # Simple force: move toward goal at 1.0 m/s
-        desired_velocity = desired_direction * 1.0
-        
-        # Update velocity with damping (tau = 0.5s)
-        tau = 0.5
-        alpha = self.dt / (tau + self.dt)
-        new_velocity = alpha * desired_velocity + (1 - alpha) * velocities
-        
-        # Update position
-        new_position = positions + new_velocity * self.dt
-        
-        # Stop if reached goal
-        reached = dist_to_goal.flatten() < 0.5
-        new_velocity[reached] = 0.0
-        
-        # Update state
-        self.state[:, 0:2] = new_position
-        self.state[:, 2:4] = new_velocity
-        
-        self.time += self.dt
-    
+            raise RuntimeError("Simulator not initialized correctly.")
+
     def get_state(self) -> PedestrianState:
         """Get current pedestrian state.
         
         Returns:
             Current pedestrian state
         """
-        return PedestrianState(
-            positions=self.state[:, 0:2].copy(),
-            velocities=self.state[:, 2:4].copy(),
-            goals=self.state[:, 4:6].copy(),
-            timestamp=self.time
-        )
+        if self.sim:
+            # PySocialForce state: [N, 7] (x, y, vx, vy, gx, gy, tau)
+            state = self.sim.peds.state
+            
+            return PedestrianState(
+                positions=state[:, 0:2].copy(),
+                velocities=state[:, 2:4].copy(),
+                goals=state[:, 4:6].copy(),
+                timestamp=self.time
+            )
+        else:
+            raise RuntimeError("Simulator not initialized.")
 
 
 # Backwards compatibility alias
