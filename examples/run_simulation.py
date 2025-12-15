@@ -96,10 +96,8 @@ def main():
     logger.info("Saving results")
     simulator.save_results()
     
-    # Visualize
-    if config.visualization_enabled:
-        logger.info("Generating visualization")
-        simulator.visualize()
+    # Visualize (Dashboard is generated in save_results)
+    # Simulator.visualize() is deprecated
     
     # Generate animation if requested
     if args.animate:

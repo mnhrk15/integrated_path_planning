@@ -26,17 +26,19 @@ class EgoVehicleState:
     yaw: float
     v: float
     a: float
+    jerk: float = 0.0
     timestamp: float = 0.0
     
     def to_array(self) -> np.ndarray:
-        """Convert to numpy array [x, y, yaw, v, a]."""
-        return np.array([self.x, self.y, self.yaw, self.v, self.a])
+        """Convert to numpy array [x, y, yaw, v, a, jerk]."""
+        return np.array([self.x, self.y, self.yaw, self.v, self.a, self.jerk])
     
     @classmethod
     def from_array(cls, arr: np.ndarray, timestamp: float = 0.0) -> 'EgoVehicleState':
-        """Create from numpy array [x, y, yaw, v, a]."""
+        """Create from numpy array [x, y, yaw, v, a, (jerk)]."""
+        jerk = arr[5] if len(arr) > 5 else 0.0
         return cls(x=arr[0], y=arr[1], yaw=arr[2], v=arr[3], a=arr[4], 
-                   timestamp=timestamp)
+                   jerk=jerk, timestamp=timestamp)
 
 
 @dataclass

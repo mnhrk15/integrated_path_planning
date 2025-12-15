@@ -305,10 +305,18 @@ class IntegratedSimulator:
         )
         
         # 4. Update ego vehicle state
+        # Store old acceleration for jerk calculation
+        old_a = self.ego_state.a
+        
         if planned_path is not None and len(planned_path) >= 2:
             # Follow the first step of the planned path
             try:
                 self.ego_state = planned_path.get_state_at_index(1)
+                
+                # Calculate jerk: (new_a - old_a) / dt
+                current_jerk = (self.ego_state.a - old_a) / self.config.dt
+                self.ego_state.jerk = current_jerk
+                
                 self.ego_state.timestamp = self.time + self.config.dt
                 logger.debug(f"Ego vehicle moved to ({self.ego_state.x:.2f}, "
                            f"{self.ego_state.y:.2f})")
@@ -316,17 +324,34 @@ class IntegratedSimulator:
                 logger.warning(f"Path index error: {e}, using index 0 instead")
                 if len(planned_path) > 0:
                     self.ego_state = planned_path.get_state_at_index(0)
+                    
+                    # Calculate jerk: (new_a - old_a) / dt
+                    current_jerk = (self.ego_state.a - old_a) / self.config.dt
+                    self.ego_state.jerk = current_jerk
+                    
                     self.ego_state.timestamp = self.time + self.config.dt
                 else:
                     logger.warning("No valid path found, emergency stop")
                     self.ego_state.v = max(0.0, self.ego_state.v - self.config.ego_max_accel * self.config.dt)
-                    self.ego_state.a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
+                    new_a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
+                    
+                    # Calculate jerk: (new_a - old_a) / dt
+                    current_jerk = (new_a - old_a) / self.config.dt
+                    
+                    self.ego_state.a = new_a
+                    self.ego_state.jerk = current_jerk
                     self.ego_state.timestamp = self.time + self.config.dt
         else:
             # No valid path, maintain current state (emergency stop)
             logger.warning("No valid path found, emergency stop")
             self.ego_state.v = max(0.0, self.ego_state.v - self.config.ego_max_accel * self.config.dt)
-            self.ego_state.a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
+            new_a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
+            
+            # Calculate jerk: (new_a - old_a) / dt
+            current_jerk = (new_a - old_a) / self.config.dt
+            
+            self.ego_state.a = new_a
+            self.ego_state.jerk = current_jerk
             self.ego_state.timestamp = self.time + self.config.dt
         
         # 5. Create result
@@ -439,6 +464,7 @@ class IntegratedSimulator:
         ego_x = [r.ego_state.x for r in self.history]
         ego_y = [r.ego_state.y for r in self.history]
         ego_v = [r.ego_state.v for r in self.history]
+        ego_jerk = [r.ego_state.jerk for r in self.history]
         min_distances = [r.metrics.get('min_distance', float('inf')) for r in self.history]
         ttc_list = [r.metrics.get('ttc', float('inf')) for r in self.history]
 
@@ -482,6 +508,7 @@ class IntegratedSimulator:
             ego_x=np.array(ego_x),
             ego_y=np.array(ego_y),
             ego_v=np.array(ego_v),
+            ego_jerk=np.array(ego_jerk),
             min_distances=np.array(min_distances),
             ttc=np.array(ttc_list),
             ped_positions=np.array(ped_positions, dtype=object),
@@ -496,84 +523,28 @@ class IntegratedSimulator:
             planned_cost=np.array(planned_cost)
         )
         
-        logger.info(f"Results saved to {trajectory_file}")
-    
-    def visualize(self, output_path: Optional[str] = None):
-        """Visualize simulation results.
-        
-        Args:
-            output_path: Output file path for animation
-        """
-        if not self.config.visualization_enabled:
-            logger.info("Visualization disabled")
-            return
-        
-        # This would use matplotlib to create an animation
-        # For now, just save a simple plot
-        import matplotlib.pyplot as plt
-        
-        if output_path is None:
-            output_path = Path(self.config.output_path) / "simulation.png"
+        # Calculate aggregated metrics and generate dashboard if visualization is enabled
+        if getattr(self.config, 'visualization_enabled', True):
+            try:
+                from ..core.metrics import calculate_aggregate_metrics
+                metrics = calculate_aggregate_metrics(self.history, self.config.dt)
+                logger.info("Simulation Metrics:")
+                for k, v in metrics.items():
+                    logger.info(f"  {k}: {v}")
+            except Exception as e:
+                logger.error(f"Failed to calculate metrics: {e}")
+                metrics = {}
+
+            # Generate Dashboard
+            try:
+                from ..visualization.dashboard import create_dashboard
+                dashboard_path = output_dir / "dashboard.png"
+                create_dashboard(self.history, str(dashboard_path), metrics=metrics)
+            except Exception as e:
+                logger.error(f"Failed to generate dashboard: {e}")
         else:
-            output_path = Path(output_path)
-        
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-        
-        # Plot 1: Trajectory
-        # Reference path
-        s = np.arange(0, self.reference_path.s[-1], 0.1)
-        rx, ry = [], []
-        for i_s in s:
-            ix, iy = self.reference_path.calc_position(i_s)
-            if ix is not None and iy is not None:
-                rx.append(ix)
-                ry.append(iy)
-        
-        ax1.plot(rx, ry, '--', color='gray', label='Reference Path', linewidth=2)
-        
-        # Ego trajectory
-        ego_x = [r.ego_state.x for r in self.history]
-        ego_y = [r.ego_state.y for r in self.history]
-        ax1.plot(ego_x, ego_y, 'b-', label='Ego Vehicle', linewidth=2)
-        ax1.plot(ego_x[0], ego_y[0], 'go', markersize=10, label='Start')
-        ax1.plot(ego_x[-1], ego_y[-1], 'ro', markersize=10, label='End')
-        
-        # Pedestrian trajectories
-        if self.pedestrian_sim is not None:
-            for i, result in enumerate(self.history[::10]):  # Sample every 10 steps
-                if result.ped_state.n_peds > 0:
-                    ax1.plot(result.ped_state.positions[:, 0],
-                           result.ped_state.positions[:, 1],
-                           'r.', markersize=5, alpha=0.3)
-        
-        ax1.set_xlabel('X [m]')
-        ax1.set_ylabel('Y [m]')
-        ax1.set_title('Trajectory')
-        ax1.legend()
-        ax1.grid(True)
-        ax1.axis('equal')
-        
-        # Plot 2: Metrics over time
-        times = [r.time for r in self.history]
-        velocities = [r.ego_state.v for r in self.history]
-        min_distances = [r.metrics.get('min_distance', float('inf')) for r in self.history]
-        
-        ax2_twin = ax2.twinx()
-        
-        ax2.plot(times, velocities, 'b-', label='Velocity', linewidth=2)
-        ax2.set_xlabel('Time [s]')
-        ax2.set_ylabel('Velocity [m/s]', color='b')
-        ax2.tick_params(axis='y', labelcolor='b')
-        ax2.grid(True)
-        
-        ax2_twin.plot(times, min_distances, 'r-', label='Min Distance', linewidth=2)
-        ax2_twin.set_ylabel('Min Distance to Pedestrian [m]', color='r')
-        ax2_twin.tick_params(axis='y', labelcolor='r')
-        ax2_twin.axhline(y=1.0, color='orange', linestyle='--', label='Safety Threshold')
-        
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=150)
-        logger.info(f"Visualization saved to {output_path}")
-        plt.close()
+            logger.debug("Visualization disabled, skipping dashboard generation.")
+            
+    def visualize(self, output_path: Optional[str] = None):
+        """Deprecated: Use dashboard generation instead."""
+        pass
