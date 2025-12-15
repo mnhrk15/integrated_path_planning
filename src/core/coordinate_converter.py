@@ -1,0 +1,290 @@
+"""Coordinate conversion utilities between Cartesian and Frenet frames.
+
+This module provides coordinate transformation functionality based on the
+Frenet-Serret frame along a reference path.
+"""
+
+import math
+import numpy as np
+from typing import Tuple, Optional
+from loguru import logger
+
+
+class CartesianFrenetConverter:
+    """Converter between Cartesian and Frenet coordinate systems.
+    
+    The Frenet frame is defined by a reference path (cubic spline), where:
+    - s: longitudinal distance along the path
+    - d: lateral offset from the path
+    
+    Reference:
+    Werling et al., "Optimal Trajectory Generation for Dynamic Street Scenarios 
+    in a Frenet Frame" (2010)
+    """
+    
+    @staticmethod
+    def cartesian_to_frenet(
+        rs: float,
+        rx: float,
+        ry: float,
+        rtheta: float,
+        rkappa: float,
+        rdkappa: float,
+        x: float,
+        y: float,
+        v: float,
+        a: float,
+        theta: float,
+        kappa: float
+    ) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
+        """Convert state from Cartesian to Frenet coordinate system.
+        
+        Args:
+            rs: Reference line s-coordinate
+            rx, ry: Reference point coordinates
+            rtheta: Reference point heading
+            rkappa: Reference point curvature
+            rdkappa: Reference point curvature rate
+            x, y: Current position
+            v: Velocity
+            a: Acceleration
+            theta: Heading angle
+            kappa: Curvature
+            
+        Returns:
+            s_condition: [s(t), s'(t), s''(t)]
+            d_condition: [d(s), d'(s), d''(s)]
+        """
+        dx = x - rx
+        dy = y - ry
+        
+        cos_theta_r = math.cos(rtheta)
+        sin_theta_r = math.sin(rtheta)
+        
+        cross_rd_nd = cos_theta_r * dy - sin_theta_r * dx
+        d = math.copysign(math.hypot(dx, dy), cross_rd_nd)
+        
+        delta_theta = theta - rtheta
+        tan_delta_theta = math.tan(delta_theta)
+        cos_delta_theta = math.cos(delta_theta)
+        
+        one_minus_kappa_r_d = 1 - rkappa * d
+        d_dot = one_minus_kappa_r_d * tan_delta_theta
+        
+        kappa_r_d_prime = rdkappa * d + rkappa * d_dot
+        
+        d_ddot = (-kappa_r_d_prime * tan_delta_theta +
+                  one_minus_kappa_r_d / (cos_delta_theta * cos_delta_theta) *
+                  (kappa * one_minus_kappa_r_d / cos_delta_theta - rkappa))
+        
+        s = rs
+        s_dot = v * cos_delta_theta / one_minus_kappa_r_d
+        
+        delta_theta_prime = one_minus_kappa_r_d / cos_delta_theta * kappa - rkappa
+        s_ddot = (a * cos_delta_theta -
+                  s_dot * s_dot *
+                  (d_dot * delta_theta_prime - kappa_r_d_prime)) / one_minus_kappa_r_d
+        
+        return (s, s_dot, s_ddot), (d, d_dot, d_ddot)
+    
+    @staticmethod
+    def frenet_to_cartesian(
+        rs: float,
+        rx: float,
+        ry: float,
+        rtheta: float,
+        rkappa: float,
+        rdkappa: float,
+        s_condition: Tuple[float, float, float],
+        d_condition: Tuple[float, float, float]
+    ) -> Tuple[float, float, float, float, float, float]:
+        """Convert state from Frenet to Cartesian coordinate system.
+        
+        Args:
+            rs: Reference line s-coordinate
+            rx, ry: Reference point coordinates
+            rtheta: Reference point heading
+            rkappa: Reference point curvature
+            rdkappa: Reference point curvature rate
+            s_condition: [s(t), s'(t), s''(t)]
+            d_condition: [d(s), d'(s), d''(s)]
+            
+        Returns:
+            x, y: Position
+            theta: Heading angle
+            kappa: Curvature
+            v: Velocity
+            a: Acceleration
+        """
+        if abs(rs - s_condition[0]) >= 1.0e-6:
+            raise ValueError(
+                "The reference point s and s_condition[0] don't match"
+            )
+        
+        cos_theta_r = math.cos(rtheta)
+        sin_theta_r = math.sin(rtheta)
+        
+        x = rx - sin_theta_r * d_condition[0]
+        y = ry + cos_theta_r * d_condition[0]
+        
+        one_minus_kappa_r_d = 1 - rkappa * d_condition[0]
+        
+        tan_delta_theta = d_condition[1] / one_minus_kappa_r_d
+        delta_theta = math.atan2(d_condition[1], one_minus_kappa_r_d)
+        cos_delta_theta = math.cos(delta_theta)
+        
+        theta = normalize_angle(delta_theta + rtheta)
+        
+        kappa_r_d_prime = rdkappa * d_condition[0] + rkappa * d_condition[1]
+        
+        kappa = (((d_condition[2] + kappa_r_d_prime * tan_delta_theta) *
+                  cos_delta_theta * cos_delta_theta) / one_minus_kappa_r_d + rkappa) * \
+            cos_delta_theta / one_minus_kappa_r_d
+        
+        d_dot = d_condition[1] * s_condition[1]
+        v = math.sqrt(one_minus_kappa_r_d * one_minus_kappa_r_d *
+                      s_condition[1] * s_condition[1] + d_dot * d_dot)
+        
+        delta_theta_prime = one_minus_kappa_r_d / cos_delta_theta * kappa - rkappa
+        
+        a = (s_condition[2] * one_minus_kappa_r_d / cos_delta_theta +
+             s_condition[1] * s_condition[1] / cos_delta_theta *
+             (d_condition[1] * delta_theta_prime - kappa_r_d_prime))
+        
+        return x, y, theta, kappa, v, a
+    
+    @staticmethod
+    def normalize_angle(angle: float) -> float:
+        """Normalize angle to [-pi, pi].
+        
+        Args:
+            angle: Input angle [rad]
+            
+        Returns:
+            Normalized angle in [-pi, pi]
+        """
+        two_pi = 2.0 * math.pi
+        a = math.remainder(angle, two_pi)  # (-pi, pi]
+        # Keep boundary as -pi for angles like 3*pi, +pi for pi
+        if abs(a + math.pi) < 1e-9 and angle > 0:
+            return -math.pi
+        return a
+
+
+def normalize_angle(angle: float) -> float:
+    """Normalize angle to [-pi, pi] range.
+    
+    Args:
+        angle: Input angle in radians
+        
+    Returns:
+        Normalized angle in [-pi, pi]
+    """
+    two_pi = 2.0 * math.pi
+    a = math.remainder(angle, two_pi)
+    if abs(a + math.pi) < 1e-9 and angle > 0:
+        return -math.pi
+    return a
+
+
+class CoordinateConverter:
+    """High-level coordinate conversion interface for the integrated system.
+    
+    This class provides convenient methods for converting between global
+    Cartesian coordinates and Frenet coordinates along a reference path.
+    """
+    
+    def __init__(self, reference_path):
+        """Initialize converter with reference path.
+        
+        Args:
+            reference_path: CubicSpline2D object representing the reference path
+        """
+        self.reference_path = reference_path
+        self.converter = CartesianFrenetConverter()
+        logger.info("Coordinate converter initialized with reference path")
+    
+    def find_nearest_point_on_path(self, x: float, y: float) -> Tuple[float, float, float, float, float, float]:
+        """Find the nearest point on the reference path.
+        
+        Args:
+            x, y: Position in global coordinates
+            
+        Returns:
+            rs: s-coordinate of nearest point
+            rx, ry: Coordinates of nearest point
+            rtheta: Heading at nearest point
+            rkappa: Curvature at nearest point
+            rdkappa: Curvature rate at nearest point
+        """
+        # Sample the reference path
+        s_samples = np.linspace(0, self.reference_path.s[-1], 1000)
+        min_dist = float('inf')
+        best_s = 0.0
+        
+        for s in s_samples:
+            px, py = self.reference_path.calc_position(s)
+            if px is None or py is None:
+                continue
+            dist = math.hypot(x - px, y - py)
+            if dist < min_dist:
+                min_dist = dist
+                best_s = s
+        
+        # Refine with local search
+        ds = 0.01
+        for _ in range(10):
+            s_left = max(0, best_s - ds)
+            s_right = min(self.reference_path.s[-1], best_s + ds)
+            
+            px_left, py_left = self.reference_path.calc_position(s_left)
+            px_right, py_right = self.reference_path.calc_position(s_right)
+            
+            if px_left is None or py_left is None or px_right is None or py_right is None:
+                break
+            
+            dist_left = math.hypot(x - px_left, y - py_left)
+            dist_right = math.hypot(x - px_right, y - py_right)
+            
+            if dist_left < min_dist:
+                min_dist = dist_left
+                best_s = s_left
+            elif dist_right < min_dist:
+                min_dist = dist_right
+                best_s = s_right
+            else:
+                ds *= 0.5
+        
+        rs = best_s
+        rx, ry = self.reference_path.calc_position(rs)
+        rtheta = self.reference_path.calc_yaw(rs)
+        rkappa = self.reference_path.calc_curvature(rs)
+        rdkappa = self.reference_path.calc_curvature_rate(rs)
+        
+        return rs, rx, ry, rtheta, rkappa, rdkappa
+    
+    def global_to_frenet_obstacle(
+        self, 
+        ped_trajectories: np.ndarray
+    ) -> np.ndarray:
+        """Convert pedestrian trajectories to obstacle points in global frame.
+        
+        Note: We keep obstacles in global frame for the Frenet planner to handle.
+        The planner will check collisions in the global frame.
+        
+        Args:
+            ped_trajectories: Predicted pedestrian trajectories [n_peds, time_horizon, 2]
+            
+        Returns:
+            obstacles: Flattened obstacle points [n_obstacles, 2] in global frame
+        """
+        if ped_trajectories is None or len(ped_trajectories) == 0:
+            return np.empty((0, 2))
+        
+        n_peds, time_horizon, _ = ped_trajectories.shape
+        obstacles = ped_trajectories.reshape(-1, 2)
+        
+        logger.debug(f"Converted {n_peds} pedestrian trajectories "
+                    f"({time_horizon} time steps) to {len(obstacles)} obstacle points")
+        
+        return obstacles

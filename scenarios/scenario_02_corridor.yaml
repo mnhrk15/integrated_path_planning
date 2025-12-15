@@ -1,0 +1,51 @@
+# Scenario 02: Narrow Corridor
+#
+# Situation: Ego vehicle navigates through a narrow corridor 
+# while pedestrians walk in opposite direction
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 25.0
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 4.0, 0.0]  # Slower initial speed
+ego_target_speed: 4.0  # Lower target speed for narrow corridor
+ego_max_speed: 6.0
+ego_max_accel: 1.5
+ego_max_curvature: 0.8
+
+# === Reference Path ===
+# Straight corridor
+reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrians ===
+# Multiple pedestrians walking in opposite direction
+ped_initial_states:
+  # Group 1: Walking toward ego vehicle
+  - [40.0, 1.5, -0.8, 0.0, 0.0, 1.5]
+  - [42.0, -1.5, -0.8, 0.0, 0.0, -1.5]
+  # Group 2: Walking same direction as ego
+  - [10.0, 2.0, 0.6, 0.0, 50.0, 2.0]
+
+ped_groups: [[0, 1], [2]]
+
+# === Static Obstacles ===
+# Corridor walls
+static_obstacles:
+  - [-5.0, 55.0, 3.0, 3.0]   # Top wall
+  - [-5.0, 55.0, -3.0, -3.0] # Bottom wall
+
+# === Model ===
+sgan_model_path: null
+
+# === Computation ===
+device: "cpu"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_02"

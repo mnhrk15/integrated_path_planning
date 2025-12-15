@@ -1,0 +1,45 @@
+# Default Configuration for Integrated Path Planning
+
+# === Time Parameters ===
+dt: 0.1  # Time step [s]
+total_time: 30.0  # Total simulation time [s]
+
+# === Observation Parameters ===
+obs_len: 8  # Number of observation time steps
+pred_len: 12  # Number of prediction time steps
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # [x, y, yaw, v, a]
+ego_target_speed: 8.33  # Target speed [m/s] (30 km/h)
+ego_max_speed: 13.89  # Maximum speed [m/s] (50 km/h)
+ego_max_accel: 2.0  # Maximum acceleration [m/s²]
+ego_max_curvature: 1.0  # Maximum curvature [1/m]
+
+# === Reference Path (Waypoints) ===
+reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrian Parameters ===
+# Each pedestrian: [x, y, vx, vy, goal_x, goal_y]
+ped_initial_states:
+  - [15.0, 5.0, 0.0, -0.5, 15.0, -5.0]
+  - [25.0, -5.0, 0.0, 0.5, 25.0, 5.0]
+
+# Pedestrian groups (list of lists of indices)
+ped_groups: [[0], [1]]
+
+# Static obstacles: [x_min, x_max, y_min, y_max]
+static_obstacles: []
+
+# Social Force configuration file (optional)
+social_force_config: null
+
+# === Model Parameters ===
+sgan_model_path: null  # Path to Social-GAN model (set to null to use fallback)
+
+# === Computation ===
+device: "cpu"  # "cpu", "cuda", or "mps"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output"

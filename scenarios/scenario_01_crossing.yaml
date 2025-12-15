@@ -1,0 +1,46 @@
+# Scenario 01: Pedestrian Crossing
+# 
+# Situation: Ego vehicle drives straight while pedestrians cross the path
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 20.0
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # Start from origin
+ego_target_speed: 6.0  # Target 6 m/s (~20 km/h)
+ego_max_speed: 10.0
+ego_max_accel: 2.0
+ego_max_curvature: 0.5
+
+# === Reference Path ===
+# Straight road
+reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrians ===
+# Two pedestrians crossing from opposite sides
+ped_initial_states:
+  # Pedestrian 1: Crossing from right to left
+  - [20.0, 6.0, 0.0, -1.0, 20.0, -6.0]
+  # Pedestrian 2: Crossing from left to right
+  - [30.0, -6.0, 0.0, 1.0, 30.0, 6.0]
+
+ped_groups: [[0], [1]]
+
+# === Static Obstacles ===
+static_obstacles: []
+
+# === Model ===
+sgan_model_path: null  # Use constant velocity fallback
+
+# === Computation ===
+device: "cpu"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_01"
