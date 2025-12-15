@@ -4,7 +4,14 @@ This module provides animated visualization of simulation results using
 matplotlib.animation.FuncAnimation.
 """
 
+import os
 import numpy as np
+import matplotlib
+
+# 強制的に非GUIバックエンドを使う（保存のみでも安定するように）
+if os.environ.get("MPLBACKEND") is None:
+    matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from matplotlib.patches import Circle, Rectangle, FancyArrow, Polygon
@@ -297,15 +304,24 @@ class SimulationAnimator:
                 artists['pedestrians'].append(circle)
             
             # Predicted trajectories
-            if show_predictions and result.predicted_traj is not None:
-                for i in range(result.predicted_traj.shape[0]):
-                    pred_traj = result.predicted_traj[i]
-                    line, = self.ax_main.plot(
-                        pred_traj[:, 0], pred_traj[:, 1],
-                        'o-', color='orange', alpha=0.4,
-                        markersize=3, linewidth=1, zorder=3
-                    )
-                    artists['predictions'].append(line)
+            if show_predictions:
+                pred_traj = getattr(result, "predicted_trajectories", None)
+                if pred_traj is None:
+                    pred_traj = getattr(result, "predicted_traj", None)
+                if pred_traj is not None:
+                    # Normalize shape to [n_peds, pred_len, 2]
+                    if pred_traj.ndim == 3:
+                        # If time-first (pred_len, n_peds, 2), swap axes
+                        if result.ped_state is not None and pred_traj.shape[1] == result.ped_state.n_peds:
+                            pred_traj = np.transpose(pred_traj, (1, 0, 2))
+                    for i in range(pred_traj.shape[0]):
+                        traj = pred_traj[i]
+                        line, = self.ax_main.plot(
+                            traj[:, 0], traj[:, 1],
+                            'o-', color='orange', alpha=0.4,
+                            markersize=3, linewidth=1, zorder=3
+                        )
+                        artists['predictions'].append(line)
     
     def _update_metrics(self, artists, frame):
         """Update metric plots."""
@@ -392,6 +408,7 @@ def create_simple_animation(
     show_metrics: bool = True,
     trail_length: int = 50,
     fps: int = 10,
+    **kwargs,
 ) -> SimulationAnimator:
     """Convenience function to create and display/save animation.
     
