@@ -11,14 +11,23 @@ from typing import Optional, Tuple, Dict, Any
 from loguru import logger
 
 # Try importing from sgan package (if installed from original repo)
-# Otherwise, use standalone implementation
+# Otherwise, use vendorized minimal implementation
 try:
     from sgan.models import TrajectoryGenerator as SGANGenerator
     from sgan.utils import relative_to_abs as sgan_relative_to_abs
     SGAN_AVAILABLE = True
+    VENDORED_SGAN_AVAILABLE = False
 except ImportError:
-    SGAN_AVAILABLE = False
-    logger.warning("sgan package not found. Trying standalone implementation...")
+    try:
+        from .sgan_vendor.models import TrajectoryGenerator as SGANGenerator
+        from .sgan_vendor.utils import relative_to_abs as sgan_relative_to_abs
+        SGAN_AVAILABLE = False
+        VENDORED_SGAN_AVAILABLE = True
+        logger.info("Using vendorized SGAN implementation (sgan package not found).")
+    except ImportError:
+        SGAN_AVAILABLE = False
+        VENDORED_SGAN_AVAILABLE = False
+        logger.warning("sgan package not found and vendorized SGAN unavailable. Using fallback.")
 
 # Standalone implementation based on official Social-GAN
 # This allows the system to work without installing the full sgan package
@@ -174,7 +183,6 @@ class TrajectoryPredictor:
             
             # Create generator
             if SGAN_AVAILABLE:
-                # Use official implementation
                 self.generator = SGANGenerator(
                     obs_len=args.get('obs_len', 8),
                     pred_len=args.get('pred_len', 12),
@@ -194,7 +202,29 @@ class TrajectoryPredictor:
                     grid_size=args.get('grid_size', 8),
                     batch_norm=args.get('batch_norm', False)
                 )
-                logger.info("Using official sgan.models.TrajectoryGenerator")
+                logger.info("Using official sgan TrajectoryGenerator")
+            elif VENDORED_SGAN_AVAILABLE:
+                self.generator = SGANGenerator(
+                    obs_len=args.get('obs_len', 8),
+                    pred_len=args.get('pred_len', 12),
+                    embedding_dim=args.get('embedding_dim', 64),
+                    encoder_h_dim=args.get('encoder_h_dim_g', 64),
+                    decoder_h_dim=args.get('decoder_h_dim_g', 128),
+                    mlp_dim=args.get('mlp_dim', 1024),
+                    num_layers=args.get('num_layers', 1),
+                    noise_dim=args.get('noise_dim', (8,)),
+                    noise_type=args.get('noise_type', 'gaussian'),
+                    noise_mix_type=args.get('noise_mix_type', 'ped'),
+                    pooling_type=args.get('pooling_type', 'pool_net'),
+                    pool_every_timestep=args.get('pool_every_timestep', True),
+                    dropout=args.get('dropout', 0.0),
+                    bottleneck_dim=args.get('bottleneck_dim', 1024),
+                    neighborhood_size=args.get('neighborhood_size', 2.0),
+                    grid_size=args.get('grid_size', 8),
+                    batch_norm=args.get('batch_norm', False),
+                    device=self.device
+                )
+                logger.info("Using vendorized SGAN TrajectoryGenerator")
             else:
                 # Use standalone implementation (defined below)
                 self.generator = StandaloneTrajectoryGenerator(

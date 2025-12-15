@@ -47,10 +47,10 @@ static_obstacles:
   - [-5.0, 55.0, -3.0, -3.0] # Bottom wall
 
 # === Model ===
-sgan_model_path: null
+sgan_model_path: models/sgan-models/eth_8_model.pt
 
 # === Computation ===
-device: "cpu"
+device: "mps"
 
 # === Visualization ===
 visualization_enabled: true

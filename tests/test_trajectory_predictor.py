@@ -64,5 +64,37 @@ def test_trajectory_predictor_with_dummy_model(monkeypatch):
     assert np.allclose(pred, expected)
 
 
+def test_trajectory_predictor_with_vendor_sgan(monkeypatch):
+    """Ensure vendorized SGAN generator path produces correct shapes."""
+    from src.prediction.sgan_vendor.models import TrajectoryGenerator
+    from src.prediction.sgan_vendor.utils import relative_to_abs
+
+    class DummyGen(TrajectoryGenerator):
+        def __init__(self):
+            super().__init__(
+                obs_len=8, pred_len=12, pooling_type=None, noise_dim=(0,), device=torch.device("cpu")
+            )
+
+        def forward(self, obs_traj, obs_traj_rel, seq_start_end, user_noise=None):
+            # Return zeros in relative coords
+            pred_len = self.pred_len
+            batch = obs_traj.shape[1]
+            return torch.zeros(pred_len, batch, 2)
+
+    obs_traj = torch.randn(8, 1, 2)
+    obs_traj_rel = torch.diff(obs_traj, dim=0, prepend=obs_traj[:1])
+    seq_start_end = torch.tensor([[0, 1]])
+
+    predictor = TrajectoryPredictor(model_path=None, pred_len=12, num_samples=1, device='cpu')
+    predictor.generator = DummyGen()
+
+    pred = predictor.predict(obs_traj, obs_traj_rel, seq_start_end)
+
+    assert pred.shape == (12, 1, 2)
+    last_obs = obs_traj[-1].cpu().numpy()
+    expected = np.repeat(last_obs[None, :, :], 12, axis=0)
+    assert np.allclose(pred, expected)
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
