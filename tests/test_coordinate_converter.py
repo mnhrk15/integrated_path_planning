@@ -55,7 +55,7 @@ def test_coordinate_converter():
     
     obstacles = converter.global_to_frenet_obstacle(ped_traj)
     
-    assert obstacles.shape == (6, 2)  # 2 peds * 3 timesteps
+    assert obstacles.shape == (2, 3, 2)  # Preserve time dimension for dynamic obstacles
 
 
 def test_nearest_point_at_boundaries():

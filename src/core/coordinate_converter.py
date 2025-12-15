@@ -267,24 +267,23 @@ class CoordinateConverter:
         self, 
         ped_trajectories: np.ndarray
     ) -> np.ndarray:
-        """Convert pedestrian trajectories to obstacle points in global frame.
-        
-        Note: We keep obstacles in global frame for the Frenet planner to handle.
-        The planner will check collisions in the global frame.
-        
+        """Pass-through helper for predicted pedestrian trajectories.
+
         Args:
             ped_trajectories: Predicted pedestrian trajectories [n_peds, time_horizon, 2]
             
         Returns:
-            obstacles: Flattened obstacle points [n_obstacles, 2] in global frame
+            Trajectories in the original shape (no flattening)
         """
         if ped_trajectories is None or len(ped_trajectories) == 0:
-            return np.empty((0, 2))
-        
-        n_peds, time_horizon, _ = ped_trajectories.shape
-        obstacles = ped_trajectories.reshape(-1, 2)
-        
-        logger.debug(f"Converted {n_peds} pedestrian trajectories "
-                    f"({time_horizon} time steps) to {len(obstacles)} obstacle points")
-        
-        return obstacles
+            return np.empty((0, 0, 2))
+
+        if ped_trajectories.ndim != 3 or ped_trajectories.shape[-1] != 2:
+            raise ValueError(f"Expected trajectories with shape (n_peds, time, 2), got {ped_trajectories.shape}")
+
+        logger.debug(
+            f"Passing through {ped_trajectories.shape[0]} pedestrian trajectories "
+            f"for {ped_trajectories.shape[1]} time steps"
+        )
+
+        return ped_trajectories

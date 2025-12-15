@@ -16,6 +16,7 @@ from ..core.data_structures import (
 from ..core.coordinate_converter import CoordinateConverter
 from ..config import SimulationConfig
 from ..planning import CubicSpline2D, FrenetPlanner
+from ..planning.frenet_planner import MAX_T
 from ..pedestrian.observer import PedestrianObserver
 from ..prediction.trajectory_predictor import TrajectoryPredictor
 
@@ -224,7 +225,8 @@ class IntegratedSimulator:
         # 3. Initialize pedestrian observer
         self.observer = PedestrianObserver(
             obs_len=config.obs_len,
-            dt=config.dt
+            dt=config.dt,
+            sgan_dt=0.4  # SGAN expects 0.4s sampling regardless of simulation dt
         )
         
         # 4. Initialize trajectory predictor
@@ -232,7 +234,10 @@ class IntegratedSimulator:
             model_path=config.sgan_model_path,
             pred_len=config.pred_len,
             num_samples=1,
-            device=config.device
+            device=config.device,
+            sgan_dt=self.observer.sgan_dt,
+            sim_dt=config.dt,
+            plan_horizon=MAX_T
         )
         
         # 5. Initialize path planner
@@ -284,7 +289,8 @@ class IntegratedSimulator:
         
         # 2. Predict pedestrian trajectories
         predicted_traj = None
-        obstacles = np.empty((0, 2))
+        dynamic_obstacles = np.empty((0, 0, 2))
+        static_obstacles = self.static_obstacle_points.copy()
         
         if ped_state is not None and self.observer.is_ready:
             try:
@@ -296,33 +302,42 @@ class IntegratedSimulator:
                     obs_traj, obs_traj_rel, seq_start_end
                 )
                 
-                # Convert to obstacle points
-                obstacles = self.coord_converter.global_to_frenet_obstacle(
+                # Preserve time dimension for dynamic collision checks
+                dynamic_obstacles = self.coord_converter.global_to_frenet_obstacle(
                     predicted_traj
                 )
                 
-                logger.debug(f"Predicted {predicted_traj.shape[0]} pedestrian "
-                           f"trajectories, {len(obstacles)} obstacle points")
+                logger.debug(
+                    f"Predicted {predicted_traj.shape[0]} pedestrian trajectories "
+                    f"for {predicted_traj.shape[1]} steps"
+                )
                 
             except Exception as e:
                 logger.warning(f"Prediction failed: {e}, using current positions")
                 if ped_state is not None:
-                    obstacles = ped_state.positions
+                    dynamic_obstacles = ped_state.positions[:, None, :]
         elif ped_state is not None:
             # Not enough observations yet, use current positions
-            obstacles = ped_state.positions
+            dynamic_obstacles = ped_state.positions[:, None, :]
 
-        # 2.5. Append static obstacles (expanded to points)
-        if self.static_obstacle_points.size > 0:
-            if obstacles.size == 0:
-                obstacles = self.static_obstacle_points.copy()
+        # Include current pedestrian positions at time t=0 for collision checks
+        if ped_state is not None:
+            current_positions = ped_state.positions[:, None, :]
+            if dynamic_obstacles.size == 0:
+                dynamic_obstacles = current_positions
             else:
-                obstacles = np.vstack([obstacles, self.static_obstacle_points])
+                already_has_current = (
+                    dynamic_obstacles.shape[1] >= 1
+                    and np.allclose(dynamic_obstacles[:, 0, :], current_positions[:, 0, :])
+                )
+                if not already_has_current:
+                    dynamic_obstacles = np.concatenate([current_positions, dynamic_obstacles], axis=1)
         
         # 3. Plan path
         planned_path = self.planner.plan(
             self.ego_state,
-            obstacles,
+            static_obstacles,
+            dynamic_obstacles,
             target_speed=self.config.ego_target_speed
         )
         

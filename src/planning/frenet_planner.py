@@ -96,14 +96,16 @@ class FrenetPlanner:
     def plan(
         self,
         ego_state: EgoVehicleState,
-        obstacles: np.ndarray,
+        static_obstacles: np.ndarray,
+        dynamic_obstacles: Optional[np.ndarray] = None,
         target_speed: float = TARGET_SPEED
     ) -> Optional[FrenetPath]:
         """Plan optimal trajectory from current state.
         
         Args:
             ego_state: Current ego vehicle state
-            obstacles: Obstacle positions [n_obstacles, 2]
+            static_obstacles: Static obstacle positions [n_obstacles, 2]
+            dynamic_obstacles: Dynamic obstacles with time dimension [n_obs, time_steps, 2]
             target_speed: Desired target speed [m/s]
             
         Returns:
@@ -126,7 +128,7 @@ class FrenetPlanner:
         fp_list = self._calc_global_paths(fp_list)
         
         # Check path validity
-        fp_dict = self._check_paths(fp_list, obstacles)
+        fp_dict = self._check_paths(fp_list, static_obstacles, dynamic_obstacles)
         
         # Select best path
         best_path = self._select_best_path(fp_dict)
@@ -391,13 +393,15 @@ class FrenetPlanner:
     def _check_paths(
         self,
         fp_list: List[FrenetPath],
-        obstacles: np.ndarray
+        static_obstacles: np.ndarray,
+        dynamic_obstacles: Optional[np.ndarray] = None
     ) -> dict:
         """Check path validity and categorize paths.
         
         Args:
             fp_list: List of Frenet paths
-            obstacles: Obstacle positions [n_obstacles, 2]
+            static_obstacles: Static obstacle positions [n_obstacles, 2]
+            dynamic_obstacles: Dynamic obstacle trajectories [n_obs, time_steps, 2]
             
         Returns:
             Dictionary categorizing paths by validity
@@ -424,7 +428,7 @@ class FrenetPlanner:
             elif any([abs(c) > self.max_curvature for c in fp.c]):
                 path_dict['max_curvature_error'].append(fp)
             # Check collision
-            elif not self._check_collision(fp, obstacles):
+            elif not self._check_collision(fp, static_obstacles, dynamic_obstacles):
                 path_dict['collision_error'].append(fp)
             else:
                 path_dict['ok'].append(fp)
@@ -434,29 +438,55 @@ class FrenetPlanner:
     def _check_collision(
         self,
         fp: FrenetPath,
-        obstacles: np.ndarray
+        static_obstacles: np.ndarray,
+        dynamic_obstacles: Optional[np.ndarray] = None
     ) -> bool:
-        """Check if path collides with obstacles.
+        """Check if path collides with obstacles (static + dynamic with time).
         
         Args:
             fp: Frenet path
-            obstacles: Obstacle positions [n_obstacles, 2]
+            static_obstacles: Static obstacle positions [n_obstacles, 2]
+            dynamic_obstacles: Dynamic obstacle trajectories [n_obs, time_steps, 2]
             
         Returns:
             True if no collision, False otherwise
         """
-        if len(obstacles) == 0:
+        has_static = static_obstacles is not None and len(static_obstacles) > 0
+        has_dynamic = (
+            dynamic_obstacles is not None
+            and dynamic_obstacles.size > 0
+            and dynamic_obstacles.shape[-1] == 2
+        )
+
+        if not has_static and not has_dynamic:
             return True
         
         inflated_radius = max(
             self.robot_radius + self.obstacle_radius + self.safety_buffer,
             1e-6
         )
-        
+
         for i in range(len(fp.x)):
-            for obs in obstacles:
-                dist = np.hypot(fp.x[i] - obs[0], fp.y[i] - obs[1])
-                if dist <= inflated_radius:
+            # Check static obstacles at all times
+            if has_static:
+                for obs in static_obstacles:
+                    dist = np.hypot(fp.x[i] - obs[0], fp.y[i] - obs[1])
+                    if dist <= inflated_radius:
+                        return False
+
+            # Time-aware dynamic obstacles
+            if has_dynamic:
+                # Align obstacle index with planner time
+                obs_count, obs_steps, _ = dynamic_obstacles.shape
+                time_idx = int(round(fp.t[i] / self.dt))
+                time_idx = min(max(time_idx, 0), obs_steps - 1)
+
+                # Slice positions for this timestep: shape (obs_count, 2)
+                obs_positions = dynamic_obstacles[:, time_idx, :]
+                dx = fp.x[i] - obs_positions[:, 0]
+                dy = fp.y[i] - obs_positions[:, 1]
+                dists = np.hypot(dx, dy)
+                if np.any(dists <= inflated_radius):
                     return False
         
         return True

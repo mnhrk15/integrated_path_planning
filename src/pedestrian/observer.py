@@ -15,43 +15,67 @@ from ..core.data_structures import PedestrianState
 
 class PedestrianObserver:
     """Observer for accumulating pedestrian observations.
-    
+
     This class maintains a sliding window of pedestrian observations
     and converts them to the format required by the trajectory predictor.
-    
+
     Args:
         obs_len: Number of observation time steps (default: 8)
-        dt: Time step between observations [s] (default: 0.4)
+        dt: Simulation time step between observations [s] (default: 0.4)
+        sgan_dt: Desired sampling interval for SGAN input [s] (default: 0.4)
     """
-    
-    def __init__(self, obs_len: int = 8, dt: float = 0.4):
+
+    def __init__(self, obs_len: int = 8, dt: float = 0.4, sgan_dt: float = 0.4):
         self.obs_len = obs_len
         self.dt = dt
+        self.sgan_dt = sgan_dt
         self.history: deque = deque(maxlen=obs_len)
         self.timestamps: deque = deque(maxlen=obs_len)
         self.n_peds = 0
-        
-        logger.info(f"Pedestrian observer initialized with obs_len={obs_len}, dt={dt}s")
+        self.accumulated_time: float = 0.0
+
+        logger.info(
+            f"Pedestrian observer initialized with obs_len={obs_len}, "
+            f"dt={dt}s, sgan_dt={sgan_dt}s"
+        )
     
     def reset(self):
         """Reset the observation history."""
         self.history.clear()
         self.timestamps.clear()
         self.n_peds = 0
+        self.accumulated_time = 0.0
         logger.debug("Observer history reset")
     
     def update(self, ped_state: PedestrianState):
         """Add a new pedestrian observation.
-        
+
         Args:
             ped_state: Current pedestrian state
         """
-        self.history.append(ped_state.positions.copy())
-        self.timestamps.append(ped_state.timestamp)
-        self.n_peds = ped_state.n_peds
-        
-        logger.debug(f"Observer updated at t={ped_state.timestamp:.2f}s, "
-                    f"history length={len(self.history)}/{self.obs_len}")
+        # Accumulate simulation time and only sample when reaching SGAN interval
+        if len(self.timestamps) > 0:
+            delta_t = max(
+                ped_state.timestamp - self.timestamps[-1],
+                0.0
+            )
+        else:
+            # Fall back to configured simulation dt for the first step
+            delta_t = self.dt
+
+        self.accumulated_time += delta_t
+
+        if self.accumulated_time + 1e-9 >= self.sgan_dt:
+            self.history.append(ped_state.positions.copy())
+            self.timestamps.append(ped_state.timestamp)
+            self.n_peds = ped_state.n_peds
+            # Keep leftover time so we stay aligned to sgan_dt
+            self.accumulated_time %= self.sgan_dt
+
+            logger.debug(
+                f"Observer sampled at t={ped_state.timestamp:.2f}s, "
+                f"history length={len(self.history)}/{self.obs_len}"
+            )
     
     @property
     def is_ready(self) -> bool:

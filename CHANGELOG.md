@@ -63,11 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enhanced `IntegratedSimulator` with animation support
 - Improved `PedestrianSimulator` with PySocialForce integration
 - Updated command-line arguments in `run_simulation.py`
+- Pedestrian observations are downsampled to SGAN's 0.4s cadence; SGAN outputs are resampled to simulation `dt` and extrapolated to the 5s planning horizon.
+- Planner collision checks now keep dynamic obstacle time information (no flattening) and evaluate collisions at matching timestamps.
 
 ### Fixed
 - Improved error handling for missing dependencies
 - Added proper warnings when optional packages unavailable
 - Fixed device handling for CPU/CUDA/MPS
+- Eliminated over-conservative braking caused by treating all future pedestrian positions as immediate obstacles.
 
 ## [0.1.0] - Initial Release
 

@@ -55,10 +55,11 @@ def test_trajectory_predictor_with_dummy_model(monkeypatch):
 
     pred = predictor.predict(obs_traj, obs_traj_rel, seq_start_end)
 
-    assert pred.shape == (12, 1, 2)
+    assert pred.shape[0] == 1  # n_peds
+    assert pred.shape[2] == 2
     # Since dummy returns zeros in relative coords, absolute should stay at last obs position
     last_obs = obs_traj[-1].cpu().numpy()
-    expected = np.repeat(last_obs[None, :, :], 12, axis=0)
+    expected = np.repeat(last_obs[None, :, :], pred.shape[1], axis=1)
     assert np.allclose(pred, expected)
 
 
@@ -88,9 +89,10 @@ def test_trajectory_predictor_with_vendor_sgan(monkeypatch):
 
     pred = predictor.predict(obs_traj, obs_traj_rel, seq_start_end)
 
-    assert pred.shape == (12, 1, 2)
+    assert pred.shape[0] == 1
+    assert pred.shape[2] == 2
     last_obs = obs_traj[-1].cpu().numpy()
-    expected = np.repeat(last_obs[None, :, :], 12, axis=0)
+    expected = np.repeat(last_obs[None, :, :], pred.shape[1], axis=1)
     assert np.allclose(pred, expected)
 
 
