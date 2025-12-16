@@ -85,7 +85,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-models/zara1_12_model.pt
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt
 
 # === Computation ===
 device: "mps"

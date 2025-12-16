@@ -203,7 +203,7 @@ python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-models/zara1_12_model.pt"
+sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
 ```
 
 ## プロジェクト構成

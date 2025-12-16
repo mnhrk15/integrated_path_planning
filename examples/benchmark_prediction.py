@@ -38,6 +38,30 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
         config.output_path = str(output_dir / method)
         config.visualization_enabled = False  # Disable viz for speed
         
+        # [Fix] Use correct model for benchmarking
+        # LSTM -> sgan-models (No Pooling)
+        # SGAN -> sgan-p-models (Pooling)
+        if config.sgan_model_path and method in ['lstm', 'sgan']:
+            original_path = Path(config.sgan_model_path)
+            model_name = original_path.name
+            
+            # Determine correct directory
+            if method == 'lstm':
+                new_dir = "models/sgan-models"
+            else: # sgan
+                new_dir = "models/sgan-p-models"
+            
+            # Update path relative to project root
+            new_path = Path(new_dir) / model_name
+            
+            # Verify existence before switching
+            if new_path.exists():
+                logger.info(f"Switched model for {method}: {new_path}")
+                config.sgan_model_path = str(new_path)
+            else:
+                logger.warning(f"Desired model {new_path} not found. Using default: {original_path}")
+
+        
         # Init simulator
         try:
             simulator = IntegratedSimulator(config)

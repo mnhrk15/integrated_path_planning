@@ -235,7 +235,7 @@ ped_groups: [[0]]
 
 static_obstacles: []
 
-sgan_model_path: "models/sgan-models/zara1_12_model.pt"  # 必須: 学習済みモデルへのパス
+sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
 visualization_enabled: true
 output_path: "output/scenario_99"
@@ -368,7 +368,7 @@ animator.show()
 python scripts/download_sgan_models.py
 ```
 ```yaml
-sgan_model_path: "models/sgan-models/zara1_12_model.pt"
+sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
 ```
 
 ### PySocialForceがインストールされていない

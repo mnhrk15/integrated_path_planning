@@ -81,7 +81,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "cpu"
