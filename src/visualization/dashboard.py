@@ -96,6 +96,23 @@ class DashboardGenerator:
         plt.close(fig)
         logger.info(f"Dashboard saved to {output_path}")
 
+    def generate_trajectory_map(self, output_path: str, map_config: Optional[Dict] = None):
+        """Generate just the trajectory map (simulation.png)."""
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(111)
+        
+        self._plot_map(ax, map_config)
+        
+        # Ensure aspect ratio is preserved
+        ax.set_aspect('equal')
+        
+        plt.savefig(output_path, dpi=100)
+        plt.close(fig)
+        logger.info(f"Simulation plot saved to {output_path}")
+
     def _plot_summary_table(self, ax, metrics: dict):
         """Render summary table."""
         # Format data
@@ -167,3 +184,8 @@ def create_dashboard(history: List[SimulationResult], output_path: str, metrics:
     """Convenience function."""
     gen = DashboardGenerator(history)
     gen.generate(output_path, metrics, map_config)
+
+def create_simulation_plot(history: List[SimulationResult], output_path: str, map_config: Optional[Dict] = None):
+    """Convenience function for trajectory map."""
+    gen = DashboardGenerator(history)
+    gen.generate_trajectory_map(output_path, map_config)

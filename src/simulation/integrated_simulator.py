@@ -556,6 +556,18 @@ class IntegratedSimulator:
                 )
             except Exception as e:
                 logger.error(f"Failed to generate dashboard: {e}")
+
+            # Generate Simulation Plot (Restored)
+            try:
+                from ..visualization.dashboard import create_simulation_plot
+                sim_plot_path = output_dir / "simulation.png"
+                create_simulation_plot(
+                    self.history,
+                    str(sim_plot_path),
+                    map_config=getattr(self.config, 'map_config', None)
+                )
+            except Exception as e:
+                logger.error(f"Failed to generate simulation plot: {e}")
         else:
             logger.debug("Visualization disabled, skipping dashboard generation.")
             
