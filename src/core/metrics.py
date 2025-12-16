@@ -18,16 +18,34 @@ def calculate_ade_fde(history: List[SimulationResult], dt: float) -> Tuple[float
     total_fde = 0.0
     count = 0
     
+    # Track sample count
+    max_samples = 0
+    
     # Iterate through history to find predictions
     for i, result in enumerate(history):
-        if result.predicted_trajectories is None or result.predicted_trajectories.size == 0:
+        # Prefer full distribution for Best-of-N
+        has_distribution = result.predicted_distribution is not None and result.predicted_distribution.size > 0
+        has_single = result.predicted_trajectories is not None and result.predicted_trajectories.size > 0
+        
+        if not has_distribution and not has_single:
             continue
             
-        # Prediction: [n_peds, n_steps, 2]
         # These predictions start from time t + dt
-        preds = result.predicted_trajectories
-        n_peds, n_steps, _ = preds.shape
+        # Shape: [n_peds, n_steps, 2]
+        preds_single = result.predicted_trajectories
         
+        # Shape: [n_samples, n_peds, n_steps, 2]
+        preds_dist = result.predicted_distribution
+        
+        # Determine number of pedestrians
+        if has_distribution:
+            n_samples, n_peds, n_steps, _ = preds_dist.shape
+        else:
+            n_peds, n_steps, _ = preds_single.shape
+            n_samples = 1
+            
+        max_samples = max(max_samples, n_samples)
+
         # We need to compare with ground truth at future steps i+1, i+2, ...
         # Available history length
         remaining_steps = len(history) - (i + 1)
@@ -40,16 +58,12 @@ def calculate_ade_fde(history: List[SimulationResult], dt: float) -> Tuple[float
             
         for p in range(n_peds):
             # Ground truth trajectory for this pedestrian
-            # We assume pedestrian index p stays consistent (simplification)
             gt_traj = []
             valid_gt = True
             
             for k in range(eval_steps):
                 d_idx = i + 1 + k
                 # Check if pedestrian p exists in ground truth
-                # Assuming ped_state.positions has shape [n_current_peds, 2]
-                # and p < n_current_peds.
-                # WARNING: This assumes constant ID/ordering.
                 gt_state = history[d_idx].ped_state
                 if p < gt_state.n_peds:
                     gt_traj.append(gt_state.positions[p])
@@ -61,20 +75,43 @@ def calculate_ade_fde(history: List[SimulationResult], dt: float) -> Tuple[float
                 continue
                 
             gt_traj = np.array(gt_traj) # [eval_steps, 2]
-            pred_traj = preds[p, :len(gt_traj), :] # [eval_steps, 2]
             
-            # Displacement error for this pedestrian at this start time
-            displacement = np.linalg.norm(pred_traj - gt_traj, axis=1)
-            
-            # Accumulate
-            total_ade += np.mean(displacement)
-            total_fde += displacement[-1]
+            # Calculate errors
+            if has_distribution:
+                # Best-of-N Logic
+                # Extract samples for this pedestrian: [n_samples, eval_steps, 2]
+                ped_samples = preds_dist[:, p, :len(gt_traj), :]
+                
+                # Difference: [n_samples, eval_steps, 2]
+                diff = ped_samples - gt_traj[None, :, :]
+                
+                # Displacement: [n_samples, eval_steps]
+                displacement = np.linalg.norm(diff, axis=2)
+                
+                # ADE per sample: [n_samples]
+                ade_samples = np.mean(displacement, axis=1)
+                
+                # FDE per sample: [n_samples]
+                fde_samples = displacement[:, -1]
+                
+                # Best-of-N (minADE, minFDE)
+                # Note: They can come from different samples
+                total_ade += np.min(ade_samples)
+                total_fde += np.min(fde_samples)
+                
+            else:
+                # Best-of-1 Logic (Fallback)
+                pred_traj = preds_single[p, :len(gt_traj), :] # [eval_steps, 2]
+                displacement = np.linalg.norm(pred_traj - gt_traj, axis=1)
+                total_ade += np.mean(displacement)
+                total_fde += displacement[-1]
+                
             count += 1
             
     if count == 0:
         return 0.0, 0.0, 0
         
-    return total_ade / count, total_fde / count, count
+    return total_ade / count, total_fde / count, max_samples
 
 def calculate_aggregate_metrics(history: List[SimulationResult], dt: float) -> Dict[str, float]:
     """Calculate aggregate metrics for the entire simulation."""

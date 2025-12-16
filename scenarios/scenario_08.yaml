@@ -8,6 +8,12 @@
 dt: 0.1
 total_time: 26.0
 
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.7 
+  ped_repulsion.v0: 3.5 
+  agent_radius: 0.4
+
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
@@ -35,14 +41,36 @@ reference_waypoints_x: [0.0, 15.0, 30.0, 45.0, 60.0]
 reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0]
 
 # === Pedestrians ===
+# === Pedestrians ===
+# Interactions INSIDE the choke points
 ped_initial_states:
-  - [20.0, 1.2, -0.6, 0.0, 5.0, 1.2]    # toward ego upper
-  - [22.0, -1.2, -0.6, 0.0, 5.0, -1.2]  # toward ego lower
-  - [10.0, 1.8,  0.5, 0.0, 55.0, 1.8]   # same direction upper
-  - [12.0, -1.8, 0.5, 0.0, 55.0, -1.8]  # same direction lower
+  # -- Approaching the first choke point (Opposing) --
+  - [20.0, 0.0, -0.8, 0.0, -10.0, 0.0] 
+  - [15.0, 0.5, 0.8, 0.0, 40.0, 0.5]
+
+  # -- Inside Block 1 (x=24-28) --
+  # Loitering/Slow moving IN the interaction zone
+  - [26.0, 0.0, 0.2, 0.0, 60.0, 0.0]
+  
+  # -- Between Blocks (weave zone) --
+  - [32.0, 1.5, -0.5, -0.5, 20.0, -1.5] # Crossing the weave
+  - [32.0, -1.5, -0.5, 0.5, 20.0, 1.5]  # Crossing the weave
+
+  # -- Inside Block 2 (x=36-40) --
+  # Opposing pair blocking the exit
+  - [42.0, 0.5, -1.0, 0.0, 10.0, 0.5]
+  - [42.0, -0.5, -1.0, 0.0, 10.0, -0.5]
+
+  # -- Moving with Ego (Overtaking required) --
+  - [5.0, 0.0, 1.0, 0.0, 60.0, 0.0] # Fast walker
+
 ped_groups:
-  - [0, 1]
-  - [2, 3]
+  - [0]
+  - [1]
+  - [2]
+  - [3, 4]
+  - [5, 6]
+  - [7]
 
 # === Static Obstacles (rectangles: x_min, x_max, y_min, y_max) ===
 static_obstacles:
@@ -61,7 +89,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
+sgan_model_path: models/sgan-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "mps"

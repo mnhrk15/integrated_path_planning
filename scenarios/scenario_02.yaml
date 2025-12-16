@@ -7,6 +7,12 @@
 dt: 0.1
 total_time: 25.0
 
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.7 
+  ped_repulsion.v0: 3.5 
+  agent_radius: 0.4
+
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
@@ -35,28 +41,33 @@ reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
 reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 # === Pedestrians ===
-# Dense oncoming traffic in narrow corridor
+# Dense oncoming "Wall" and overtaking challenges
 ped_initial_states:
-  # -- Wave 1: Immediate oncoming group --
-  - [20.0, 1.0, -1.0, 0.0, -5.0, 1.0]
-  - [20.0, -1.0, -1.0, 0.0, -5.0, -1.0]
+  # -- The "Wall" (Oncoming) --
+  # A line of pedestrians walking abreast accurately down the hall
+  # Extended path: x=60 -> x=-20
+  - [55.0, 2.0, -1.2, 0.0, -20.0, 2.0]
+  - [55.0, 0.8, -1.2, 0.0, -20.0, 0.8]
+  - [55.0, -0.8, -1.2, 0.0, -20.0, -0.8]
+  - [55.0, -2.0, -1.2, 0.0, -20.0, -2.0]
   
-  # -- Wave 2: Fast walker overtaking --
-  - [30.0, 0.0, -1.5, 0.0, -5.0, 0.0]
+  # -- Wave 2 (Behind the wall, faster) --
+  - [60.0, 0.0, -1.8, 0.0, -20.0, 0.0] # Fast walker trying to pass the wall?
 
-  # -- Wave 3: Group of 3 blocking width --
-  - [45.0, 2.0, -0.8, 0.0, 0.0, 2.0]
-  - [45.0, 0.0, -0.8, 0.0, 0.0, 0.0]
-  - [45.0, -2.0, -0.8, 0.0, 0.0, -2.0]
+  # -- Slow walker "With" Ego --
+  # Ego has to decide to overtake this person while the wall approaches
+  - [10.0, 0.0, 0.8, 0.0, 60.0, 0.0] 
 
-  # -- Walking with Ego (obstacles to overtake?) --
-  - [10.0, 2.5, 0.5, 0.0, 50.0, 2.5]  # Slow walker on edge
+  # -- Opposing friction --
+  # Pedestrians on the edges moving against the wall
+  - [40.0, 2.5, -1.0, 0.0, -10.0, 2.5]
+  - [40.0, -2.5, -1.0, 0.0, -10.0, -2.5]
 
 ped_groups: 
-  - [0, 1]      # Pair
-  - [2]         # Loner
-  - [3, 4, 5]   # Wall of pedestrians
-  - [6]         # Loner
+  - [0, 1, 2, 3] # The Wall
+  - [4]
+  - [5]
+  - [6, 7]
 
 # === Static Obstacles ===
 # Corridor walls
@@ -74,7 +85,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-models/eth_8_model.pt
+sgan_model_path: models/sgan-models/zara1_12_model.pt
 
 # === Computation ===
 device: "mps"

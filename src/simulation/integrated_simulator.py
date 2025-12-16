@@ -40,7 +40,8 @@ class PedestrianSimulator:
         obstacles: Optional[List] = None,
         dt: float = 0.1,
         config_file: Optional[str] = None,
-        ego_radius: float = 1.0
+        ego_radius: float = 1.0,
+        social_force_params: Optional[Dict] = None
     ):
         """Initialize simulator.
         
@@ -51,6 +52,7 @@ class PedestrianSimulator:
             dt: Simulation time step
             config_file: Path to PySocialForce config file
             ego_radius: Radius of the ego vehicle [m]
+            social_force_params: Dictionary of SFM parameters to override
         """
         self.dt = dt
         self.initial_states = initial_states
@@ -65,13 +67,19 @@ class PedestrianSimulator:
                 "Please install it via `pip install pysocialforce`."
             )
             
-        self._init_pysocialforce(groups, obstacles, config_file)
+        self._init_pysocialforce(
+            groups, 
+            obstacles, 
+            config_file,
+            social_force_params=social_force_params
+        )
 
     def _init_pysocialforce(
         self, 
         groups: Optional[List[List[int]]] = None, 
         obstacles: Optional[List] = None,
-        config_file: Optional[str] = None
+        config_file: Optional[str] = None,
+        social_force_params: Optional[Dict] = None
     ):
         """Initialize PySocialForce simulator."""
         # Convert states to PySocialForce format
@@ -115,6 +123,26 @@ class PedestrianSimulator:
             obstacles=psf_obstacles if psf_obstacles else None,
             config_file=config_file
         )
+
+        # Apply custom parameters if provided
+        if social_force_params and hasattr(self.sim, 'config'):
+            for key, value in social_force_params.items():
+                # Support nested keys with dot notation (e.g. "ped_repulsion.sigma")
+                if "." in key:
+                    section, subkey = key.split(".", 1)
+                    if hasattr(self.sim.config, section):
+                        section_obj = getattr(self.sim.config, section)
+                        if isinstance(section_obj, dict):
+                             section_obj[subkey] = value
+                        else:
+                             setattr(section_obj, subkey, value)
+                else:
+                    setattr(self.sim.config, key, value)
+                    
+        # Also try to update specific force parameters if exposed
+        if social_force_params:
+             # Basic handling for common PySocialForce parameters if directly exposed
+             pass
         
         # Manually set dt (step_width)
         if hasattr(self.sim, 'peds'):
@@ -235,7 +263,8 @@ class IntegratedSimulator:
                 obstacles=config.static_obstacles,
                 dt=config.dt,
                 config_file=getattr(config, "social_force_config", None),
-                ego_radius=self.ego_radius
+                ego_radius=self.ego_radius,
+                social_force_params=getattr(config, "social_force_params", None)
             )
         else:
             self.pedestrian_sim = None
@@ -551,6 +580,17 @@ class IntegratedSimulator:
             # Check for collision
             if result.metrics.get('collision', False):
                 logger.error(f"Collision detected at t={self.time:.1f}s!")
+                break
+            
+            # Check for goal reached
+            current_s, _, _, _, _, _ = self.coord_converter.find_nearest_point_on_path(
+                self.ego_state.x, self.ego_state.y
+            )
+            max_s = self.reference_path.s[-1]
+            dist_to_goal = max_s - current_s
+            
+            if dist_to_goal < 2.0:
+                logger.success(f"Goal reached at t={self.time:.1f}s! (Dist to goal: {dist_to_goal:.1f}m)")
                 break
         
         logger.info(f"Simulation complete: {len(self.history)} steps")

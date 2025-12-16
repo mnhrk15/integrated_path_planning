@@ -8,6 +8,12 @@
 dt: 0.1
 total_time: 15.0
 
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.7 
+  ped_repulsion.v0: 3.5 
+  agent_radius: 0.4
+
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
@@ -36,28 +42,36 @@ reference_waypoints_y: [0.0, 2.0, 6.0, 10.0, 13.0, 15.0, 16.0]
 
 # === Pedestrians ===
 # Chaotic mix of crossing and parallel walking near curve
+# === Pedestrians ===
+# Chaotic mix of crossing and parallel walking near curve
+# Extended paths to ensure no stopping
 ped_initial_states:
-  # -- Crossing Group near apex --
-  - [28.0, 13.0, -0.6, -0.2, 10.0, 8.0]
-  - [29.0, 14.0, -0.6, -0.2, 11.0, 9.0]
+  # -- Crossing Group near apex (Inner to Outer) --
+  # Extended goals
+  - [28.0, 13.0, -0.6, -0.2, 10.0, 5.0]
+  - [29.0, 14.0, -0.6, -0.2, 11.0, 6.0]
+  - [27.0, 12.0, -0.7, -0.1, 8.0, 5.0]
   
-  # -- Fast individual crossing late --
-  - [45.0, 18.0, -0.8, -0.2, 25.0, 12.0]
+  # -- Fast individual crossing late (Outer to Inner) --
+  - [45.0, 18.0, -0.8, -0.2, 25.0, 8.0]
+  - [50.0, 19.0, -0.9, -0.3, 30.0, 10.0]
 
-  # -- Parallel walkers (inner track) --
-  - [15.0, 1.0, 0.8, 0.4, 60.0, 14.0]
-  - [18.0, 2.0, 0.7, 0.4, 60.0, 15.0]
+  # -- Parallel walkers (Walking "against" ego on the inner track) --
+  # Walking along the curve boundary, crowding the lane
+  - [40.0, 10.0, -0.8, -0.2, 10.0, 0.0]
+  - [42.0, 11.0, -0.8, -0.2, 12.0, 1.0]
+  - [44.0, 12.0, -0.8, -0.2, 14.0, 2.0]
 
-  # -- Parallel walkers (outer track) --
-  - [30.0, 15.0, 0.0, 0.0, 30.0, 15.0] # Standing still? Or moving very slowly
-  - [40.0, 18.0, -0.5, -0.1, 20.0, 10.0] # Walking against traffic on outside
+  # -- The "Squeeze" Group --
+  # Static/Slow group right at the apex of the curve on the road
+  - [30.0, 9.0, 0.1, 0.05, 35.0, 11.0] 
+  - [31.0, 9.5, 0.1, 0.05, 36.0, 11.5]
 
 ped_groups: 
-  - [0, 1]
-  - [2]
+  - [0, 1, 2]
   - [3, 4]
-  - [5]
-  - [6]
+  - [5, 6, 7]
+  - [8, 9]
 
 # === Static Obstacles ===
 static_obstacles: []
@@ -88,7 +102,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
+sgan_model_path: models/sgan-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "cpu"

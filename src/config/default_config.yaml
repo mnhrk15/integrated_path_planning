@@ -2,7 +2,13 @@
 
 # === Time Parameters ===
 dt: 0.1  # Time step [s]
-total_time: 30.0  # Total simulation time [s]
+total_time: 20.0  # Total simulation time [s]
+
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.7
+  ped_repulsion.v0: 3.5
+  agent_radius: 0.4
 
 # === Observation Parameters ===
 obs_len: 8  # Number of observation time steps
@@ -53,7 +59,7 @@ static_obstacles: []
 social_force_config: null
 
 # === Model Parameters ===
-sgan_model_path: models/sgan-models/eth_8_model.pt  # Path to Social-GAN model (required; set before running)
+sgan_model_path: models/sgan-models/zara1_12_model.pt  # Path to Social-GAN model (required; set before running)
 prediction_method: "sgan"  # "cv" (Constant Velocity), "lstm", or "sgan"
 
 # === Computation ===

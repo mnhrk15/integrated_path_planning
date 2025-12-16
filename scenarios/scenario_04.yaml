@@ -8,6 +8,12 @@
 dt: 0.1
 total_time: 25.0
 
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.7 
+  ped_repulsion.v0: 3.5 
+  agent_radius: 0.4
+
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
@@ -35,21 +41,37 @@ reference_waypoints_x: [0.0, 12.0, 24.0, 36.0, 48.0, 60.0]
 reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 # === Pedestrians (three waves) ===
+# === Pedestrians (three waves + stragglers) ===
+# Constant pressure, no clear gaps
 ped_initial_states:
-  # Wave 1 (early)
-  - [18.0, 6.0, 0.0, -1.0, 18.0, -6.0]
-  - [22.0, -6.5, 0.0, 1.0, 22.0, 6.5]
-  # Wave 2 (mid)
-  - [30.0, 7.0, 0.0, -0.9, 30.0, -7.0]
-  - [34.0, -7.0, 0.0, 0.9, 34.0, 7.0]
-  # Wave 3 (late)
-  - [44.0, 6.0, 0.0, -1.1, 44.0, -6.0]
-  - [48.0, -6.0, 0.0, 1.1, 48.0, 6.0]
+  # Wave 1 (Early) - Extended goals
+  - [18.0, 8.0, 0.0, -1.0, 18.0, -15.0]
+  - [22.0, -8.0, 0.0, 1.0, 22.0, 15.0]
+  - [20.0, 8.0, 0.0, -1.1, 20.0, -15.0]
+  
+  # Stragglers 1 (Between Wave 1 and 2)
+  - [26.0, 10.0, -0.2, -1.0, 24.0, -15.0]
+  
+  # Wave 2 (Mid) - The density peak
+  - [30.0, 9.0, 0.0, -0.9, 30.0, -15.0]
+  - [32.0, -9.0, 0.0, 0.9, 32.0, 15.0]
+  - [34.0, 9.0, 0.0, -1.0, 34.0, -15.0]
+  - [36.0, -9.0, 0.0, 0.9, 36.0, 15.0]
+
+  # Stragglers 2 (Between Wave 2 and 3)
+  - [40.0, -8.0, 0.0, 1.2, 38.0, 15.0]
+
+  # Wave 3 (Late)
+  - [44.0, 8.0, 0.0, -1.1, 44.0, -15.0]
+  - [48.0, -8.0, 0.0, 1.1, 48.0, 15.0]
+  - [46.0, 8.0, 0.0, -1.2, 46.0, -15.0]
 
 ped_groups:
-  - [0, 1]
-  - [2, 3]
-  - [4, 5]
+  - [0, 2]
+  - [1]
+  - [4, 6]
+  - [5, 7]
+  - [9, 11]
 
 # === Static Obstacles ===
 static_obstacles: []
@@ -67,7 +89,7 @@ map_config:
     - [42.0, -6.0, 8.0, 12.0]
 
 # === Model ===
-sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running
+sgan_model_path: models/sgan-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
 
 # === Computation ===
 device: "cpu"

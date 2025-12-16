@@ -38,6 +38,7 @@
 
 ### シミュレーションエンジン (v1.2 Update)
 - **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。
+- **自動終了機能 (v3.1 Update)**: 車両が参照経路のゴール地点（2m以内）に到達すると、設定された `total_time` を待たずにシミュレーションを自動終了し、効率的な評価が可能になりました。
 
 ### 評価と可視化 (v1.3 & v2.1 Update)
 - **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
@@ -202,7 +203,7 @@ python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-models/eth_8_model.pt"
+sgan_model_path: "models/sgan-models/zara1_12_model.pt"
 ```
 
 ## プロジェクト構成

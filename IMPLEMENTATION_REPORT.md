@@ -147,7 +147,28 @@
    - `metrics_summary.csv` を追記モードに変更し、バッチ実行時の履歴を保持
    - `SimulationConfig` に `num_samples` を追加し、設定ファイルから制御可能に
 
+### ✅ Phase 12: シナリオ強化とパラメータチューニング (v3.0 - NEW!)
 
+- [x] **Comprehensive Scenario Overhaul**
+  - 全10シナリオ（`scenario_01`〜`10`）を大幅に刷新
+  - 歩行者密度の増加（Rush Hour, Crowd Wall, Scramble Crossing）
+  - 複雑な相互作用パターンの導入（合流、対向流、ボトルネック、斜め横断）
+  - 歩行者の移動距離を延長し、シミュレーション途中での停止を防止
+- [x] **Social Force Parameter Tuning**
+  - `social_force_params` 設定オプションを追加
+  - 歩行者の反発力（`ped_repulsion.sigma`, `v0`）をYAMLから直接調整可能に
+  - デフォルト設定および全シナリオに「強めの反発（より明確な回避行動）」を適用し、SGANの予測能力を最大限に活用可能に
+  
+### ✅ Phase 13: 修正と改善 (v3.1 - NEW!)
+
+- [x] **Goal Reached Termination**
+  - 車両が参照経路の終端（ゴール）に到達した場合（距離 < 2.0m）、設定された終了時間を待たずにシミュレーションを自動終了する機能を追加
+  - 無駄な計算時間を削減し、効率性評価（到達時間）の精度を向上
+- [x] **Metrics Integrity Fix**
+  - **Best-of-N Evaluation**: ADE/FDE計算において、設定された全サンプル分布（例: 20サンプル）を用いた確率的な評価ロジック（minADE/minFDE）を正しく実装。単一軌道評価による誤差過大評価を解消。
+  - **Sample Count Reporting**: ログ出力される `pred_samples` が、評価数ではなく実際の分布サンプル数（`num_samples`）を正しく反映するように修正。
+- [x] **Model Standardization**
+  - デフォルトの学習済みモデルを `zara1_12_model.pt` に更新（より適切な回避行動の予測のため）
 
 
 ### ✅ 追加機能
@@ -280,7 +301,7 @@ class TrajectoryPredictor:
 #### 3.3 シナリオファイルでモデルを指定
 
 ```yaml
-sgan_model_path: "models/eth_8_model.pt"
+sgan_model_path: "models/zara1_12_model.pt"
 ```
 
 ### 4. PySocialForceの統合（推奨）

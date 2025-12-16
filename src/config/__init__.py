@@ -99,6 +99,7 @@ class SimulationConfig:
     
     # Social Force config
     social_force_config: Optional[str] = None
+    social_force_params: Dict[str, Any] = field(default_factory=dict)
     
     # Model
     # Model
@@ -172,6 +173,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'ped_groups': config.ped_groups,
         'static_obstacles': config.static_obstacles,
         'social_force_config': config.social_force_config,
+        'social_force_params': config.social_force_params,
         'sgan_model_path': config.sgan_model_path,
         'prediction_method': config.prediction_method,
         'device': config.device,
