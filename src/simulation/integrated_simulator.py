@@ -19,6 +19,7 @@ from ..planning import CubicSpline2D, FrenetPlanner
 from ..planning.frenet_planner import MAX_T
 from ..pedestrian.observer import PedestrianObserver
 from ..prediction.trajectory_predictor import TrajectoryPredictor
+from ..core.state_machine import FailSafeStateMachine, VehicleState
 
 
 import pysocialforce as psf
@@ -285,6 +286,10 @@ class IntegratedSimulator:
         ego_arr = np.array(config.ego_initial_state)
         self.ego_state = EgoVehicleState.from_array(ego_arr, timestamp=0.0)
 
+        # 8. Initialize State Machine
+        self.state_machine = FailSafeStateMachine(config)
+        self.ego_state.state = self.state_machine.current_state
+
         # Precompute static obstacles (expanded to point set for collision checks)
         self.static_obstacle_points = self._expand_static_obstacles(
             config.static_obstacles, step=0.5
@@ -353,83 +358,95 @@ class IntegratedSimulator:
                 if not already_has_current:
                     dynamic_obstacles = np.concatenate([current_positions, dynamic_obstacles], axis=1)
         
-        # 3. Plan path
+        # 3. Plan path with State Machine
+        
+        # Determine constraints based on current state (before planning)
+        # In the first step, we are in NORMAL unless initialized otherwise.
+        # But we actually want the *result* of the previous step to drive this one's constraints?
+        # Or do we want to iterate?
+        # Let's try to plan with *current* state.
+        
+        # Get planner config from state machine
+        sm_output = self.state_machine._get_planner_config()
+        
+        target_speed = sm_output.target_speed_override
+        if target_speed is None:
+            target_speed = self.config.ego_target_speed
+            
         planned_path = self.planner.plan(
             self.ego_state,
             static_obstacles,
             dynamic_obstacles,
-            target_speed=self.config.ego_target_speed
+            target_speed=target_speed,
+            constraint_overrides=sm_output.constraint_overrides
         )
         
-        # Fallback planning (Emergency Mode)
-        if planned_path is None:
-            # Relax constraints
-            # We assume "emergency" means we can brake harder or turn sharper
-            relaxed_constraints = {
-                "max_accel": self.config.ego_max_accel * 2.0,  # Double accel limit (braking)
-                "max_curvature": self.config.ego_max_curvature * 1.5  # 1.5x sharp turn
-            }
-            logger.warning("No valid path found with normal constraints. Attempting emergency planning...")
+        # Update State Machine based on result
+        found_path = (planned_path is not None)
+        
+        # We need safety metrics for state machine update, but we only compute them *after* moving?
+        # Actually state machine might need to know if we are *currently* too close.
+        # Let's calculate current safety metrics based on CURRENT position (before move)
+        # This is a bit redundant with result.compute_safety_metrics but safer for decision making
+        current_ped_pos = ped_state.positions if ped_state else np.empty((0, 2))
+        current_ego_pos = np.array([self.ego_state.x, self.ego_state.y])
+        dists = np.linalg.norm(current_ped_pos - current_ego_pos, axis=1) if len(current_ped_pos) > 0 else []
+        min_dist = np.min(dists) if len(dists) > 0 else float('inf')
+        
+        current_metrics = {'min_distance': min_dist}
+        
+        # Update SM
+        new_sm_output = self.state_machine.update(found_path, current_metrics)
+        
+        # If state CHANGED to a more critical one (NORMAL -> CAUTION or CAUTION -> EMERGENCY)
+        # AND we didn't find a path, we should RE-PLAN immediately with the new relaxed constraints
+        # to avoid wasting a step doing nothing (or previous emergency stop).
+        
+        if not found_path and new_sm_output.state != sm_output.state:
+            logger.warning(f"Planning failed in {sm_output.state}. Transitioning to {new_sm_output.state} and retrying...")
+            
+            # Update local state variable to reflect new state for logging/recording
+            self.ego_state.state = new_sm_output.state
+            
+            # Re-plan
+            target_speed = new_sm_output.target_speed_override
+            if target_speed is None:
+                target_speed = self.config.ego_target_speed
+                
             planned_path = self.planner.plan(
                 self.ego_state,
                 static_obstacles,
                 dynamic_obstacles,
-                target_speed=0.0,  # Target stop in emergency
-                constraint_overrides=relaxed_constraints
+                target_speed=target_speed,
+                constraint_overrides=new_sm_output.constraint_overrides
             )
             
             if planned_path is not None:
-                logger.warning("Emergency path found! Executing emergency maneuver.")
+                logger.info(f"Re-planning successful in {new_sm_output.state}")
+            else:
+                logger.error(f"Re-planning failed even in {new_sm_output.state}")
 
         # 4. Update ego vehicle state
-        # Store old acceleration for jerk calculation
+        # Storage for old accel
         old_a = self.ego_state.a
         
         if planned_path is not None and len(planned_path) >= 2:
-            # Follow the first step of the planned path
+            # Follow path
             try:
                 self.ego_state = planned_path.get_state_at_index(1)
-                
-                # Calculate jerk: (new_a - old_a) / dt
                 current_jerk = (self.ego_state.a - old_a) / self.config.dt
                 self.ego_state.jerk = current_jerk
-                
                 self.ego_state.timestamp = self.time + self.config.dt
-                logger.debug(f"Ego vehicle moved to ({self.ego_state.x:.2f}, "
-                           f"{self.ego_state.y:.2f})")
-            except IndexError as e:
-                logger.warning(f"Path index error: {e}, using index 0 instead")
-                if len(planned_path) > 0:
-                    self.ego_state = planned_path.get_state_at_index(0)
-                    
-                    # Calculate jerk: (new_a - old_a) / dt
-                    current_jerk = (self.ego_state.a - old_a) / self.config.dt
-                    self.ego_state.jerk = current_jerk
-                    
-                    self.ego_state.timestamp = self.time + self.config.dt
-                else:
-                    logger.warning("No valid path found, emergency stop")
-                    self.ego_state.v = max(0.0, self.ego_state.v - self.config.ego_max_accel * self.config.dt)
-                    new_a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
-                    
-                    # Calculate jerk: (new_a - old_a) / dt
-                    current_jerk = (new_a - old_a) / self.config.dt
-                    
-                    self.ego_state.a = new_a
-                    self.ego_state.jerk = current_jerk
-                    self.ego_state.timestamp = self.time + self.config.dt
+                self.ego_state.state = self.state_machine.current_state # Update state in object
+            except IndexError:
+                # Fallback to stop
+                self._apply_emergency_stop(old_a)
         else:
-            # No valid path, maintain current state (emergency stop)
-            logger.warning("No valid path found, emergency stop")
-            self.ego_state.v = max(0.0, self.ego_state.v - self.config.ego_max_accel * self.config.dt)
-            new_a = -self.config.ego_max_accel if self.ego_state.v > 0 else 0.0
-            
-            # Calculate jerk: (new_a - old_a) / dt
-            current_jerk = (new_a - old_a) / self.config.dt
-            
-            self.ego_state.a = new_a
-            self.ego_state.jerk = current_jerk
-            self.ego_state.timestamp = self.time + self.config.dt
+            # No path found (even after retry) -> Apply Emergency Stop Logic locally
+            # determining how 'hard' to stop based on state
+            logger.warning("No valid path found. Applying stop.")
+            self._apply_emergency_stop(old_a)
+            self.ego_state.state = self.state_machine.current_state
         
         # 5. Create result
         result = SimulationResult(
@@ -445,7 +462,8 @@ class IntegratedSimulator:
             planned_path=planned_path,
             ego_radius=self.ego_radius,
             ped_radius=self.ped_radius,
-            safety_buffer=self.safety_buffer
+            safety_buffer=self.safety_buffer,
+            # state=self.ego_state.state # Implicitly in ego_state
         )
         
         # Compute metrics
@@ -459,6 +477,20 @@ class IntegratedSimulator:
         self.step_count += 1
         
         return result
+
+    def _apply_emergency_stop(self, old_a: float):
+        """Apply emergency stop dynamics."""
+        # Use emergency deceleration
+        max_dec = self.config.ego_max_accel * 2.0 # Hard braking
+        
+        self.ego_state.v = max(0.0, self.ego_state.v - max_dec * self.config.dt)
+        new_a = -max_dec if self.ego_state.v > 0 else 0.0
+        
+        current_jerk = (new_a - old_a) / self.config.dt
+        
+        self.ego_state.a = new_a
+        self.ego_state.jerk = current_jerk
+        self.ego_state.timestamp = self.time + self.config.dt
 
     @staticmethod
     def _expand_static_obstacles(static_obstacles, step: float = 0.5) -> np.ndarray:
@@ -579,6 +611,8 @@ class IntegratedSimulator:
             for r in self.history
         ]
         
+        ego_state_enum = [r.ego_state.state.name for r in self.history]
+        
         np.savez(
             trajectory_file,
             times=np.array(times),
@@ -586,6 +620,7 @@ class IntegratedSimulator:
             ego_y=np.array(ego_y),
             ego_v=np.array(ego_v),
             ego_jerk=np.array(ego_jerk),
+            ego_state=np.array(ego_state_enum), # Store state string
             min_distances=np.array(min_distances),
             ttc=np.array(ttc_list),
             ped_positions=np.array(ped_positions, dtype=object),

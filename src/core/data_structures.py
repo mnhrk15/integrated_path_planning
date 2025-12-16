@@ -8,6 +8,24 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple
 import numpy as np
 
+# Import VehicleState but avoid circular dependency if possible is tricky.
+# Instead, we just import it. If circular dependency happens, we might need to move enum here.
+# For now, let's redefine the Enum here or import it if appropriate.
+# Given it's core, let's look at where state_machine is. src/core/state_machine.py
+# data_structures.py is imported BY state_machine.py usually (or used by it).
+# So state_machine importing data_structures is fine.
+# But data_structures importing state_machine is bad.
+# Solution: Move VehicleState Enum to data_structures or a new enums file.
+# Let's move VehicleState to here.
+
+from enum import Enum, auto
+
+class VehicleState(Enum):
+    """Vehicle operational states."""
+    NORMAL = auto()
+    CAUTION = auto()
+    EMERGENCY = auto()
+
 
 @dataclass
 class EgoVehicleState:
@@ -28,6 +46,7 @@ class EgoVehicleState:
     a: float
     jerk: float = 0.0
     timestamp: float = 0.0
+    state: VehicleState = VehicleState.NORMAL
     
     def to_array(self) -> np.ndarray:
         """Convert to numpy array [x, y, yaw, v, a, jerk]."""
@@ -246,6 +265,7 @@ class SimulationResult:
     ego_radius: float = 1.0
     ped_radius: float = 0.3
     safety_buffer: float = 0.0
+    state: VehicleState = VehicleState.NORMAL
     
     def compute_safety_metrics(self) -> dict:
         """Compute safety-related metrics.
