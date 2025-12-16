@@ -41,6 +41,17 @@ ped_groups: [[0], [1]]
 # === Static Obstacles ===
 static_obstacles: []
 
+# === Map Visualization ===
+map_config:
+  road_borders:
+    - [-10.0, 4.0, 70.0, 4.0]
+    - [-10.0, -4.0, 70.0, -4.0]
+  lanes:
+    - [-10.0, 0.0, 70.0, 0.0]
+  crosswalks:
+    - [18.0, -5.0, 4.0, 10.0]
+    - [28.0, -5.0, 4.0, 10.0]
+
 # === Model ===
 sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint (required)
 

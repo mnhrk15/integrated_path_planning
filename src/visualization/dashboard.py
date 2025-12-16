@@ -3,8 +3,9 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import numpy as np
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Dict
 from loguru import logger
+from matplotlib.patches import Rectangle
 
 from ..core.data_structures import SimulationResult
 
@@ -16,7 +17,7 @@ class DashboardGenerator:
         if not history:
             raise ValueError("History is empty")
 
-    def generate(self, output_path: str, summary_metrics: dict = None):
+    def generate(self, output_path: str, summary_metrics: dict = None, map_config: Optional[Dict] = None):
         """Create and save the dashboard image.
         
         Args:
@@ -41,7 +42,7 @@ class DashboardGenerator:
         
         # 1. Trajectory Map (Top-Left, spans 2 cols)
         ax_map = fig.add_subplot(gs[0:2, 0:2])
-        self._plot_map(ax_map)
+        self._plot_map(ax_map, map_config)
         
         # 2. Dynamics (Top-Right)
         ax_dyn = fig.add_subplot(gs[0, 2])
@@ -119,26 +120,50 @@ class DashboardGenerator:
         table.scale(1, 1.5)
         ax.set_title("Performance Summary")
 
-    def _plot_map(self, ax):
+    def _plot_map(self, ax, map_config: Optional[Dict] = None):
+        if map_config:
+            # Draw road borders (Solid black lines)
+            for border in map_config.get('road_borders', []):
+                if len(border) == 4:
+                    x1, y1, x2, y2 = border
+                    ax.plot([x1, x2], [y1, y2], 'k-', linewidth=2.0, alpha=0.8, zorder=1)
+                    
+            # Draw lanes (Dashed lighter lines)
+            for lane in map_config.get('lanes', []):
+                if len(lane) == 4:
+                    x1, y1, x2, y2 = lane
+                    ax.plot([x1, x2], [y1, y2], 'k--', linewidth=1.0, alpha=0.4, zorder=1)
+                    
+            # Draw crosswalks (Rectangles)
+            for cw in map_config.get('crosswalks', []):
+                if len(cw) >= 4:
+                    x, y, w, h = cw[:4]
+                    angle = cw[4] if len(cw) > 4 else 0.0
+                    rect = Rectangle(
+                        (x, y), w, h, angle=angle,
+                        facecolor='white', edgecolor='gray',
+                        hatch='///', alpha=0.3, zorder=0
+                    )
+                    ax.add_patch(rect)
+
         # Plot Trajectories
         ego_x = [r.ego_state.x for r in self.history]
         ego_y = [r.ego_state.y for r in self.history]
-        ax.plot(ego_x, ego_y, 'b-', linewidth=2, label='Ego')
-        ax.plot(ego_x[0], ego_y[0], 'go', label='Start')
-        ax.plot(ego_x[-1], ego_y[-1], 'ro', label='End')
+        ax.plot(ego_x, ego_y, 'b-', linewidth=2, label='Ego', zorder=2)
+        ax.plot(ego_x[0], ego_y[0], 'go', label='Start', zorder=2)
+        ax.plot(ego_x[-1], ego_y[-1], 'ro', label='End', zorder=2)
         
         # Plot Pedestrians (Sampled)
-        ped_x, ped_y = [], []
         for r in self.history[::5]: # Sample every 5 steps
             if r.ped_state and r.ped_state.n_peds > 0:
-                ax.plot(r.ped_state.positions[:, 0], r.ped_state.positions[:, 1], 'r.', markersize=2, alpha=0.2)
+                ax.plot(r.ped_state.positions[:, 0], r.ped_state.positions[:, 1], 'r.', markersize=2, alpha=0.2, zorder=2)
 
         ax.set_title("Trajectory Map")
         ax.set_aspect('equal')
         ax.grid(True)
         ax.legend()
 
-def create_dashboard(history: List[SimulationResult], output_path: str, metrics: dict = None):
+def create_dashboard(history: List[SimulationResult], output_path: str, metrics: dict = None, map_config: Optional[Dict] = None):
     """Convenience function."""
     gen = DashboardGenerator(history)
-    gen.generate(output_path, metrics)
+    gen.generate(output_path, metrics, map_config)

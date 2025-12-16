@@ -17,7 +17,7 @@ import matplotlib.animation as animation
 from matplotlib.patches import Circle, Rectangle, FancyArrow, Polygon
 from matplotlib.collections import PatchCollection
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from loguru import logger
 
 from ..core.data_structures import SimulationResult
@@ -44,6 +44,7 @@ class SimulationAnimator:
     def __init__(
         self,
         results: List[SimulationResult],
+        map_config: Optional[Dict] = None,
         figsize: Tuple[float, float] = (14, 8),
         dpi: int = 100,
         interval: int = 100  # ms between frames
@@ -51,6 +52,7 @@ class SimulationAnimator:
         if len(results) == 0:
             raise ValueError("SimulationAnimator requires at least one result")
         self.results = results
+        self.map_config = map_config or {}
         self.figsize = figsize
         self.dpi = dpi
         self.interval = interval
@@ -167,6 +169,40 @@ class SimulationAnimator:
             y_min, y_max = min(all_y) - margin, max(all_y) + margin
             self.ax_main.set_xlim(x_min, x_max)
             self.ax_main.set_ylim(y_min, y_max)
+            
+        # Draw Map
+        self._draw_map()
+        
+    def _draw_map(self):
+        """Draw map elements (road borders, lanes, crosswalks)."""
+        if not self.map_config:
+            return
+            
+        # Draw road borders (Solid black lines)
+        for border in self.map_config.get('road_borders', []):
+            if len(border) == 4:
+                x1, y1, x2, y2 = border
+                self.ax_main.plot([x1, x2], [y1, y2], 'k-', linewidth=2.0, alpha=0.8, zorder=1)
+                
+        # Draw lanes (Dashed lighter lines)
+        for lane in self.map_config.get('lanes', []):
+            if len(lane) == 4:
+                x1, y1, x2, y2 = lane
+                self.ax_main.plot([x1, x2], [y1, y2], 'k--', linewidth=1.0, alpha=0.4, zorder=1)
+                
+        # Draw crosswalks (Rectangles)
+        for cw in self.map_config.get('crosswalks', []):
+            if len(cw) >= 4:
+                # x, y, w, h, angle (optional)
+                x, y, w, h = cw[:4]
+                angle = cw[4] if len(cw) > 4 else 0.0
+                
+                rect = Rectangle(
+                    (x, y), w, h, angle=angle,
+                    facecolor='white', edgecolor='gray',
+                    hatch='///', alpha=0.3, zorder=0
+                )
+                self.ax_main.add_patch(rect)
     
     def _setup_metric_plots(self):
         """Setup metric subplots."""
@@ -195,14 +231,15 @@ class SimulationAnimator:
             0, 0, 1, 0,
             width=1.5, head_width=2.5, head_length=2.0,
             fc=ego_color, ec='black', alpha=0.8,
-            transform=self.ax_main.transData
+            transform=self.ax_main.transData,
+            zorder=10
         )
         self.ax_main.add_patch(artists['ego'])
         
         # Ego trail
         artists['ego_trail'], = self.ax_main.plot(
             [], [], '-', color=ego_color, alpha=0.3, linewidth=1,
-            label='Ego trajectory'
+            label='Ego trajectory', zorder=5
         )
         
         # Pedestrians (circles)
@@ -217,7 +254,7 @@ class SimulationAnimator:
         if show_planned_path:
             artists['planned_path'], = self.ax_main.plot(
                 [], [], '--', color=plan_color, alpha=0.8, linewidth=1.5,
-                label='Planned path'
+                label='Planned path', zorder=4
             )
         
         # Metric lines
@@ -436,6 +473,7 @@ class SimulationAnimator:
 
 def create_simple_animation(
     results: List[SimulationResult],
+    map_config: Optional[Dict] = None,
     output_path: Optional[Path] = None,
     show: bool = True,
     show_predictions: bool = True,
@@ -456,7 +494,7 @@ def create_simple_animation(
     Returns:
         SimulationAnimator instance
     """
-    animator = SimulationAnimator(results)
+    animator = SimulationAnimator(results, map_config=map_config)
     
     # Determine writer from file extension
     writer = 'pillow'  # Default to GIF

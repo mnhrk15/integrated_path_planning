@@ -46,6 +46,9 @@ class SimulationConfig:
         # Visualization
         visualization_enabled: Enable visualization
         output_path: Output directory for results
+        
+        # Map Visualization
+        map_config: Dictionary defining road map elements
     """
     # Time parameters
     dt: float = 0.1
@@ -99,6 +102,9 @@ class SimulationConfig:
     # Visualization
     visualization_enabled: bool = True
     output_path: str = 'output'
+    
+    # Map Visualization
+    map_config: Dict[str, Any] = field(default_factory=dict)
 
 
 def load_config(config_path: str) -> SimulationConfig:
@@ -155,6 +161,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'device': config.device,
         'visualization_enabled': config.visualization_enabled,
         'output_path': config.output_path,
+        'map_config': config.map_config,
     }
     
     with open(config_path, 'w') as f:

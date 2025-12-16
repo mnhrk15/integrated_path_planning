@@ -42,8 +42,17 @@ ped_groups:
 # === Static Obstacles ===
 # Narrowing in middle of the corridor (y-limits slightly inside walls)
 static_obstacles:
-  - [28.0, 34.0, 1.5, 1.5]   # Upper block segment
   - [28.0, 34.0, -1.5, -1.5] # Lower block segment
+  - [28.0, 34.0, 1.5, 1.5]   # Upper block segment
+
+# === Map Visualization ===
+map_config:
+  road_borders:
+    - [-10.0, 4.0, 70.0, 4.0]
+    - [-10.0, -4.0, 70.0, -4.0]
+  lanes:
+    - [-10.0, 0.0, 70.0, 0.0]
+  crosswalks: []
 
 # === Model ===
 sgan_model_path: models/sgan-models/eth_8_model.pt  # Set to a downloaded SGAN checkpoint before running

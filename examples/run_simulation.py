@@ -127,7 +127,8 @@ def main():
                 show=False,  # Don't show, just save
                 show_predictions=True,
                 show_metrics=True,
-                fps=args.fps
+                fps=args.fps,
+                map_config=getattr(config, 'map_config', None)
             )
             logger.success(f"✓ Animation saved to {animation_path}")
         except Exception as e:

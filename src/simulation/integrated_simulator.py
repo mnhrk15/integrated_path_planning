@@ -81,13 +81,21 @@ class PedestrianSimulator:
             for obs in obstacles:
                 if len(obs) == 4:  # [x_min, x_max, y_min, y_max]
                     x_min, x_max, y_min, y_max = obs
-                    # Box as 4 lines
-                    psf_obstacles.extend([
-                        [(x_min, y_min), (x_max, y_min)],
-                        [(x_max, y_min), (x_max, y_max)],
-                        [(x_max, y_max), (x_min, y_max)],
-                        [(x_min, y_max), (x_min, y_min)]
-                    ])
+                    # Box as 4 lines, filtering out zero-length segments
+                    # PySocialForce expects (x1, y1, x2, y2)
+                    segments = [
+                        (x_min, y_min, x_max, y_min), # Bottom edge
+                        (x_max, y_min, x_max, y_max), # Right edge
+                        (x_max, y_max, x_min, y_max), # Top edge
+                        (x_min, y_max, x_min, y_min)  # Left edge
+                    ]
+                    for s in segments:
+                        # Check if length > epsilon (s is x1, y1, x2, y2)
+                        # Calculates Euclidean distance squared to be safe, or just check component diffs
+                        dx = s[2] - s[0]
+                        dy = s[3] - s[1]
+                        if (dx*dx + dy*dy) > 1e-12:
+                            psf_obstacles.append(s)
         
         self.sim = psf.Simulator(
             state=state,
@@ -540,7 +548,12 @@ class IntegratedSimulator:
             try:
                 from ..visualization.dashboard import create_dashboard
                 dashboard_path = output_dir / "dashboard.png"
-                create_dashboard(self.history, str(dashboard_path), metrics=metrics)
+                create_dashboard(
+                    self.history, 
+                    str(dashboard_path), 
+                    metrics=metrics,
+                    map_config=getattr(self.config, 'map_config', None)
+                )
             except Exception as e:
                 logger.error(f"Failed to generate dashboard: {e}")
         else:

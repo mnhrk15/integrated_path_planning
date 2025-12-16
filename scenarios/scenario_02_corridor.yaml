@@ -43,8 +43,17 @@ ped_groups: [[0, 1], [2]]
 # === Static Obstacles ===
 # Corridor walls
 static_obstacles:
-  - [-5.0, 55.0, 3.0, 3.0]   # Top wall
   - [-5.0, 55.0, -3.0, -3.0] # Bottom wall
+  - [-5.0, 55.0, 3.0, 3.0]   # Top wall
+
+# === Map Visualization ===
+map_config:
+  road_borders:
+    - [-5.0, 3.0, 55.0, 3.0]
+    - [-5.0, -3.0, 55.0, -3.0]
+  lanes:
+    - [-5.0, 0.0, 55.0, 0.0]
+  crosswalks: []
 
 # === Model ===
 sgan_model_path: models/sgan-models/eth_8_model.pt

@@ -1,0 +1,104 @@
+# Scenario 10: Busy Intersection (4-Way)
+#
+# Situation: Ego vehicle approaches a 4-way intersection intending to go straight/right.
+# Pedestrians crossing from all sides.
+# Visuals: Intersection corners, crosswalks.
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 25.0
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [-20.0, -2.0, 0.0, 5.0, 0.0]
+ego_target_speed: 6.0
+ego_max_speed: 8.0
+ego_max_accel: 2.0
+ego_max_curvature: 1.0
+ego_radius: 1.0
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.3
+obstacle_radius: 0.3
+safety_buffer: 0.2
+
+# === Reference Path (Straight through intersection) ===
+reference_waypoints_x: [-20.0, -10.0, 0.0, 10.0, 20.0, 30.0, 40.0]
+reference_waypoints_y: [-2.0, -2.0, -2.0, -2.0, -2.0, -2.0, -2.0]
+
+# === Pedestrians ===
+ped_initial_states:
+  # Crossing from top-left to bottom-left
+  - [-8.0, 15.0, 0.0, -1.2, -8.0, -15.0]
+  
+  # Crossing from bottom-right to top-right
+  - [8.0, -15.0, 0.0, 1.3, 8.0, 15.0]
+  
+  # Crossing parallel (top to bottom on right side)
+  - [15.0, 10.0, -0.2, -1.0, 15.0, -10.0]
+  
+  # Crossing diag/random (Intersection chaos)
+  - [10.0, 10.0, -0.8, -0.8, -10.0, -10.0]
+  - [-10.0, 10.0, 0.8, -0.8, 10.0, -10.0]
+
+ped_groups: []
+
+# === Static Obstacles (Corners of buildings/sidewalks) ===
+# Intersection center at (0,0), road width ~10m (-5 to 5)
+static_obstacles:
+  # Top Left Corner
+  - [-50.0, -5.0, 5.0, 50.0]
+  # Top Right Corner
+  - [5.0, 50.0, 5.0, 50.0]
+  # Bottom Left Corner
+  - [-50.0, -5.0, -50.0, -5.0]
+  # Bottom Right Corner
+  - [5.0, 50.0, -50.0, -5.0]
+
+# === Map Visualization (Visual Elements) ===
+map_config:
+  road_borders:
+    # Horizontal Road Borders (Top)
+    - [-50.0, 5.0, -5.0, 5.0]
+    - [5.0, 5.0, 50.0, 5.0]
+    # Horizontal Road Borders (Bottom)
+    - [-50.0, -5.0, -5.0, -5.0]
+    - [5.0, -5.0, 50.0, -5.0]
+    # Vertical Road Borders (Left)
+    - [-5.0, 5.0, -5.0, 50.0]
+    - [-5.0, -50.0, -5.0, -5.0]
+    # Vertical Road Borders (Right)
+    - [5.0, 5.0, 5.0, 50.0]
+    - [5.0, -50.0, 5.0, -5.0]
+    
+  lanes:
+    # Horizontal Center Line
+    - [-50.0, 0.0, -5.0, 0.0]
+    - [5.0, 0.0, 50.0, 0.0]
+    # Vertical Center Line
+    - [0.0, 50.0, 0.0, 5.0]
+    - [0.0, -5.0, 0.0, -50.0]
+
+  crosswalks:
+    # Left
+    - [-7.0, -5.0, 2.0, 10.0]
+    # Right
+    - [5.0, -5.0, 2.0, 10.0]
+    # Top
+    - [-5.0, 5.0, 10.0, 2.0]
+    # Bottom
+    - [-5.0, -7.0, 10.0, 2.0]
+
+# === Model ===
+sgan_model_path: models/sgan-models/univ_12_model.pt
+prediction_method: sgan
+
+# === Computation ===
+device: "cpu"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_10_busy_intersection"

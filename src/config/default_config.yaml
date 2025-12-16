@@ -58,3 +58,9 @@ device: "cpu"  # "cpu", "cuda", or "mps"
 # === Visualization ===
 visualization_enabled: true
 output_path: "output"
+
+# === Map Visualization ===
+map_config:
+  road_borders: []
+  lanes: []
+  crosswalks: []
