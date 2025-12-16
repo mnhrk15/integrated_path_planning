@@ -131,14 +131,9 @@ def main():
     
     # Check scenarios
     print_section("Scenarios")
-    scenario_files = [
-        'scenarios/scenario_01_crossing.yaml',
-        'scenarios/scenario_02_corridor.yaml',
-    ]
-    
-    for filepath in scenario_files:
-        status = check_file(filepath)
-        print_status(filepath, status, False)
+    scenario_file = "scenarios/scenario_01.yaml"
+    status = check_file(scenario_file)
+    print_status(scenario_file, status, False)
     
     # Check model directory
     print_section("Model Directory")

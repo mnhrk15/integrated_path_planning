@@ -84,39 +84,39 @@ bash scripts/download_sgan_models.sh
 ### シナリオ1: 歩行者との交差
 
 ```bash
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml
 ```
 
 ### シナリオ2: 狭い通路
 
 ```bash
-python examples/run_simulation.py --scenario scenarios/scenario_02_corridor.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_02.yaml
 ```
 
 ### 追加シナリオ
 
 ```bash
 # 曲線路合流＋歩行者すれ違い
-python examples/run_simulation.py --scenario scenarios/scenario_03_curved_merge.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_03.yaml
 
 # 多波交差の混雑
-python examples/run_simulation.py --scenario scenarios/scenario_04_multi_crossing.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_04.yaml
 
 # 静的障害で狭窄した通路
-python examples/run_simulation.py --scenario scenarios/scenario_05_blocked_corridor.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_05.yaml
 ```
 
 ### カスタムオプション
 
 ```bash
 # ステップ数を指定
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --steps 100
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --steps 100
 
 # 出力ディレクトリを指定
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --output my_results
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --output my_results
 
 # ログレベルを変更
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --log-level DEBUG
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --log-level DEBUG
 
 # プランナ重み・安全パラメータを上書き（例: YAMLを複製して編集）
 # k_j, k_t, k_d, k_s_dot, k_lat, k_lon, ego_radius, ped_radius, obstacle_radius, safety_buffer
@@ -128,7 +128,7 @@ python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
 
 ```bash
 python examples/run_simulation.py \
-    --scenario scenarios/scenario_01_crossing.yaml \
+    --scenario scenarios/scenario_01.yaml \
     --animate \
     --animation-format gif \
     --fps 10
@@ -138,7 +138,7 @@ python examples/run_simulation.py \
 
 ```bash
 python examples/run_simulation.py \
-    --scenario scenarios/scenario_02_corridor.yaml \
+    --scenario scenarios/scenario_02.yaml \
     --animate \
     --animation-format mp4 \
     --fps 20
@@ -237,7 +237,7 @@ static_obstacles: []
 sgan_model_path: "models/sgan-models/eth_8_model.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
 visualization_enabled: true
-output_path: "output/my_scenario"
+output_path: "output/scenario_99"
 ```
 
 実行：
@@ -255,7 +255,7 @@ from src.config import load_config
 from src.simulation.integrated_simulator import IntegratedSimulator
 
 # Load configuration
-config = load_config('scenarios/scenario_01_crossing.yaml')
+config = load_config('scenarios/scenario_01.yaml')
 
 # Create simulator
 simulator = IntegratedSimulator(config)
@@ -283,7 +283,7 @@ from src.simulation.integrated_simulator import IntegratedSimulator
 from src.visualization import create_simple_animation
 
 # Run simulation
-config = load_config('scenarios/scenario_01_crossing.yaml')
+config = load_config('scenarios/scenario_01.yaml')
 simulator = IntegratedSimulator(config)
 results = simulator.run(n_steps=150)
 

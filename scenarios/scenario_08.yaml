@@ -63,4 +63,4 @@ device: "mps"
 
 # === Visualization ===
 visualization_enabled: true
-output_path: "output/scenario_08_multi_obstacles"
+output_path: "output/scenario_08"

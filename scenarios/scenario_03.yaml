@@ -73,4 +73,4 @@ device: "cpu"
 
 # === Visualization ===
 visualization_enabled: true
-output_path: "output/scenario_03_curved_merge"
+output_path: "output/scenario_03"

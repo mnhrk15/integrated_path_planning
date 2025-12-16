@@ -60,4 +60,4 @@ device: "mps"
 
 # === Visualization ===
 visualization_enabled: true
-output_path: "output/scenario_07_highspeed_sparse"
+output_path: "output/scenario_07"

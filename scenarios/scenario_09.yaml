@@ -71,4 +71,4 @@ device: "cpu"
 
 # === Visualization ===
 visualization_enabled: true
-output_path: "output/scenario_09_crowded_corridor"
+output_path: "output/scenario_09"

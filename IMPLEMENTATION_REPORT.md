@@ -83,11 +83,23 @@
   - 予測精度(ADE/FDE)と計画安全性(Min Dist/TTC)の同時評価
   - Markdown/Tableレポート生成
 
+### ✅ Phase 6: バグ修正と最適化 (v1.5 - 完了)
+
+- [x] `PySocialForce` 統合の修正
+  - 障害物座標順序の修正 (`x1, y1, x2, y2`)
+  - 長さゼロの障害物セグメントのフィルタリング (`ValueError` 回避)
+- [x] シナリオファイル構成の整理
+  - ファイル名の標準化 (`scenario_0N.yaml`)
+  - マップ可視化設定 (`map_config`) の追加
+- [x] ログ出力の適正化
+  - 外部ライブラリのデバッグログ抑制
+
+
 ### ✅ 追加機能
 
 - [x] シナリオ設定ファイル（YAML）
-  - `scenario_01_crossing.yaml`: 交差シナリオ
-  - `scenario_02_corridor.yaml`: 狭い通路シナリオ
+  - `scenario_01.yaml`: 交差シナリオ
+  - `scenario_02.yaml`: 狭い通路シナリオ
 
 - [x] サンプルスクリプト
   - `examples/run_simulation.py`: 実行スクリプト
@@ -129,11 +141,13 @@ integrated_path_planning/
 │   │   └── integrated_simulator.py
 │   └── visualization/       ✓ 可視化
 │       ├── __init__.py
-│       ├── animator.py      ✓ アニメーション
-│       └── dashboard.py     ✓ ダッシュボード
+│       ├── animator.py      ✓ アニメーション (Map描画対応)
+│       └── dashboard.py     ✓ ダッシュボード (Map描画対応)
 ├── scenarios/               ✓ シミュレーションシナリオ
-│   ├── scenario_01_crossing.yaml
-│   └── scenario_02_corridor.yaml
+│   ├── scenario_01.yaml     ✓ 交差
+│   ├── scenario_02.yaml     ✓ 通路
+│   ├── ...                  ✓ (全10シナリオ)
+│   └── scenario_10.yaml     ✓ 交差点
 ├── models/                  ⚠ 学習済みモデル配置用（空）
 ├── tests/                   ✓ ユニットテスト
 │   └── test_coordinate_converter.py
@@ -172,7 +186,7 @@ pip install -e .
 ```bash
 # シナリオ1を実行
 python examples/run_simulation.py \
-    --scenario scenarios/scenario_01_crossing.yaml \
+    --scenario scenarios/scenario_01.yaml \
     --log-level INFO
 
 # 結果は output/scenario_01/ に保存されます
@@ -349,7 +363,7 @@ from mpl_toolkits.mplot3d import Axes3D
 # tests/test_integration.py
 def test_full_simulation():
     """完全なシミュレーションのエンドツーエンドテスト"""
-    config = load_config('scenarios/scenario_01_crossing.yaml')
+    config = load_config('scenarios/scenario_01.yaml')
     simulator = IntegratedSimulator(config)
     results = simulator.run(n_steps=10)
     assert len(results) == 10

@@ -7,7 +7,7 @@ from src.simulation.integrated_simulator import IntegratedSimulator
 
 def test_long_run_no_nan_or_inf(tmp_path):
     # Use scenario_01 with shorter dt/steps to limit runtime
-    config = load_config('scenarios/scenario_01_crossing.yaml')
+    config = load_config('scenarios/scenario_01.yaml')
     config.total_time = 15.0  # reduce time for test speed
     config.output_path = tmp_path / "out"
 

@@ -108,7 +108,7 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
 
 def main():
     parser = argparse.ArgumentParser(description='Run prediction benchmark')
-    parser.add_argument('--scenario', type=str, default='scenarios/scenario_01_crossing.yaml',
+    parser.add_argument('--scenario', type=str, default='scenarios/scenario_01.yaml',
                       help='Path to scenario config')
     parser.add_argument('--steps', type=int, default=None,
                       help='Number of steps')

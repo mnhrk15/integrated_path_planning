@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from loguru import logger
+import logging
 from src.config import load_config
 from src.simulation.integrated_simulator import IntegratedSimulator
 from src.visualization import create_simple_animation
@@ -25,7 +26,7 @@ def main():
     parser.add_argument(
         '--scenario',
         type=str,
-        default='scenarios/scenario_01_crossing.yaml',
+        default='scenarios/scenario_01.yaml',
         help='Path to scenario configuration file'
     )
     parser.add_argument(
@@ -82,6 +83,11 @@ def main():
         format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <level>{message}</level>",
         level=args.log_level
     )
+    
+    # Suppress noisy third-party libraries
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+    logging.getLogger('numba').setLevel(logging.WARNING)
+    logging.getLogger('PIL').setLevel(logging.WARNING)
     
     # Load configuration
     logger.info(f"Loading scenario from {args.scenario}")

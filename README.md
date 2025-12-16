@@ -36,6 +36,7 @@
 ### 評価と可視化 (v1.3 Update)
 - **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
 - **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
+- **Map Visualization**: 道路境界線、レーン、横断歩道などの地図情報をアニメーションとダッシュボードに描画し、状況把握を容易にしました。
 - **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
 
 ### 比較研究機能 (v1.4 Update - Prediction Modes)
@@ -101,7 +102,7 @@ from src.simulation.integrated_simulator import IntegratedSimulator
 from src.config import load_config
 
 # 設定ファイルの読み込み
-config = load_config('scenarios/scenario_01_crossing.yaml')
+config = load_config('scenarios/scenario_01.yaml')
 
 # シミュレータの初期化
 simulator = IntegratedSimulator(config)
@@ -117,33 +118,33 @@ simulator.save_results()
 
 #### 基本実行
 ```bash
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml
 ```
 
 #### 予測モードの切り替え (v1.4 Update)
 ```bash
 # 等速直線運動 (ベースライン)
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method cv
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method cv
 
 # 単純LSTM (相互作用なし)
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method lstm
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method lstm
 
 # Social-GAN (デフォルト)
-python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method sgan
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method sgan
 ```
 
 #### アニメーション生成（NEW! 🆕）
 ```bash
 # GIFアニメーション生成
 python examples/run_simulation.py \
-    --scenario scenarios/scenario_01_crossing.yaml \
+    --scenario scenarios/scenario_01.yaml \
     --animate \
     --animation-format gif \
     --fps 10
 
 # MP4アニメーション生成（高品質）
 python examples/run_simulation.py \
-    --scenario scenarios/scenario_02_corridor.yaml \
+    --scenario scenarios/scenario_02.yaml \
     --animate \
     --animation-format mp4 \
     --fps 20
@@ -163,7 +164,7 @@ from src.visualization import create_simple_animation
 from src.config import load_config
 
 # シミュレーション実行
-config = load_config('scenarios/scenario_01_crossing.yaml')
+config = load_config('scenarios/scenario_01.yaml')
 simulator = IntegratedSimulator(config)
 results = simulator.run(n_steps=150)
 
@@ -183,7 +184,7 @@ create_simple_animation(
 3つの予測モード（CV, LSTM, SGAN）を同一シナリオで実行し、安全性指標（最小距離、衝突回数、TTC）と効率性指標を比較します。
 
 ```bash
-python examples/benchmark_prediction.py --scenario scenarios/scenario_01_crossing.yaml
+python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
 ```
 
 レポートは `output/benchmark/benchmark_report.md` に保存されます。
@@ -219,11 +220,16 @@ integrated_path_planning/
 
 複数のシナリオが用意されています：
 
-1. **scenario_01_crossing.yaml**: 歩行者との交差シナリオ
-2. **scenario_02_corridor.yaml**: 狭い通路でのすれ違いシナリオ
-3. **scenario_03_curved_merge.yaml**: 曲線路合流＋歩行者すれ違い
-4. **scenario_04_multi_crossing.yaml**: 多波交差の混雑シナリオ
-5. **scenario_05_blocked_corridor.yaml**: 静的障害で狭窄した通路を通過
+1. **scenario_01.yaml**: 歩行者との交差シナリオ
+2. **scenario_02.yaml**: 狭い通路でのすれ違いシナリオ
+3. **scenario_03.yaml**: 曲線路合流＋歩行者すれ違い
+4. **scenario_04.yaml**: 多波交差の混雑シナリオ
+5. **scenario_05.yaml**: 静的障害で狭窄した通路を通過
+6. **scenario_06.yaml**: 斜め横断歩行者
+7. **scenario_07.yaml**: 高速車両とまばらな歩行者
+8. **scenario_08.yaml**: 複数の静的障害物と双方向流
+9. **scenario_09.yaml**: 混雑した狭い通路
+10. **scenario_10.yaml**: 交通量の多い交差点
 
 ## 主な設定項目（YAML）
 

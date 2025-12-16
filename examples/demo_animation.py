@@ -27,7 +27,14 @@ def main():
     logger.info("=" * 60)
     
     # Load scenario
-    scenario_path = Path(__file__).parent.parent / 'scenarios' / 'scenario_01_crossing.yaml'
+    # Define scenarios to demonstrate
+    scenarios = [
+        'scenarios/scenario_01.yaml',
+        'scenarios/scenario_03.yaml'
+    ]
+    
+    # Use first scenario for now or iterate
+    scenario_path = Path(__file__).parent.parent / scenarios[0]
     logger.info(f"\nLoading scenario: {scenario_path.name}")
     config = load_config(str(scenario_path))
     
