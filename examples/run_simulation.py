@@ -84,10 +84,13 @@ def main():
         level=args.log_level
     )
     
-    # Suppress noisy third-party libraries
-    logging.getLogger('matplotlib').setLevel(logging.WARNING)
-    logging.getLogger('numba').setLevel(logging.WARNING)
-    logging.getLogger('PIL').setLevel(logging.WARNING)
+    # Aggressively suppress noisy third-party libraries
+    # Set root logger to WARNING to catch any stray standard logging
+    logging.getLogger().setLevel(logging.WARNING)
+    
+    # Explicitly silence specific noisy modules
+    for lib in ['matplotlib', 'numba', 'PIL', 'frenet_planner', 'pysocialforce']:
+        logging.getLogger(lib).setLevel(logging.WARNING)
     
     # Load configuration
     logger.info(f"Loading scenario from {args.scenario}")
