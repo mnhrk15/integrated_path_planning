@@ -60,7 +60,7 @@ class SimulationConfig:
     
     # Observation parameters
     obs_len: int = 8
-    pred_len: int = 12
+    pred_len: int = 8
     num_samples: int = 1
     
     # Ego vehicle
@@ -72,9 +72,8 @@ class SimulationConfig:
     ego_radius: float = 1.0
     
     # Obstacle / pedestrian safety parameters
-    ped_radius: float = 0.3
-    obstacle_radius: float = 0.3
-    safety_buffer: float = 0.2
+    ped_radius: float = 0.2
+    obstacle_radius: float = 0.2
 
     # Planner cost weights (optional override)
     k_j: float = 1.0

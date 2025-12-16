@@ -203,7 +203,7 @@ python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
+sgan_model_path: "models/sgan-p-models/zara1_8_model.pt"
 ```
 
 ## プロジェクト構成
@@ -244,7 +244,7 @@ integrated_path_planning/
 - 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`, `num_samples` (SGAN予測サンプル数, 推奨: 20)
 - Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature`
 - 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.5), `max_road_width` (最大横探索幅)
-- 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`, `safety_buffer`
+- 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`
 - プランナ重み（任意上書き）: `k_j`, `k_t`, `k_d`, `k_s_dot`, `k_lat`, `k_lon`
 - 経路: `reference_waypoints_x`, `reference_waypoints_y`
 - 歩行者: `ped_initial_states`, `ped_groups`
@@ -264,7 +264,7 @@ integrated_path_planning/
     - Plan: `planned_path` 詳細
  
  2. **`metrics_summary.csv`**: メトリクス集計（CSV形式）
-    - **追記モード**: 実行ごとに新しい行が追加されます（履歴保持）
+    - **上書きモード**: 実行ごとにファイルが上書きされます（最新の結果のみ保持）
     - 内容: シナリオ設定（モデル、メソッド）、ADE/FDE、安全性指標（最小距離、衝突有無）、効率性指標
  
  3. **`metrics_report.txt`**: レポート（テキスト形式）

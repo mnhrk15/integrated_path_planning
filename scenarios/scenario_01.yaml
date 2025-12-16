@@ -17,7 +17,7 @@ social_force_params:
 
 # === Observation Parameters ===
 obs_len: 8
-pred_len: 12
+pred_len: 8
 num_samples: 20
 
 # === Ego Vehicle Parameters ===
@@ -33,9 +33,8 @@ d_road_w: 0.5
 max_road_width: 7.0
 
 # === Obstacle / Pedestrian Parameters ===
-ped_radius: 0.3
-obstacle_radius: 0.3
-safety_buffer: 0.2
+ped_radius: 0.2
+obstacle_radius: 0.2
 
 # === Reference Path ===
 # Straight road
@@ -93,7 +92,7 @@ map_config:
     - [28.0, -5.0, 4.0, 10.0]
 
 # === Model ===
-sgan_model_path: models/sgan-p-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint (required)
+sgan_model_path: models/sgan-p-models/zara1_8_model.pt  # Set to a downloaded SGAN checkpoint (required)
 
 # === Computation ===
 device: "cpu"

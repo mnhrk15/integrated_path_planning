@@ -252,7 +252,6 @@ class IntegratedSimulator:
         self.ego_radius = getattr(config, "ego_radius", 1.0)
         self.ped_radius = getattr(config, "ped_radius", 0.3)
         self.obstacle_radius = getattr(config, "obstacle_radius", self.ped_radius)
-        self.safety_buffer = getattr(config, "safety_buffer", 0.0)
         
         # 2. Initialize pedestrian simulator
         if len(config.ped_initial_states) > 0:
@@ -300,7 +299,6 @@ class IntegratedSimulator:
             max_road_width=config.max_road_width,
             robot_radius=self.ego_radius,
             obstacle_radius=config.obstacle_radius,
-            safety_buffer=config.safety_buffer,
             k_j=config.k_j,
             k_t=config.k_t,
             k_d=config.k_d,
@@ -494,7 +492,6 @@ class IntegratedSimulator:
             planned_path=planned_path,
             ego_radius=self.ego_radius,
             ped_radius=self.ped_radius,
-            safety_buffer=self.safety_buffer,
             # state=self.ego_state.state # Implicitly in ego_state
         )
         
@@ -711,10 +708,9 @@ class IntegratedSimulator:
 
         try:
             file_exists = csv_path.exists()
-            with open(csv_path, 'a', newline='') as f:
+            with open(csv_path, 'w', newline='') as f:
                 writer = csv.DictWriter(f, fieldnames=csv_data.keys())
-                if not file_exists:
-                    writer.writeheader()
+                writer.writeheader()
                 writer.writerow(csv_data)
             logger.info(f"Saved metrics summary to {csv_path}")
         except Exception as e:

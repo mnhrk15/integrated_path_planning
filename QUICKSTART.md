@@ -74,7 +74,7 @@ bash scripts/download_sgan_models.sh
 
 **ダウンロードされるモデル:**
 - ETH, HOTEL, UNIV, ZARA1, ZARA2データセット
-- 予測長: 8ステップ、12ステップ
+- 予測長: 8ステップ (推奨)
 - 合計サイズ: 約50-100MB
 
 **注意:** `sgan_model_path` に学習済みモデルを指定することが必須です。未指定のまま実行すると `RuntimeError` で停止します。
@@ -119,7 +119,7 @@ python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --output
 python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --log-level DEBUG
 
 # プランナ重み・安全パラメータを上書き（例: YAMLを複製して編集）
-# k_j, k_t, k_d, k_s_dot, k_lat, k_lon, ego_radius, ped_radius, obstacle_radius, safety_buffer
+# k_j, k_t, k_d, k_s_dot, k_lat, k_lon, ego_radius, ped_radius, obstacle_radius
 ```
 
 ### アニメーション生成（NEW! 🆕）
@@ -216,7 +216,7 @@ dt: 0.1
 total_time: 20.0
 
 obs_len: 8
-pred_len: 12
+pred_len: 8
 num_samples: 20
 
 ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]
@@ -235,7 +235,7 @@ ped_groups: [[0]]
 
 static_obstacles: []
 
-sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"  # 必須: 学習済みモデルへのパス
+sgan_model_path: "models/sgan-p-models/zara1_8_model.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
 visualization_enabled: true
 output_path: "output/scenario_99"
@@ -368,7 +368,7 @@ animator.show()
 python scripts/download_sgan_models.py
 ```
 ```yaml
-sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
+sgan_model_path: "models/sgan-p-models/zara1_8_model.pt"
 ```
 
 ### PySocialForceがインストールされていない

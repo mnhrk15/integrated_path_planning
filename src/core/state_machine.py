@@ -46,7 +46,7 @@ class FailSafeStateMachine:
                 # But maybe we should stay in CAUTION for a bit? 
                 # For simplicity, if we found a path, check safety.
                 min_dist = safety_metrics.get('min_distance', float('inf'))
-                if min_dist > self.config.safety_buffer * 2:
+                if min_dist > 0.5: # Hardcoded safe distance
                     self.current_state = VehicleState.NORMAL
             elif not plan_found:
                 # If CAUTION extraction failed, escalate
@@ -61,7 +61,7 @@ class FailSafeStateMachine:
             # But if a very safe path appears, we could recover
             if plan_found:
                  min_dist = safety_metrics.get('min_distance', float('inf'))
-                 if min_dist > self.config.safety_buffer * 3:
+                 if min_dist > 1.0: # Hardcoded safe distance (emergency recovery)
                      self.current_state = VehicleState.CAUTION
             else:
                 # Keep trying to stop

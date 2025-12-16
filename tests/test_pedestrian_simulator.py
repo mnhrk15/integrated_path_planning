@@ -85,8 +85,7 @@ def test_static_obstacle_collision_detection():
         predicted_trajectories=None,
         planned_path=None,
         ego_radius=0.6,
-        ped_radius=0.3,
-        safety_buffer=0.2
+        ped_radius=0.3
     )
     metrics = res.compute_safety_metrics()
     assert bool(metrics['collision']) is True

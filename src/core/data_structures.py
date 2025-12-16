@@ -265,7 +265,6 @@ class SimulationResult:
     metrics: dict = field(default_factory=dict)
     ego_radius: float = 1.0
     ped_radius: float = 0.3
-    safety_buffer: float = 0.0
     state: VehicleState = VehicleState.NORMAL
     
     def compute_safety_metrics(self) -> dict:
@@ -282,7 +281,7 @@ class SimulationResult:
         distances = np.linalg.norm(self.ped_state.positions - ego_pos, axis=1)
         min_distance = np.min(distances) if len(distances) > 0 else float('inf')
         
-        combined_radius = self.ego_radius + self.ped_radius + self.safety_buffer
+        combined_radius = self.ego_radius + self.ped_radius
         collision = min_distance < combined_radius
         
         # Time to collision (simplified, along relative approach)

@@ -5,7 +5,7 @@
 
 # === Time Parameters ===
 dt: 0.1
-total_time: 25.0
+total_time: 30.0
 
 # === Social Force Parameters (Tuning) ===
 social_force_params:
@@ -15,7 +15,7 @@ social_force_params:
 
 # === Observation Parameters ===
 obs_len: 8
-pred_len: 12
+pred_len: 8
 num_samples: 20
 
 # === Ego Vehicle Parameters ===
@@ -31,9 +31,8 @@ d_road_w: 0.2  # Finer resolution for narrow corridor
 max_road_width: 7.0
 
 # === Obstacle / Pedestrian Parameters ===
-ped_radius: 0.3
-obstacle_radius: 0.3
-safety_buffer: 0.2
+ped_radius: 0.2
+obstacle_radius: 0.2
 
 # === Reference Path ===
 # Straight corridor
@@ -85,7 +84,7 @@ map_config:
   crosswalks: []
 
 # === Model ===
-sgan_model_path: models/sgan-p-models/zara1_12_model.pt
+sgan_model_path: models/sgan-p-models/zara1_8_model.pt
 
 # === Computation ===
 device: "mps"

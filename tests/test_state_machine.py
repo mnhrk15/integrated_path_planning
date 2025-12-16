@@ -10,7 +10,6 @@ def config():
     c.ego_max_accel = 2.0
     c.ego_max_curvature = 1.0
     c.ego_max_speed = 10.0
-    c.safety_buffer = 0.5
     return c
 
 def test_initial_state(config):

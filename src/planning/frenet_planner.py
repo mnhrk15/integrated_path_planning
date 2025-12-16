@@ -71,7 +71,6 @@ class FrenetPlanner:
         max_road_width: float = MAX_ROAD_WIDTH,
         robot_radius: float = ROBOT_RADIUS,
         obstacle_radius: float = 0.3,
-        safety_buffer: float = 0.0,
         **kwargs
     ):
         self.csp = reference_path
@@ -84,7 +83,6 @@ class FrenetPlanner:
         self.converter = CartesianFrenetConverter()
         self.robot_radius = robot_radius
         self.obstacle_radius = obstacle_radius
-        self.safety_buffer = safety_buffer
 
         # Cost weights (default to module constants; can be overridden via kwargs)
         self.k_j = kwargs.get("k_j", K_J)
@@ -96,8 +94,7 @@ class FrenetPlanner:
         
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
-                   f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
-                   f"buffer={safety_buffer}m")
+                   f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m")
     
     def plan(
         self,
@@ -490,7 +487,7 @@ class FrenetPlanner:
         path_points = np.stack([path_x, path_y], axis=1)  # [n_path, 2]
         
         inflated_radius = max(
-            self.robot_radius + self.obstacle_radius + self.safety_buffer,
+            self.robot_radius + self.obstacle_radius,
             1e-6
         )
         sq_rubicon = inflated_radius ** 2
