@@ -2,9 +2,9 @@
 
 ## ステータス: ✅ 完了
 
-**実装日:** 2025-12-15  
+**実装日:** 2025-12-16  
 **プロジェクト:** Integrated Path Planning System  
-**追加機能:** 3つの主要統合
+**追加機能:** 不確実性可視化とバグ修正 (v2.2)
 
 ---
 
@@ -45,18 +45,24 @@
 - [x] テスト作成 (`test_animator.py`)
 - [x] ドキュメント更新
 
-### 4. ドキュメント整備 ✅
+### 4. 不確実性の可視化 (v2.1) ✅
+
+- [x] Multi-Sample Prediction (TrajectoryPredictor)
+- [x] Simulation Animatorでの雲描画
+- [x] Metrics Export (CSV Append Mode) (v2.2)
+
+### 5. ドキュメント整備 ✅
 
 - [x] README.md更新
 - [x] QUICKSTART.md更新
-- [x] ADDITIONAL_FEATURES.md作成
-- [x] IMPLEMENTATION_COMPLETE.md作成
+- [x] IMPLEMENTATION_REPORT.md更新
+- [x] COMPLETION_SUMMARY.md更新
 - [x] CHANGELOG.md更新
 - [x] インストール手順
 - [x] 使用例追加
 - [x] トラブルシューティング
 
-### 5. テスト ✅
+### 6. テスト ✅
 
 - [x] test_animator.py
 - [x] test_pedestrian_simulator.py

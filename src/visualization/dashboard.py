@@ -175,6 +175,8 @@ class DashboardGenerator:
             if r.ped_state and r.ped_state.n_peds > 0:
                 ax.plot(r.ped_state.positions[:, 0], r.ped_state.positions[:, 1], 'r.', markersize=2, alpha=0.2, zorder=2)
 
+
+
         ax.set_title("Trajectory Map")
         ax.set_aspect('equal')
         ax.grid(True)

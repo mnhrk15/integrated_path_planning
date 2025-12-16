@@ -217,6 +217,7 @@ total_time: 20.0
 
 obs_len: 8
 pred_len: 12
+num_samples: 20
 
 ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]
 ego_target_speed: 6.0

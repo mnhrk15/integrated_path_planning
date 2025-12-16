@@ -1,0 +1,17 @@
+dt: 0.1
+total_time: 5.0
+obs_len: 8
+pred_len: 12
+num_samples: 20
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]
+ego_target_speed: 10.0
+ego_max_speed: 15.0
+sgan_model_path: models/sgan-models/eth_8_model.pt
+prediction_method: sgan
+ped_initial_states: []
+reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+map_config:
+  road_borders:
+    - [0.0, -3.5, 100.0, -3.5]
+    - [0.0, 3.5, 100.0, 3.5]

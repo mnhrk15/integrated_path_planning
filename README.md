@@ -7,15 +7,19 @@
 このプロジェクトは、以下の3つのコンポーネントを統合します：
 
 1. **Social Force Model**: 歩行者の動きをシミュレート（Ground Truth生成）
-2. **Social-GAN**: 歩行者の未来軌道を予測
-3. **Frenet Optimal Trajectory**: 予測された歩行者を回避する安全な経路を計画
+
+### 予測と可視化
+- **Social-GAN**: 歩行者の社会的相互作用を考慮した軌道予測
+- **不確実性の可視化**: 予測分布（複数サンプル）を半透明の軌道「雲」として描画し、モデルの確信度を表現
+   - `num_samples > 1` (推奨: 20) に設定することで有効化されます（アニメーションのみ。静的ダッシュボードは視認性のため予測雲を非表示にしています）
+- **Frenet Optimal Trajectory**: 道路形状に沿った滑らかな経路生成と、予測された歩行者を回避する安全な経路を計画
 
 ## システムアーキテクチャ
 
 ```
 [Social Force Simulator] → [Pedestrian Observer] → [Social-GAN Predictor]
                                                             ↓
-                                                    [Predicted Trajectories]
+                                                    [Predicted Trajectories] (Multi-Sample)
                                                             ↓
 [Ego Vehicle State] ← [Frenet Planner] ← [Coordinate Converter]
 ```
@@ -35,10 +39,11 @@
 ### シミュレーションエンジン (v1.2 Update)
 - **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。
 
-### 評価と可視化 (v1.3 Update)
+### 評価と可視化 (v1.3 & v2.1 Update)
 - **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
 - **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
 - **Map Visualization**: 道路境界線、レーン、横断歩道などの地図情報をアニメーションとダッシュボードに描画し、状況把握を容易にしました。
+- **Uncertainty Visualization (v2.1)**: Social-GANの確率的推論を活用し、複数サンプルの予測軌道をアニメーション上に描画することで、予測の不確実性を直感的に把握可能にしました。
 - **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
 
 ### 比較研究機能 (v1.4 Update - Prediction Modes)
@@ -235,7 +240,7 @@ integrated_path_planning/
 
 ## 主な設定項目（YAML）
 
-- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`
+- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`, `num_samples` (SGAN予測サンプル数, 推奨: 20)
 - Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature`
 - 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.5), `max_road_width` (最大横探索幅)
 - 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`, `safety_buffer`
@@ -247,14 +252,26 @@ integrated_path_planning/
 - デバイス/出力: `device`, `output_path`, `visualization_enabled`
 
 ## 保存される出力
-
-`simulator.save_results()` は以下を `trajectory.npz` に保存します（object配列含む）:
-- 時系列: `times`
-- Ego: `ego_x`, `ego_y`, `ego_v`
-- 安全指標: `min_distances`, `ttc`
-- 歩行者: `ped_positions`, `ped_velocities`, `ped_goals`
-- 予測: `predicted_trajectories`
-- 計画軌跡: `planned_x`, `planned_y`, `planned_v`, `planned_a`, `planned_yaw`, `planned_cost`
+ 
+ `simulator.save_results()` は以下を保存します:
+ 
+ 1. **`trajectory.npz`**: 時系列データ（NumPy形式）
+    - Ego: `ego_x`, `ego_y`, `ego_v`, `ego_jerk`, `ego_state`
+    - Safety: `min_distances`, `ttc`
+    - Pedestrians: `ped_positions`, `ped_velocities`, `ped_goals`
+    - Prediction: `predicted_trajectories`
+    - Plan: `planned_path` 詳細
+ 
+ 2. **`metrics_summary.csv`**: メトリクス集計（CSV形式）
+    - **追記モード**: 実行ごとに新しい行が追加されます（履歴保持）
+    - 内容: シナリオ設定（モデル、メソッド）、ADE/FDE、安全性指標（最小距離、衝突有無）、効率性指標
+ 
+ 3. **`metrics_report.txt`**: レポート（テキスト形式）
+    - 人間が読みやすい形式の実行サマリ
+    - 内容: 全設定値と詳細メトリクス
+ 
+ 4. **`dashboard.png`** (visualization_enabled=True時):
+    - 統合ダッシュボード画像
 
 ## テスト
 

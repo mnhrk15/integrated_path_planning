@@ -61,6 +61,7 @@ class SimulationConfig:
     # Observation parameters
     obs_len: int = 8
     pred_len: int = 12
+    num_samples: int = 1
     
     # Ego vehicle
     ego_initial_state: list = field(default_factory=lambda: [0.0, 0.0, 0.0, 5.0, 0.0])
@@ -113,6 +114,9 @@ class SimulationConfig:
     
     # Map Visualization
     map_config: Dict[str, Any] = field(default_factory=dict)
+    
+    # Internal: loaded from
+    config_path: Optional[str] = None
 
 
 def load_config(config_path: str) -> SimulationConfig:
@@ -132,6 +136,7 @@ def load_config(config_path: str) -> SimulationConfig:
         config_dict = yaml.safe_load(f)
     
     config = SimulationConfig(**config_dict)
+    config.config_path = str(config_path)
     logger.info(f"Configuration loaded from {config_path}")
     
     return config
@@ -153,6 +158,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'total_time': config.total_time,
         'obs_len': config.obs_len,
         'pred_len': config.pred_len,
+        'num_samples': config.num_samples,
         'ego_initial_state': config.ego_initial_state,
         'ego_target_speed': config.ego_target_speed,
         'ego_max_speed': config.ego_max_speed,

@@ -6,11 +6,12 @@
 
 # === Time Parameters ===
 dt: 0.1
-total_time: 35.0
+total_time: 15.0
 
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
+num_samples: 20
 
 # === Ego Vehicle Parameters ===
 ego_initial_state: [0.0, 0.0, 0.0, 6.0, 0.0]
@@ -34,12 +35,29 @@ reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
 reference_waypoints_y: [0.0, 2.0, 6.0, 10.0, 13.0, 15.0, 16.0]
 
 # === Pedestrians ===
-# Walk roughly parallel or crossing near the curve apex.
+# Chaotic mix of crossing and parallel walking near curve
 ped_initial_states:
-  - [28.0, 13.0, -0.6, -0.2, 10.0, 8.0]   # Crossing inward near apex
-  - [45.0, 18.0, -0.8, -0.2, 25.0, 12.0]  # Crossing mid-late curve
-  - [20.0, -2.0, 0.4, 0.4, 50.0, 6.0]     # Walking along inner side
-ped_groups: [[0], [1], [2]]
+  # -- Crossing Group near apex --
+  - [28.0, 13.0, -0.6, -0.2, 10.0, 8.0]
+  - [29.0, 14.0, -0.6, -0.2, 11.0, 9.0]
+  
+  # -- Fast individual crossing late --
+  - [45.0, 18.0, -0.8, -0.2, 25.0, 12.0]
+
+  # -- Parallel walkers (inner track) --
+  - [15.0, 1.0, 0.8, 0.4, 60.0, 14.0]
+  - [18.0, 2.0, 0.7, 0.4, 60.0, 15.0]
+
+  # -- Parallel walkers (outer track) --
+  - [30.0, 15.0, 0.0, 0.0, 30.0, 15.0] # Standing still? Or moving very slowly
+  - [40.0, 18.0, -0.5, -0.1, 20.0, 10.0] # Walking against traffic on outside
+
+ped_groups: 
+  - [0, 1]
+  - [2]
+  - [3, 4]
+  - [5]
+  - [6]
 
 # === Static Obstacles ===
 static_obstacles: []

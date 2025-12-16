@@ -355,8 +355,32 @@ class SimulationAnimator:
                 self.ax_main.add_patch(circle)
                 artists['pedestrians'].append(circle)
             
-            # Predicted trajectories
+            # Predicted trajectories (Distribution)
             if show_predictions:
+                # 1. Plot Distribution (if available) - Thin transparent lines
+                pred_dist = getattr(result, "predicted_distribution", None)
+                if pred_dist is not None:
+                     # pred_dist shape: [n_samples, n_peds, n_steps, 2]
+                     n_samples = pred_dist.shape[0]
+                     for s in range(n_samples):
+                         # For each sample
+                         sample_trajs = pred_dist[s] # [n_peds, n_steps, 2]
+                         
+                         # Check dimensions and swap if needed (time-first vs peds-first)
+                         if sample_trajs.ndim == 3 and result.ped_state is not None:
+                              if sample_trajs.shape[1] == result.ped_state.n_peds and sample_trajs.shape[0] != result.ped_state.n_peds:
+                                   sample_trajs = np.transpose(sample_trajs, (1, 0, 2))
+                         
+                         for i in range(sample_trajs.shape[0]):
+                             traj = sample_trajs[i]
+                             line, = self.ax_main.plot(
+                                 traj[:, 0], traj[:, 1],
+                                 '-', color='orange', alpha=0.3, # Increased visibility
+                                 linewidth=1.0, zorder=2
+                             )
+                             artists['predictions'].append(line)
+
+                # 2. Plot Best Trajectory - Thick opaque line
                 pred_traj = getattr(result, "predicted_trajectories", None)
                 if pred_traj is None:
                     pred_traj = getattr(result, "predicted_traj", None)
@@ -370,8 +394,8 @@ class SimulationAnimator:
                         traj = pred_traj[i]
                         line, = self.ax_main.plot(
                             traj[:, 0], traj[:, 1],
-                            'o-', color='orange', alpha=0.4,
-                            markersize=3, linewidth=1, zorder=3
+                            'o-', color='orange', alpha=0.8, # More opaque
+                            markersize=3, linewidth=1.5, zorder=3
                         )
                         artists['predictions'].append(line)
 

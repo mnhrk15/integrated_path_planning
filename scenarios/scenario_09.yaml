@@ -11,6 +11,7 @@ total_time: 30.0
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
+num_samples: 20
 
 # === Ego Vehicle Parameters ===
 ego_initial_state: [0.0, 0.0, 0.0, 3.0, 0.0]  # Slow start

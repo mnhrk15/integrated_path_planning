@@ -4,6 +4,7 @@ This is the main simulation module that orchestrates all components.
 """
 
 import numpy as np
+import csv
 from pathlib import Path
 from typing import List, Dict, Optional
 from loguru import logger
@@ -251,7 +252,7 @@ class IntegratedSimulator:
         self.predictor = TrajectoryPredictor(
             model_path=config.sgan_model_path,
             pred_len=config.pred_len,
-            num_samples=1,
+            num_samples=getattr(config, 'num_samples', 1),
             device=config.device,
             sgan_dt=self.observer.sgan_dt,
             sim_dt=config.dt,
@@ -314,6 +315,7 @@ class IntegratedSimulator:
         
         # 2. Predict pedestrian trajectories
         predicted_traj = None
+        predicted_dist = None
         dynamic_obstacles = np.empty((0, 0, 2))
         static_obstacles = self.static_obstacle_points.copy()
         
@@ -323,7 +325,7 @@ class IntegratedSimulator:
                 obs_traj, obs_traj_rel, seq_start_end = self.observer.get_observation()
                 
                 # Predict
-                predicted_traj = self.predictor.predict_single_best(
+                predicted_traj, predicted_dist = self.predictor.predict_single_best(
                     obs_traj, obs_traj_rel, seq_start_end
                 )
                 
@@ -459,6 +461,7 @@ class IntegratedSimulator:
                 timestamp=self.time
             ),
             predicted_trajectories=predicted_traj,
+            predicted_distribution=predicted_dist,
             planned_path=planned_path,
             ego_radius=self.ego_radius,
             ped_radius=self.ped_radius,
@@ -635,17 +638,82 @@ class IntegratedSimulator:
             planned_cost=np.array(planned_cost)
         )
         
+        
+        # --- Metrics Calculation (Always run for export) ---
+        try:
+            from ..core.metrics import calculate_aggregate_metrics
+            metrics = calculate_aggregate_metrics(self.history, self.config.dt)
+        except Exception as e:
+            logger.error(f"Failed to calculate metrics: {e}")
+            metrics = {}
+
+        # --- save results to CSV and TXT ---
+        # Prepare context data
+        context = {
+            "prediction_method": getattr(self.config, 'prediction_method', 'unknown'),
+            "sgan_model": getattr(self.config, 'sgan_model_path', 'none'),
+            "ego_target_speed": getattr(self.config, 'ego_target_speed', 0.0),
+            "scenario_file": str(getattr(self.config, 'config_path', 'unknown')), # config_path might not be standard, checking
+            "total_time": self.time,
+            "steps": len(self.history)
+        }
+        
+        # 1. Output CSV (metrics_summary.csv)
+        csv_path = output_dir / "metrics_summary.csv"
+        
+        # Combine metrics and context
+        csv_data = context.copy()
+        csv_data.update(metrics)
+        
+        # We also want to record if collision happened as a boolean
+        if 'collision' not in csv_data:
+            csv_data['collision'] = any(r.metrics.get('collision', False) for r in self.history)
+
+        try:
+            file_exists = csv_path.exists()
+            with open(csv_path, 'a', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=csv_data.keys())
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(csv_data)
+            logger.info(f"Saved metrics summary to {csv_path}")
+        except Exception as e:
+            logger.error(f"Failed to save metrics CSV: {e}")
+
+        # 2. Output Text Report (metrics_report.txt)
+        txt_path = output_dir / "metrics_report.txt"
+        try:
+            with open(txt_path, 'w') as f:
+                f.write("=" * 40 + "\n")
+                f.write("       SIMULATION REPORT\n")
+                f.write("=" * 40 + "\n\n")
+                
+                f.write("--- Configuration ---\n")
+                for k, v in context.items():
+                    f.write(f"{k}: {v}\n")
+                f.write("\n")
+                
+                f.write("--- Metrics ---\n")
+                for k, v in metrics.items():
+                    f.write(f"{k}: {v}\n")
+                f.write("\n")
+                
+                # Add minimal stats if metrics missing
+                if not metrics:
+                     f.write("No detailed metrics available.\n")
+                     
+                f.write("=" * 40 + "\n")
+            logger.info(f"Saved metrics report to {txt_path}")
+        except Exception as e:
+             logger.error(f"Failed to save metrics report: {e}")
+
+
         # Calculate aggregated metrics and generate dashboard if visualization is enabled
         if getattr(self.config, 'visualization_enabled', True):
-            try:
-                from ..core.metrics import calculate_aggregate_metrics
-                metrics = calculate_aggregate_metrics(self.history, self.config.dt)
-                logger.info("Simulation Metrics:")
-                for k, v in metrics.items():
-                    logger.info(f"  {k}: {v}")
-            except Exception as e:
-                logger.error(f"Failed to calculate metrics: {e}")
-                metrics = {}
+            logger.info("Simulation Metrics:")
+            for k, v in metrics.items():
+                logger.info(f"  {k}: {v}")
+
 
             # Generate Dashboard
             try:

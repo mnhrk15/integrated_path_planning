@@ -3,7 +3,7 @@
 import torch
 import numpy as np
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from loguru import logger
 
 # Always use vendorized SGAN implementation
@@ -279,11 +279,8 @@ class TrajectoryPredictor:
         obs_traj: torch.Tensor,
         obs_traj_rel: torch.Tensor,
         seq_start_end: torch.Tensor
-    ) -> np.ndarray:
-        """Predict a single trajectory (best sample).
-        
-        If num_samples > 1, samples multiple trajectories and returns
-        the one closest to the average.
+    ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        """Predict trajectories, returning best sample and full distribution.
         
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2]
@@ -291,10 +288,13 @@ class TrajectoryPredictor:
             seq_start_end: Sequence boundaries [n_seq, 2]
             
         Returns:
-            Best predicted trajectory [n_peds, n_dense_steps, 2]
+            Tuple of:
+            - Best predicted trajectory [n_peds, n_dense_steps, 2]
+            - Full distribution [num_samples, n_peds, n_dense_steps, 2] or None
         """
         if self.num_samples == 1:
-            return self.predict(obs_traj, obs_traj_rel, seq_start_end)
+            pred = self.predict(obs_traj, obs_traj_rel, seq_start_end)
+            return pred, None
         
         # Generate multiple samples
         samples = []
@@ -309,4 +309,4 @@ class TrajectoryPredictor:
         distances = np.linalg.norm(samples - mean_traj[None, ...], axis=-1).sum(axis=(1, 2))
         best_idx = np.argmin(distances)
         
-        return samples[best_idx]
+        return samples[best_idx], samples

@@ -122,6 +122,31 @@
   - **Caution**: 計画失敗時に一時的に制約（加速度、曲率）を緩和して再計画
   - **Emergency**: 回避不可能な場合に最大減速で停止
   - アドホックな条件分岐を廃止し、決定論的なステート遷移により予期せぬ挙動を防止
+ 
+ ### ✅ Phase 10: 評価メトリクス出力 (v2.0 - NEW!)
+ 
+ - [x] **Metrics Export**
+   - `metrics_summary.csv`: バッチ処理用のCSV形式でのメトリクス・設定出力
+   - `metrics_report.txt`: 可読性の高いテキストレポート出力
+   - シナリオ設定（モデル、メソッド、ターゲット速度）と評価結果（ADE/FDE、安全性指標）を統合して記録
+ 
+ ### ✅ Phase 11: 不確実性の可視化 (v2.1 - NEW!)
+ 
+ - [x] **Uncertainty Visualization**
+   - **Multi-Sample Prediction**: `TrajectoryPredictor` が確率分布として複数サンプルを出力
+   - **Simulation Animator**: 半透明の「軌道クラウド」として分布を描画し、不確実性を表現
+   - **Static Dashboard**: 最終ステップの予測分布を静的レポートにも反映
+
+ ### ✅ Phase 11.5: バグ修正と改善 (v2.2 - NEW!)
+
+ - [x] **Fix: Crash with No Pedestrians**
+   - 歩行者ゼロのシナリオで発生するクラッシュを修正（フォールバック実装）
+ - [x] **Improvement: Visualization Visibility**
+   - 予測分布の描画パラメータ（alpha, linewidth）を調整し、視認性を大幅に向上
+ - [x] **Refinement: Metrics Preservation**
+   - `metrics_summary.csv` を追記モードに変更し、バッチ実行時の履歴を保持
+   - `SimulationConfig` に `num_samples` を追加し、設定ファイルから制御可能に
+
 
 
 

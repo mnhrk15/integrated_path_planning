@@ -259,7 +259,8 @@ class SimulationResult:
     time: float
     ego_state: EgoVehicleState
     ped_state: PedestrianState
-    predicted_trajectories: Optional[np.ndarray] = None
+    predicted_trajectories: Optional[np.ndarray] = None  # [n_peds, n_steps, 2]
+    predicted_distribution: Optional[np.ndarray] = None  # [n_samples, n_peds, n_steps, 2]
     planned_path: Optional[FrenetPath] = None
     metrics: dict = field(default_factory=dict)
     ego_radius: float = 1.0
