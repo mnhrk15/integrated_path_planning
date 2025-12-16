@@ -22,10 +22,12 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
     methods = ['cv', 'lstm', 'sgan']
     results_list = []
     
-    output_dir = Path(output_path)
+    scenario_name = Path(scenario_path).stem
+    output_dir = Path(output_path) / scenario_name
     output_dir.mkdir(parents=True, exist_ok=True)
     
     logger.info(f"Starting benchmark on scenario: {scenario_path}")
+    logger.info(f"Results will be saved to: {output_dir}")
     
     for method in methods:
         logger.info(f"Testing method: {method.upper()}")
@@ -107,6 +109,15 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
     logger.info(f"Report saved to {report_path}")
 
 def main():
+    # Configure logging to reduce noise
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+    
+    # Suppress verbose debug logs from libraries using standard logging (e.g., Numba)
+    import logging
+    logging.getLogger('numba').setLevel(logging.WARNING)
+    logging.getLogger('matplotlib').setLevel(logging.WARNING)
+
     parser = argparse.ArgumentParser(description='Run prediction benchmark')
     parser.add_argument('--scenario', type=str, default='scenarios/scenario_01.yaml',
                       help='Path to scenario config')
