@@ -10,7 +10,7 @@ in a Frenet Frame" (2010)
 
 import copy
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from loguru import logger
 
 from ..core.data_structures import FrenetPath, FrenetState, EgoVehicleState
@@ -24,7 +24,7 @@ MAX_SPEED = 50.0 / 3.6  # Maximum speed [m/s]
 MAX_ACCEL = 2.0  # Maximum acceleration [m/s²]
 MAX_CURVATURE = 1.0  # Maximum curvature [1/m]
 MAX_ROAD_WIDTH = 7.0  # Maximum road width [m]
-D_ROAD_W = 1.0  # Road width sampling distance [m]
+D_ROAD_W = 0.5  # Road width sampling distance [m]
 DT = 0.2  # Time tick [s]
 MAX_T = 5.0  # Max prediction time [s]
 MIN_T = 4.0  # Min prediction time [s]
@@ -56,6 +56,8 @@ class FrenetPlanner:
         max_accel: Maximum allowed acceleration [m/s²]
         max_curvature: Maximum allowed curvature [1/m]
         dt: Time step [s]
+        d_road_w: Lateral sampling width [m]
+        max_road_width: Maximum road width to check [m]
     """
     
     def __init__(
@@ -65,6 +67,8 @@ class FrenetPlanner:
         max_accel: float = MAX_ACCEL,
         max_curvature: float = MAX_CURVATURE,
         dt: float = DT,
+        d_road_w: float = D_ROAD_W,
+        max_road_width: float = MAX_ROAD_WIDTH,
         robot_radius: float = ROBOT_RADIUS,
         obstacle_radius: float = 0.3,
         safety_buffer: float = 0.0,
@@ -75,6 +79,8 @@ class FrenetPlanner:
         self.max_accel = max_accel
         self.max_curvature = max_curvature
         self.dt = dt
+        self.d_road_w = d_road_w
+        self.max_road_width = max_road_width
         self.converter = CartesianFrenetConverter()
         self.robot_radius = robot_radius
         self.obstacle_radius = obstacle_radius
@@ -98,7 +104,8 @@ class FrenetPlanner:
         ego_state: EgoVehicleState,
         static_obstacles: np.ndarray,
         dynamic_obstacles: Optional[np.ndarray] = None,
-        target_speed: float = TARGET_SPEED
+        target_speed: float = TARGET_SPEED,
+        constraint_overrides: Optional[Dict[str, float]] = None
     ) -> Optional[FrenetPath]:
         """Plan optimal trajectory from current state.
         
@@ -107,6 +114,7 @@ class FrenetPlanner:
             static_obstacles: Static obstacle positions [n_obstacles, 2]
             dynamic_obstacles: Dynamic obstacles with time dimension [n_obs, time_steps, 2]
             target_speed: Desired target speed [m/s]
+            constraint_overrides: Optional dictionary to override constraints (e.g. max_accel)
             
         Returns:
             Best trajectory, or None if no valid trajectory found
@@ -128,7 +136,7 @@ class FrenetPlanner:
         fp_list = self._calc_global_paths(fp_list)
         
         # Check path validity
-        fp_dict = self._check_paths(fp_list, static_obstacles, dynamic_obstacles)
+        fp_dict = self._check_paths(fp_list, static_obstacles, dynamic_obstacles, constraint_overrides)
         
         # Select best path
         best_path = self._select_best_path(fp_dict)
@@ -220,13 +228,17 @@ class FrenetPlanner:
                 target_speed + D_T_S * N_S_SAMPLE,
                 D_T_S
             ):
+                # Prevent reverse trajectories
+                if tv < 0.0:
+                    continue
+
                 # Generate longitudinal trajectory
                 fp_lon = self._generate_longitudinal_trajectory(
                     frenet_state, tv, Ti
                 )
                 
                 # Sample different lateral positions
-                for di in np.arange(-MAX_ROAD_WIDTH, MAX_ROAD_WIDTH, D_ROAD_W):
+                for di in np.arange(-self.max_road_width, self.max_road_width, self.d_road_w):
                     # Generate lateral trajectory
                     fp = self._generate_lateral_trajectory(
                         fp_lon, di, frenet_state, Ti
@@ -394,7 +406,8 @@ class FrenetPlanner:
         self,
         fp_list: List[FrenetPath],
         static_obstacles: np.ndarray,
-        dynamic_obstacles: Optional[np.ndarray] = None
+        dynamic_obstacles: Optional[np.ndarray] = None,
+        constraint_overrides: Optional[Dict[str, float]] = None
     ) -> dict:
         """Check path validity and categorize paths.
         
@@ -402,6 +415,7 @@ class FrenetPlanner:
             fp_list: List of Frenet paths
             static_obstacles: Static obstacle positions [n_obstacles, 2]
             dynamic_obstacles: Dynamic obstacle trajectories [n_obs, time_steps, 2]
+            constraint_overrides: Optional overrides for max_speed, max_accel, max_curvature
             
         Returns:
             Dictionary categorizing paths by validity
@@ -414,18 +428,28 @@ class FrenetPlanner:
             'ok': []
         }
         
+        # Resolve constraints
+        c_max_speed = self.max_speed
+        c_max_accel = self.max_accel
+        c_max_curvature = self.max_curvature
+        
+        if constraint_overrides:
+            c_max_speed = constraint_overrides.get('max_speed', c_max_speed)
+            c_max_accel = constraint_overrides.get('max_accel', c_max_accel)
+            c_max_curvature = constraint_overrides.get('max_curvature', c_max_curvature)
+        
         for fp in fp_list:
             if len(fp.x) == 0:
                 continue
             
             # Check speed limit
-            if any([v > self.max_speed for v in fp.v]):
+            if any([v > c_max_speed for v in fp.v]):
                 path_dict['max_speed_error'].append(fp)
             # Check acceleration limit
-            elif any([abs(a) > self.max_accel for a in fp.a]):
+            elif any([abs(a) > c_max_accel for a in fp.a]):
                 path_dict['max_accel_error'].append(fp)
             # Check curvature limit
-            elif any([abs(c) > self.max_curvature for c in fp.c]):
+            elif any([abs(c) > c_max_curvature for c in fp.c]):
                 path_dict['max_curvature_error'].append(fp)
             # Check collision
             elif not self._check_collision(fp, static_obstacles, dynamic_obstacles):

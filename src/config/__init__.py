@@ -31,6 +31,10 @@ class SimulationConfig:
         reference_waypoints_x: X coordinates of waypoints
         reference_waypoints_y: Y coordinates of waypoints
         
+        # Planner parameters
+        d_road_w: Lateral sampling width [m]
+        max_road_width: Maximum road width to check [m]
+        
         # Pedestrian parameters
         ped_initial_states: List of [x, y, vx, vy, gx, gy]
         ped_groups: List of pedestrian group indices
@@ -82,6 +86,10 @@ class SimulationConfig:
     # Reference path
     reference_waypoints_x: list = field(default_factory=list)
     reference_waypoints_y: list = field(default_factory=list)
+    
+    # Planner path generation
+    d_road_w: float = 0.5
+    max_road_width: float = 7.0
     
     # Pedestrians
     ped_initial_states: list = field(default_factory=list)
@@ -139,7 +147,7 @@ def save_config(config: SimulationConfig, config_path: str):
     config_path = Path(config_path)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Convert to dict
+
     config_dict = {
         'dt': config.dt,
         'total_time': config.total_time,
@@ -152,6 +160,8 @@ def save_config(config: SimulationConfig, config_path: str):
         'ego_max_curvature': config.ego_max_curvature,
         'reference_waypoints_x': config.reference_waypoints_x,
         'reference_waypoints_y': config.reference_waypoints_y,
+        'd_road_w': config.d_road_w,
+        'max_road_width': config.max_road_width,
         'ped_initial_states': config.ped_initial_states,
         'ped_groups': config.ped_groups,
         'static_obstacles': config.static_obstacles,

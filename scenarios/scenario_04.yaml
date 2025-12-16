@@ -20,6 +20,10 @@ ego_max_accel: 1.8
 ego_max_curvature: 0.6
 ego_radius: 1.0
 
+# === Planning Parameters ===
+d_road_w: 0.5
+max_road_width: 7.0
+
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.3
 obstacle_radius: 0.3

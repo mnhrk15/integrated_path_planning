@@ -24,6 +24,7 @@
 - 観測はシミュレーション `dt` に依らず SGAN の想定サンプリング 0.4s 間隔でダウンサンプリングされます。
 - SGAN 出力はプランナ/シミュレーション `dt`（デフォルト 0.1s）に線形補間され、5s の計画ホライゾンまで等速外挿して時間幅を揃えます。
 - 衝突判定は動的障害物の「同時刻位置」のみを評価し、将来軌道を平坦化しません（過剰な停止・回避を防止）。
+- **緊急回避 (v1.7 Update)**: 通常の経路計画が解を見つけられない場合、一時的に加速度や曲率の制約を緩和して衝突回避経路を探索するフォールバック機能を搭載しています。
 
 ### パフォーマンスとロバスト性 (v1.1 Update)
 - **高速化**: 衝突判定のベクトル化（NumPy Broadcasting）により、数百の障害物が存在しても 0.06ms 程度で判定可能です。
@@ -235,6 +236,7 @@ integrated_path_planning/
 
 - 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`
 - Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature`
+- 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.5), `max_road_width` (最大横探索幅)
 - 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`, `safety_buffer`
 - プランナ重み（任意上書き）: `k_j`, `k_t`, `k_d`, `k_s_dot`, `k_lat`, `k_lon`
 - 経路: `reference_waypoints_x`, `reference_waypoints_y`

@@ -265,15 +265,17 @@ class IntegratedSimulator:
             max_accel=config.ego_max_accel,
             max_curvature=config.ego_max_curvature,
             dt=config.dt,
+            d_road_w=config.d_road_w,
+            max_road_width=config.max_road_width,
             robot_radius=self.ego_radius,
-            obstacle_radius=self.obstacle_radius,
-            safety_buffer=self.safety_buffer,
-            k_j=getattr(config, "k_j", None),
-            k_t=getattr(config, "k_t", None),
-            k_d=getattr(config, "k_d", None),
-            k_s_dot=getattr(config, "k_s_dot", None),
-            k_lat=getattr(config, "k_lat", None),
-            k_lon=getattr(config, "k_lon", None)
+            obstacle_radius=config.obstacle_radius,
+            safety_buffer=config.safety_buffer,
+            k_j=config.k_j,
+            k_t=config.k_t,
+            k_d=config.k_d,
+            k_s_dot=config.k_s_dot,
+            k_lat=config.k_lat,
+            k_lon=config.k_lon
         )
         
         # 6. Initialize coordinate converter
@@ -359,6 +361,26 @@ class IntegratedSimulator:
             target_speed=self.config.ego_target_speed
         )
         
+        # Fallback planning (Emergency Mode)
+        if planned_path is None:
+            # Relax constraints
+            # We assume "emergency" means we can brake harder or turn sharper
+            relaxed_constraints = {
+                "max_accel": self.config.ego_max_accel * 2.0,  # Double accel limit (braking)
+                "max_curvature": self.config.ego_max_curvature * 1.5  # 1.5x sharp turn
+            }
+            logger.warning("No valid path found with normal constraints. Attempting emergency planning...")
+            planned_path = self.planner.plan(
+                self.ego_state,
+                static_obstacles,
+                dynamic_obstacles,
+                target_speed=0.0,  # Target stop in emergency
+                constraint_overrides=relaxed_constraints
+            )
+            
+            if planned_path is not None:
+                logger.warning("Emergency path found! Executing emergency maneuver.")
+
         # 4. Update ego vehicle state
         # Store old acceleration for jerk calculation
         old_a = self.ego_state.a
