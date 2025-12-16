@@ -38,6 +38,13 @@
 - **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
 - **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
 
+### 比較研究機能 (v1.4 Update - Prediction Modes)
+- **予測モード比較**: 歩行者予測の影響を検証するために、3つのモードを切り替え可能です。
+  - `cv`: 等速直線運動（Constant Velocity） - ベースライン
+  - `lstm`: 相互作用を考慮しない単純なLSTM予測（SGAN w/o Pooling）
+  - `sgan`: 相互作用を考慮したSocial-GAN予測（推奨）
+- **ベンチマーク**: シナリオごとの安全性・効率性を一括比較するスクリプトを提供します。
+
 ## インストール
 
 ```bash
@@ -113,6 +120,18 @@ simulator.save_results()
 python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml
 ```
 
+#### 予測モードの切り替え (v1.4 Update)
+```bash
+# 等速直線運動 (ベースライン)
+python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method cv
+
+# 単純LSTM (相互作用なし)
+python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method lstm
+
+# Social-GAN (デフォルト)
+python examples/run_simulation.py --scenario scenarios/scenario_01_crossing.yaml --method sgan
+```
+
 #### アニメーション生成（NEW! 🆕）
 ```bash
 # GIFアニメーション生成
@@ -158,6 +177,16 @@ create_simple_animation(
     fps=10
 )
 ```
+
+### 予測モデルのベンチマーク (v1.4 Update)
+
+3つの予測モード（CV, LSTM, SGAN）を同一シナリオで実行し、安全性指標（最小距離、衝突回数、TTC）と効率性指標を比較します。
+
+```bash
+python examples/benchmark_prediction.py --scenario scenarios/scenario_01_crossing.yaml
+```
+
+レポートは `output/benchmark/benchmark_report.md` に保存されます。
 
 ### 学習済みモデルの指定（必須）
 

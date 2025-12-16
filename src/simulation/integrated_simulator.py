@@ -200,7 +200,8 @@ class IntegratedSimulator:
             device=config.device,
             sgan_dt=self.observer.sgan_dt,
             sim_dt=config.dt,
-            plan_horizon=MAX_T
+            plan_horizon=MAX_T,
+            method=getattr(config, 'prediction_method', 'sgan')
         )
         
         # 5. Initialize path planner

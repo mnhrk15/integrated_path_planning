@@ -38,7 +38,8 @@ class SimulationConfig:
         
         # Model paths
         sgan_model_path: Path to Social-GAN model
-        
+        prediction_method: Prediction method ('cv', 'lstm', 'sgan')
+
         # Device
         device: Computation device ('cpu', 'cuda', 'mps')
         
@@ -88,7 +89,9 @@ class SimulationConfig:
     social_force_config: Optional[str] = None
     
     # Model
+    # Model
     sgan_model_path: Optional[str] = None
+    prediction_method: str = 'sgan'
     
     # Device
     device: str = 'cpu'
@@ -148,6 +151,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'static_obstacles': config.static_obstacles,
         'social_force_config': config.social_force_config,
         'sgan_model_path': config.sgan_model_path,
+        'prediction_method': config.prediction_method,
         'device': config.device,
         'visualization_enabled': config.visualization_enabled,
         'output_path': config.output_path,

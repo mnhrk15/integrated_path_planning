@@ -68,8 +68,20 @@
   - Jerk, TTC, Collision Stats
 
 - [x] `src/visualization/dashboard.py` - レポート生成
+- [x] `src/visualization/dashboard.py` - レポート生成
   - 軌道マップ、速度/加速度/Jerkプロファイル、TTC分布の可視化
   - 数値サマリテーブルの埋め込み
+
+### ✅ Phase 5: 比較研究 (v1.4 - 完了)
+
+- [x] `src/prediction/trajectory_predictor.py` - 予測モード拡張
+  - `cv`: Constant Velocity (Baseline)
+  - `lstm`: SGAN without Pooling (Ablation)
+  - `sgan`: Full Social-GAN
+
+- [x] `examples/benchmark_prediction.py` - ベンチマーク
+  - 予測精度(ADE/FDE)と計画安全性(Min Dist/TTC)の同時評価
+  - Markdown/Tableレポート生成
 
 ### ✅ 追加機能
 
@@ -126,7 +138,9 @@ integrated_path_planning/
 ├── tests/                   ✓ ユニットテスト
 │   └── test_coordinate_converter.py
 ├── examples/                ✓ 使用例
-│   └── run_simulation.py
+│   ├── run_simulation.py
+│   └── benchmark_prediction.py ✓ 比較ベンチマーク
+├── requirements.txt         ✓
 ├── requirements.txt         ✓
 ├── setup.py                 ✓
 ├── README.md                ✓
@@ -437,7 +451,13 @@ def test_trajectory_prediction():
 
 - 📊 **包括的評価システム**: ADE/FDE, Jerk, TTCを含む多角的な評価指標を導入。
 - 📈 **自動レポート生成**: シミュレーション終了時にダッシュボード (`dashboard.png`) を自動生成し、結果の即時確認が可能。
+- 📈 **自動レポート生成**: シミュレーション終了時にダッシュボード (`dashboard.png`) を自動生成し、結果の即時確認が可能。
 - 🖥️ **ヘッドレス実行**: GUIのないサーバー環境でも安全に実行可能。
+
+### 比較研究 (v1.4) 🔬
+
+- 🔬 **マルチモード予測**: `cv`, `lstm`, `sgan` の3つの予測モードを比較可能に。
+- 📊 **自動ベンチマーク**: 単一コマンドで全モードをテストし、安全性と精度のトレードオフを定量評価。
 
 ### 今後の拡張 🔄
 

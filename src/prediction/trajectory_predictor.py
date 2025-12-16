@@ -33,6 +33,7 @@ class TrajectoryPredictor:
         sgan_dt: float = 0.4,
         sim_dt: float = 0.1,
         plan_horizon: float = 5.0,
+        method: str = 'sgan',
     ):
         self.pred_len = pred_len
         self.num_samples = num_samples
@@ -41,13 +42,21 @@ class TrajectoryPredictor:
         self.sgan_dt = sgan_dt
         self.sim_dt = sim_dt
         self.plan_horizon = plan_horizon
+        self.method = method.lower()
         
-        if model_path is not None:
+        valid_methods = ['cv', 'lstm', 'sgan']
+        if self.method not in valid_methods:
+            raise ValueError(f"Invalid method '{method}'. Must be one of {valid_methods}")
+        
+        # SGAN and LSTM require loading the model
+        if self.method in ['sgan', 'lstm'] and model_path is not None:
             self.load_model(model_path)
-        
+        elif self.method == 'cv':
+            logger.info("Initialized Constant Velocity predictor (no model required)")
+            
         logger.info(
-            f"Trajectory predictor initialized with pred_len={pred_len}, "
-            f"num_samples={num_samples}, device={device}, "
+            f"Trajectory predictor initialized with method='{self.method}', "
+            f"pred_len={pred_len}, num_samples={num_samples}, device={device}, "
             f"sgan_dt={sgan_dt}s, sim_dt={sim_dt}s, plan_horizon={plan_horizon}s"
         )
     
@@ -127,6 +136,9 @@ class TrajectoryPredictor:
         Returns:
             Predicted trajectories [n_peds, n_dense_steps, 2] in simulation time resolution
         """
+        if self.method == 'cv':
+             return self.predict_cv(obs_traj)
+
         if self.generator is None:
             raise RuntimeError("Generator not loaded. Call load_model before predict().")
         
@@ -136,16 +148,66 @@ class TrajectoryPredictor:
             seq_start_end = seq_start_end.to(self.device)
             
             # Generate prediction
-            pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
+            if self.method == 'lstm':
+                # Temporarily disable pooling
+                original_pooling = self.generator.pooling_type
+                try:
+                    self.generator.pooling_type = None
+                    pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
+                finally:
+                    self.generator.pooling_type = original_pooling
+            else:
+                # Normal SGAN
+                pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
 
             # Convert to absolute coordinates: [pred_len, n_peds, 2]
             pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1]).cpu().numpy()
-
+        
         logger.debug(
             f"Predicted {pred_traj.shape[1]} pedestrians for {pred_traj.shape[0]} coarse steps"
         )
 
         return self.process_prediction(pred_traj)
+        
+    def predict_cv(self, obs_traj: torch.Tensor) -> np.ndarray:
+        """Predict using Constant Velocity model.
+        
+        Args:
+            obs_traj: Observed trajectories [obs_len, n_peds, 2] (Absolute coordinates)
+            
+        Returns:
+            Predicted trajectories [n_peds, n_dense_steps, 2]
+        """
+        # Get last two positions to calculate velocity
+        # obs_traj is (obs_len, n_peds, 2)
+        if obs_traj.shape[0] < 2:
+            # Not enough history, assume zero velocity
+            current_pos = obs_traj[-1].cpu().numpy()  # (n_peds, 2)
+            n_peds = current_pos.shape[0]
+            velocities = np.zeros((n_peds, 2))
+        else:
+            p_curr = obs_traj[-1].cpu().numpy()
+            p_prev = obs_traj[-2].cpu().numpy()
+            n_peds = p_curr.shape[0]
+            
+            # Calculate velocity: (p_curr - p_prev) / dt
+            # Note: The input obs_traj typically has sgan_dt spacing (0.4s)
+            velocities = (p_curr - p_prev) / self.sgan_dt
+            current_pos = p_curr
+
+        # Generate predictions for the planning horizon
+        target_horizon = max(self.plan_horizon, self.pred_len * self.sgan_dt)
+        time_target = np.arange(self.sim_dt, target_horizon + 1e-9, self.sim_dt)
+        
+        # [n_peds, n_steps, 2]
+        dense_preds = np.zeros((n_peds, len(time_target), 2))
+        
+        for i in range(len(time_target)):
+            t = time_target[i]
+            dense_preds[:, i, :] = current_pos + velocities * t
+            
+        logger.debug(f"Generated CV predictions for {n_peds} pedestrians")
+        return dense_preds
 
     def process_prediction(self, pred_traj: np.ndarray) -> np.ndarray:
         """Resample and extrapolate predictions to simulation resolution and planner horizon.

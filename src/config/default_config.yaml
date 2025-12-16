@@ -50,6 +50,7 @@ social_force_config: null
 
 # === Model Parameters ===
 sgan_model_path: models/sgan-models/eth_8_model.pt  # Path to Social-GAN model (required; set before running)
+prediction_method: "sgan"  # "cv" (Constant Velocity), "lstm", or "sgan"
 
 # === Computation ===
 device: "cpu"  # "cpu", "cuda", or "mps"

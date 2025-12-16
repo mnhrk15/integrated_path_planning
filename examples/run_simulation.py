@@ -65,6 +65,13 @@ def main():
         default=10,
         help='Frames per second for animation'
     )
+    parser.add_argument(
+        '--method',
+        type=str,
+        default=None,
+        choices=['cv', 'lstm', 'sgan'],
+        help='Prediction method: cv, lstm, sgan'
+    )
     
     args = parser.parse_args()
     
@@ -83,6 +90,11 @@ def main():
     # Override output path if specified
     if args.output is not None:
         config.output_path = args.output
+
+    # Override prediction method if specified
+    if args.method is not None:
+        config.prediction_method = args.method
+        logger.info(f"Overriding prediction method to: {args.method}")
     
     # Create simulator
     logger.info("Creating integrated simulator")
