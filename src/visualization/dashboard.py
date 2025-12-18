@@ -180,7 +180,12 @@ class DashboardGenerator:
         ax.set_title("Trajectory Map")
         ax.set_aspect('equal')
         ax.grid(True)
-        ax.legend()
+        ax.legend(
+            loc='upper center',
+            bbox_to_anchor=(0.5, -0.5),
+            ncol=3,
+            fontsize=9
+        )
 
 def create_dashboard(history: List[SimulationResult], output_path: str, metrics: dict = None, map_config: Optional[Dict] = None):
     """Convenience function."""
