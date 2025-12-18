@@ -23,7 +23,7 @@ ego_max_curvature: 1.0  # Maximum curvature [1/m]
 ego_radius: 1.0  # Collision radius for ego vehicle [m]
 
 # === Planning Parameters ===
-d_road_w: 0.5  # Lateral sampling width [m] (Balanced: 1.0=Fast, 0.2=Precise)
+d_road_w: 0.3  # Lateral sampling width [m] (Balanced: 1.0=Fast, 0.2=Precise)
 max_road_width: 7.0  # Maximum lateral search width [m]
 
 # === Obstacle / Pedestrian Parameters ===
