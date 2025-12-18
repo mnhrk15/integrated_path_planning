@@ -1,0 +1,96 @@
+# Scenario 02: Narrow Corridor
+#
+# Situation: Ego vehicle navigates through a narrow corridor 
+# while pedestrians walk in opposite direction
+
+# === Time Parameters ===
+dt: 0.1
+total_time: 30.0
+
+# === Social Force Parameters (Tuning) ===
+social_force_params:
+  ped_repulsion.sigma: 0.3
+  ped_repulsion.v0: 2.1
+  agent_radius: 0.2
+
+# === Observation Parameters ===
+obs_len: 8
+pred_len: 12
+num_samples: 1
+
+# === Ego Vehicle Parameters ===
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # Slower initial speed
+ego_target_speed: 5.0  # Lower target speed for narrow corridor
+ego_max_speed: 6.0
+ego_max_accel: 1.5
+ego_max_curvature: 1.0
+ego_radius: 1.0
+
+# === Planning Parameters ===
+d_road_w: 0.2  # Finer resolution for narrow corridor
+max_road_width: 7.0
+
+# === Obstacle / Pedestrian Parameters ===
+ped_radius: 0.2
+obstacle_radius: 0.2
+
+# === Planner Cost Weights (optional) ===
+k_j: 0.5
+k_t: 1.0
+k_d: 0.5
+k_s_dot: 1.0
+k_lat: 0.5
+k_lon: 1.0
+
+# === Reference Path ===
+# Straight corridor
+reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0]
+reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+# === Pedestrians ===
+# Dense oncoming "Wall" and overtaking challenges
+ped_initial_states:
+  # -- The "Wall" (Oncoming) --
+  # A line of pedestrians walking abreast accurately down the hall
+  - [55.0, 1.6, -1.2, 0.1, -20.0, 2.0]
+  - [55.0, 1.2, -1.2, 0.1, -20.0, 1.6]
+  - [55.0, 0.8, -1.2, 0.1, -20.0, 1.2]
+
+  # -- Opposing friction --
+  - [40.0, 2.5, -1.0, 0.0, -10.0, 2.5]
+  - [40.0, 2.0, -1.0, 0.0, -10.0, 2.0]
+
+  # -- Opposing friction --
+  - [12.0, 1.5, 1.0, 0.0, 60.0, 1.5]
+  - [13.0, 1.0, 1.0, 0.0, 60.0, 1.0]
+
+ped_groups: 
+  - [0, 1, 2] # The Wall
+  - [3, 4]
+  - [5, 6]
+
+# === Static Obstacles ===
+# Corridor walls
+static_obstacles:
+  - [-5.0, 55.0, -5.0, -5.0] # Bottom wall
+  - [-5.0, 55.0, 5.0, 5.0]   # Top wall
+
+# === Map Visualization ===
+map_config:
+  road_borders:
+    - [-5.0, 5.0, 55.0, 5.0]
+    - [-5.0, -5.0, 55.0, -5.0]
+  lanes:
+    - [-5.0, 0.0, 55.0, 0.0]
+  crosswalks: []
+
+# === Model ===
+sgan_model_path: models/sgan-models/zara1_12_model.pt
+prediction_method: "lstm"
+
+# === Computation ===
+device: "cpu"
+
+# === Visualization ===
+visualization_enabled: true
+output_path: "output/scenario_02_lstm"

@@ -182,7 +182,7 @@ class DashboardGenerator:
         ax.grid(True)
         ax.legend(
             loc='upper center',
-            bbox_to_anchor=(0.5, -0.5),
+            bbox_to_anchor=(0.5, -0.2),
             ncol=3,
             fontsize=9
         )

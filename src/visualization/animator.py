@@ -147,7 +147,7 @@ class SimulationAnimator:
         self.ax_main.legend(
             handles=legend_elements,
             loc='upper center', 
-            bbox_to_anchor=(0.5, -0.5), # Place BELOW the plot
+            bbox_to_anchor=(0.5, -0.3), # Place BELOW the plot
             borderaxespad=0,
             ncol=3, # Spread horizontally
             fontsize=9,
