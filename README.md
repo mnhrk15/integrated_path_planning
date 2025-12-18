@@ -234,14 +234,8 @@ integrated_path_planning/
 
 1. **scenario_01.yaml**: 歩行者との交差シナリオ
 2. **scenario_02.yaml**: 狭い通路でのすれ違いシナリオ
-3. **scenario_03.yaml**: 曲線路合流＋歩行者すれ違い
-4. **scenario_04.yaml**: 多波交差の混雑シナリオ
-5. **scenario_05.yaml**: 静的障害で狭窄した通路を通過
-6. **scenario_06.yaml**: 斜め横断歩行者
-7. **scenario_07.yaml**: 高速車両とまばらな歩行者
-8. **scenario_08.yaml**: 複数の静的障害物と双方向流
-9. **scenario_09.yaml**: 左折/右折（Yielding）シナリオ（改良版: 滑らかな円弧経路と適切な歩行者配置）
-10. **scenario_10.yaml**: 交通量の多い交差点
+3. **scenario_03.yaml**: 交差点での右折（Yielding）シナリオ
+
 
 ## 主な設定項目（YAML）
 

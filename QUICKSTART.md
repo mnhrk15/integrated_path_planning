@@ -93,19 +93,6 @@ python examples/run_simulation.py --scenario scenarios/scenario_01.yaml
 python examples/run_simulation.py --scenario scenarios/scenario_02.yaml
 ```
 
-### 追加シナリオ
-
-```bash
-# 曲線路合流＋歩行者すれ違い
-python examples/run_simulation.py --scenario scenarios/scenario_03.yaml
-
-# 多波交差の混雑
-python examples/run_simulation.py --scenario scenarios/scenario_04.yaml
-
-# 静的障害で狭窄した通路
-python examples/run_simulation.py --scenario scenarios/scenario_05.yaml
-```
-
 ### カスタムオプション
 
 ```bash

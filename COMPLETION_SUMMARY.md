@@ -4,7 +4,7 @@
 
 **実装日:** 2025-12-16  
 **プロジェクト:** Integrated Path Planning System  
-**追加機能:** シナリオ強化とパラメータ調整 (v3.0) → 修正と改善 (v3.1)
+**追加機能:** 最適化と修正 (v3.0) → 修正と改善 (v3.1)
 
 ---
 
@@ -52,9 +52,8 @@
 - [x] Simulation Animatorでの雲描画
 - [x] Metrics Export (CSV Append Mode) (v2.2)
 
-### 4.5 シナリオ強化 (v3.0) ✅
+### 4.5 最適化 (v3.0) ✅
 
-- [x] 全10シナリオの大幅刷新 (Density / Interaction)
 - [x] Social Forceパラメータ調整機能の実装 (Sigma / V0)
 - [x] デフォルト設定の最適化
 

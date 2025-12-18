@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Generate GIF animations for all scenarios 01-10
+# Generate GIF animations for all scenarios
 echo "Starting batch animation generation..."
 
-for k in {1..10}; do
+for k in {1..3}; do
     i=$(printf "%02d" $k)
     echo "----------------------------------------------------------------"
     echo "Generating animation for scenario_$i..."

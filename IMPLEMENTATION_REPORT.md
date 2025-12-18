@@ -150,7 +150,6 @@
 ### ✅ Phase 12: シナリオ強化とパラメータチューニング (v3.0 - NEW!)
 
 - [x] **Comprehensive Scenario Overhaul**
-  - 全10シナリオ（`scenario_01`〜`10`）を大幅に刷新
   - 歩行者密度の増加（Rush Hour, Crowd Wall, Scramble Crossing）
   - 複雑な相互作用パターンの導入（合流、対向流、ボトルネック、斜め横断）
   - 歩行者の移動距離を延長し、シミュレーション途中での停止を防止
@@ -222,8 +221,7 @@ integrated_path_planning/
 ├── scenarios/               ✓ シミュレーションシナリオ
 │   ├── scenario_01.yaml     ✓ 交差
 │   ├── scenario_02.yaml     ✓ 通路
-│   ├── ...                  ✓ (全10シナリオ)
-│   └── scenario_10.yaml     ✓ 交差点
+│   ├── ...
 ├── models/                  ⚠ 学習済みモデル配置用（空）
 ├── tests/                   ✓ ユニットテスト
 │   └── test_coordinate_converter.py
@@ -574,6 +572,6 @@ MIT License
 
 **推奨される最初のステップ**: 
 1. 環境セットアップ
-2. シナリオ01/04の実行
+2. シナリオ01/02の実行
 3. dashboard.png の確認
 

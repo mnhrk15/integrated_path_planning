@@ -1,14 +1,16 @@
-# Scenario 03: Curved merge with oncoming pedestrians
+# Scenario 03: Intersection Right Turn (Yielding)
 #
-# Situation:
-# - Ego follows a gentle left curve (simulating an on-ramp / bend).
-# - Pedestrians walk tangentially near the curve; ego must keep safe lateral gap.
+# Situation: 
+# - Ego vehicle approaches a 4-way intersection and turns RIGHT.
+# - (Assuming Right-Hand Traffic: Turning from West leg to South leg).
+# - Challenge: Ego must safely navigate the curve and Yield to pedestrians 
+#   crossing the target street (South leg crosswalk).
 
 # === Time Parameters ===
 dt: 0.1
 total_time: 30.0
 
-# === Social Force Parameters (Tuning) ===
+# === Social Force Parameters ===
 social_force_params:
   ped_repulsion.sigma: 0.7 
   ped_repulsion.v0: 3.5 
@@ -20,11 +22,12 @@ pred_len: 12
 num_samples: 20
 
 # === Ego Vehicle Parameters ===
-ego_initial_state: [0.0, 0.0, 0.0, 6.0, 0.0]
-ego_target_speed: 7.0
-ego_max_speed: 12.0
-ego_max_accel: 2.0
-ego_max_curvature: 0.8
+# Start: West Leg (-30, 2.5), Heading East (0 rad)
+ego_initial_state: [-30.0, 2.5, 0.0, 6.0, 0.0]
+ego_target_speed: 8.0
+ego_max_speed: 10.0
+ego_max_accel: 3.0
+ego_max_curvature: 1.0
 ego_radius: 1.0
 
 # === Planning Parameters ===
@@ -35,73 +38,66 @@ max_road_width: 7.0
 ped_radius: 0.2
 obstacle_radius: 0.2
 
-# === Reference Path (gentle left curve) ===
-reference_waypoints_x: [0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0]
-reference_waypoints_y: [0.0, 2.0, 6.0, 10.0, 13.0, 15.0, 16.0]
+# === Planner Cost Weights (optional) ===
+k_j: 0.5
+k_t: 1.0
+k_d: 1.0
+k_s_dot: 0.5
+k_lat: 1.5
+k_lon: 1.0
+
+# === Reference Path (Right Turn) ===
+# From West (-30, 2.5) to South (2.5, -30)
+# A smooth curve connecting the two lanes (Rounded R=8m approx)
+# A smooth curve connecting the two lanes (Geometric Arc R=10.5m)
+reference_waypoints_x: [-30.0, -8.0, -0.4, 2.0, 2.0]
+reference_waypoints_y: [2.5, 2.5, -0.4, -8.0, -30.0]
 
 # === Pedestrians ===
-# Chaotic mix of crossing and parallel walking near curve
-# === Pedestrians ===
-# Chaotic mix of crossing and parallel walking near curve
-# Extended paths to ensure no stopping
 ped_initial_states:
-  # -- Crossing Group near apex (Inner to Outer) --
-  # Extended goals
-  - [28.0, 13.0, -0.6, -0.2, 10.0, 5.0]
-  - [29.0, 14.0, -0.6, -0.2, 11.0, 6.0]
-  - [27.0, 12.0, -0.7, -0.1, 8.0, 5.0]
-  
-  # -- Fast individual crossing late (Outer to Inner) --
-  - [45.0, 18.0, -0.8, -0.2, 25.0, 8.0]
-  - [50.0, 19.0, -0.9, -0.3, 30.0, 10.0]
+  # -- Group 1: Crossing the TARGET road (South Leg) --
+  # Critical Conflict: Ego mid-turn meets these
+  # Crossing Left -> Right (East -> West) at y=-12
+  - [18.0, -12.0, -1.2, 0.0, -40.0, -12.0]
+  - [19.0, -11.0, -1.3, 0.0, -40.0, -11.0]
+  - [20.0, -13.0, -1.1, 0.0, -40.0, -13.0]
 
-  # -- Parallel walkers (Walking "against" ego on the inner track) --
-  # Walking along the curve boundary, crowding the lane
-  - [40.0, 10.0, -0.8, -0.2, 10.0, 0.0]
-  - [42.0, 11.0, -0.8, -0.2, 12.0, 1.0]
-  - [44.0, 12.0, -0.8, -0.2, 14.0, 2.0]
-
-  # -- The "Squeeze" Group --
-  # Static/Slow group right at the apex of the curve on the road
-  - [30.0, 9.0, 0.1, 0.05, 35.0, 11.0] 
-  - [31.0, 9.5, 0.1, 0.05, 36.0, 11.5]
+  # -- Group 2: Crossing the TARGET road (Opposing) --
+  # Crossing Right -> Left (West -> East) at y=-14
+  - [-18.0, -14.0, 1.2, 0.0, 40.0, -14.0]
+  - [-16.0, -15.0, 1.0, 0.0, 40.0, -15.0]
 
 ped_groups: 
-  - [0, 1, 2]
-  - [3, 4]
-  - [5, 6, 7]
-  - [8, 9]
-
-# === Static Obstacles ===
-static_obstacles: []
+  - [0, 1, 2] # Target road wave 1
+  - [3, 4]    # Target road wave 2
 
 # === Map Visualization ===
 map_config:
   road_borders:
-    # Left Border (approx offset +4m)
-    - [0.0, 4.0, 10.0, 6.0]
-    - [10.0, 6.0, 20.0, 10.0]
-    - [20.0, 10.0, 30.0, 14.0]
-    - [30.0, 14.0, 40.0, 17.0]
-    - [40.0, 17.0, 60.0, 20.0]
-    # Right Border (approx offset -4m)
-    - [0.0, -4.0, 10.0, -2.0]
-    - [10.0, -2.0, 20.0, 2.0]
-    - [20.0, 2.0, 30.0, 6.0]
-    - [30.0, 6.0, 40.0, 9.0]
-    - [40.0, 9.0, 60.0, 12.0]
+    # Horizontal (West-East)
+    - [-50.0, 5.0, 50.0, 5.0]
+    - [-50.0, -5.0, -5.0, -5.0] # Gap for South road
+    - [5.0, -5.0, 50.0, -5.0]   # Gap for South road
+    # Vertical (North-South)
+    - [-5.0, 50.0, -5.0, 5.0]
+    - [-5.0, -5.0, -5.0, -50.0]
+    - [5.0, 50.0, 5.0, 5.0]
+    - [5.0, -5.0, 5.0, -50.0]
+    
   lanes:
-    # Center Line (Reference Path)
-    - [0.0, 0.0, 10.0, 2.0]
-    - [10.0, 2.0, 20.0, 6.0]
-    - [20.0, 6.0, 30.0, 10.0]
-    - [30.0, 10.0, 40.0, 13.0]
-    - [40.0, 13.0, 50.0, 15.0]
-    - [50.0, 15.0, 60.0, 16.0]
-  crosswalks: []
+    # Center lines
+    - [-50.0, 0.0, 50.0, 0.0]
+    - [0.0, 50.0, 0.0, -50.0]
+    
+  crosswalks:
+    # South Leg (Critical)
+    - [-5.0, -15.0, 10.0, 4.0]
+    # West Leg (Initial)
+    - [-15.0, -5.0, 4.0, 10.0]
 
 # === Model ===
-sgan_model_path: models/sgan-p-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint before running
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt
+prediction_method: sgan
 
 # === Computation ===
 device: "cpu"
