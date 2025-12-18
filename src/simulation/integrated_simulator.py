@@ -323,7 +323,28 @@ class IntegratedSimulator:
             config.static_obstacles, step=0.5
         )
         
+        if self.pedestrian_sim is not None:
+            self.warmup()
+        
         logger.info("Integrated simulator initialization complete")
+    
+    def warmup(self):
+        """Warm up the simulation to fill observer history.
+        
+        This advances the pedestrian simulation and observer without
+        advancing the main simulation clock or recording history,
+        so that predictions are available immediately at t=0.
+        """
+        warmup_steps = int(self.config.obs_len * self.observer.sgan_dt / self.config.dt)
+        logger.info(f"Warming up simulation for {warmup_steps} steps...")
+        
+        for _ in range(warmup_steps):
+            # Step pedestrians (Ego is at 0,0,0,0 during warmup as defined in init)
+            self.pedestrian_sim.step(self.ego_state)
+            ped_state = self.pedestrian_sim.get_state()
+            self.observer.update(ped_state)
+            
+        logger.info("Warmup complete. Observer is ready.")
     
     def step(self) -> SimulationResult:
         """Execute one simulation step.

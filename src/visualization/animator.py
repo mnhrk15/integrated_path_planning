@@ -14,7 +14,8 @@ if os.environ.get("MPLBACKEND") is None:
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from matplotlib.patches import Circle, Rectangle, FancyArrow, Polygon
+from matplotlib.lines import Line2D
+from matplotlib.patches import Circle, Rectangle, FancyArrow, Polygon, Patch
 from matplotlib.collections import PatchCollection
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict
@@ -124,6 +125,27 @@ class SimulationAnimator:
             ego_color, ped_color, pred_color, plan_color
         )
         
+        # Add legend with proxy artists
+        legend_elements = [
+            Patch(facecolor=ego_color, edgecolor='black', alpha=0.9, label='Ego Vehicle'),
+            Line2D([0], [0], color=ped_color, marker='o', linestyle='None', 
+                  markersize=8, alpha=0.7, label='Pedestrian'),
+        ]
+        
+        if show_predictions:
+            legend_elements.append(
+                Line2D([0], [0], color=pred_color, linestyle='-', linewidth=2, 
+                      alpha=0.8, label='Predicted Trajectory')
+            )
+            
+        if show_planned_path:
+            legend_elements.append(
+                Line2D([0], [0], color=plan_color, linestyle='--', linewidth=1.5, 
+                      label='Planned Path')
+            )
+            
+        self.ax_main.legend(handles=legend_elements, loc='upper right', fontsize=10, framealpha=0.9)
+        
         # Create animation
         self.anim = animation.FuncAnimation(
             self.fig,
@@ -227,12 +249,12 @@ class SimulationAnimator:
         artists = {}
         
         # Ego vehicle (triangle/arrow)
-        artists['ego'] = FancyArrow(
-            0, 0, 1, 0,
-            width=1.5, head_width=2.5, head_length=2.0,
-            fc=ego_color, ec='black', alpha=0.8,
-            transform=self.ax_main.transData,
-            zorder=10
+        # Ego vehicle (Rectangle using Polygon)
+        # Initial dummy shape
+        artists['ego'] = Polygon(
+            [[0, 0], [0, 0], [0, 0], [0, 0]],
+            fc=ego_color, ec='black', alpha=0.9,
+            zorder=10, label='Ego Vehicle'
         )
         self.ax_main.add_patch(artists['ego'])
         
@@ -315,11 +337,28 @@ class SimulationAnimator:
         ego = result.ego_state
         
         # Update arrow position and rotation
-        dx = 2.0 * np.cos(ego.yaw)
-        dy = 2.0 * np.sin(ego.yaw)
-        artists['ego'].set_data(
-            x=ego.x, y=ego.y, dx=dx, dy=dy
-        )
+        # Car dimensions (approximate average car size)
+        L = 4.5  # Length
+        W = 2.0  # Width
+        
+        # Calculate corners relative to center (Yaw=0 points East/+X)
+        # FL, FR, RR, RL
+        corners_local = np.array([
+            [L/2, W/2],
+            [L/2, -W/2],
+            [-L/2, -W/2],
+            [-L/2, W/2]
+        ])
+        
+        # Rotation
+        c, s = np.cos(ego.yaw), np.sin(ego.yaw)
+        R = np.array([[c, -s], [s, c]])
+        
+        # Rotate and translate
+        corners_global = corners_local @ R.T + np.array([ego.x, ego.y])
+        
+        # Update polygon vertices
+        artists['ego'].set_xy(corners_global)
         
         # Update trail
         start_idx = max(0, frame - trail_length)

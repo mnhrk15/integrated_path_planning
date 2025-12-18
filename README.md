@@ -39,12 +39,16 @@
 ### シミュレーションエンジン (v1.2 Update)
 - **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。
 - **自動終了機能 (v3.1 Update)**: 車両が参照経路のゴール地点（2m以内）に到達すると、設定された `total_time` を待たずにシミュレーションを自動終了し、効率的な評価が可能になりました。
+- **予測ウォームアップ機能 (v3.2 Update)**: シミュレーション開始時 ($t=0$) に自動的に過去の観測データを生成（プリロール）する初期化フェーズを導入しました。これにより、**開始直後からSocial-GANによる有効な軌道予測が可能**となり、初期のラグが解消されました。
 
 ### 評価と可視化 (v1.3 & v2.1 Update)
 - **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
 - **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
 - **Map Visualization**: 道路境界線、レーン、横断歩道などの地図情報をアニメーションとダッシュボードに描画し、状況把握を容易にしました。
 - **Uncertainty Visualization (v2.1)**: Social-GANの確率的推論を活用し、複数サンプルの予測軌道をアニメーション上に描画することで、予測の不確実性を直感的に把握可能にしました。
+- **Enhanced Animation (v3.3)**: 
+    - 車両を**長方形** (4.5m x 2.0m) で描画し、Yaw角（向き）を明確化。
+    - **凡例 (Legend)** を追加し、Ego車両、歩行者、予測軌道、計画経路を識別しやすく改善。
 - **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
 
 ### 比較研究機能 (v1.4 Update - Prediction Modes)
@@ -93,11 +97,11 @@ bash scripts/download_sgan_models.sh
 ```
 
 ダウンロードされるモデル例：
-- `models/sgan-models/eth_8_model.pt` / `*_12_model.pt`
-- `models/sgan-models/hotel_8.pt`
-- `models/sgan-models/univ_8.pt`
-- `models/sgan-models/zara1_8.pt`
-- `models/sgan-models/zara2_8.pt`
+- `models/sgan-models/eth_12_model.pt` / `*_12_model.pt`
+- `models/sgan-models/hotel_12.pt`
+- `models/sgan-models/univ_12.pt`
+- `models/sgan-models/zara1_12.pt`
+- `models/sgan-models/zara2_12.pt`
 
 モデルサイズ: 各モデル約5-10MB（合計数十MB）
 
@@ -203,7 +207,7 @@ python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
 
 ```yaml
 # scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-p-models/zara1_8_model.pt"
+sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
 ```
 
 ## プロジェクト構成
@@ -236,16 +240,20 @@ integrated_path_planning/
 6. **scenario_06.yaml**: 斜め横断歩行者
 7. **scenario_07.yaml**: 高速車両とまばらな歩行者
 8. **scenario_08.yaml**: 複数の静的障害物と双方向流
-9. **scenario_09.yaml**: 混雑した狭い通路
+9. **scenario_09.yaml**: 左折/右折（Yielding）シナリオ（改良版: 滑らかな円弧経路と適切な歩行者配置）
 10. **scenario_10.yaml**: 交通量の多い交差点
 
 ## 主な設定項目（YAML）
 
-- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len`, `num_samples` (SGAN予測サンプル数, 推奨: 20)
-- Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature`
-- 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.5), `max_road_width` (最大横探索幅)
-- 安全パラメータ: `ego_radius`, `ped_radius`, `obstacle_radius`
-- プランナ重み（任意上書き）: `k_j`, `k_t`, `k_d`, `k_s_dot`, `k_lat`, `k_lon`
+- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len` (default=12), `num_samples` (SGAN予測サンプル数, 推奨: 20)
+- Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature` (default=1.0)
+- 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.3), `max_road_width` (最大横探索幅)
+- 安全パラメータ: `ego_radius` (自車半径), `ped_radius` (プランナ用マージン), `obstacle_radius`
+  - `social_force_params.agent_radius`: 歩行者シミュレータ内での歩行者の物理半径
+- プランナ重み（任意上書き）: 
+  - `k_lat`: 横方向偏差の重み（低いと障害物回避で大きく避けるようになる）
+  - `k_j`: ジャークの重み（低いとキビキビ動く）
+  - `k_t`, `k_d`, `k_s_dot`, `k_lon`
 - 経路: `reference_waypoints_x`, `reference_waypoints_y`
 - 歩行者: `ped_initial_states`, `ped_groups`
 - 障害物: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）

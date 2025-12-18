@@ -17,7 +17,7 @@ social_force_params:
 
 # === Observation Parameters ===
 obs_len: 8
-pred_len: 8
+pred_len: 12
 num_samples: 20
 
 # === Ego Vehicle Parameters ===
@@ -46,26 +46,26 @@ reference_waypoints_y: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 # Pedestrians have longer goals to ensure continuous movement
 ped_initial_states:
   # -- Group 1: Heavy flow from Right (Top) to Left (Bottom) --
-  - [18.0, 6.0, 0.0, -1.3, 18.0, -20.0]
-  - [19.0, 5.0, 0.0, -1.2, 19.0, -20.0]
-  - [20.0, 6.5, 0.0, -1.4, 20.0, -20.0]
-  - [21.0, 4.0, 0.0, -1.1, 21.0, -20.0]
-  - [22.0, 7.0, 0.0, -1.3, 22.0, -20.0]
+  - [18.0, 11.0, 0.0, -1.3, 18.0, -20.0]
+  - [19.0, 10.0, 0.0, -1.2, 19.0, -20.0]
+  - [20.0, 11.5, 0.0, -1.4, 20.0, -20.0]
+  - [21.0, 9.0, 0.0, -1.1, 21.0, -20.0]
+  - [22.0, 12.0, 0.0, -1.3, 22.0, -20.0]
   
   # -- Group 2: Heavy flow from Left (Bottom) to Right (Top) --
-  - [28.0, -10.0, 0.0, 1.2, 28.0, 20.0]
-  - [29.0, -9.0, 0.0, 1.3, 29.0, 20.0]
-  - [30.0, -11.0, 0.0, 1.1, 30.0, 20.0]
-  - [31.0, -8.0, 0.0, 1.2, 31.0, 20.0]
-  - [32.0, -11.5, 0.0, 1.4, 32.0, 20.0]
+  - [28.0, -18.0, 0.0, 1.2, 28.0, 20.0]
+  - [29.0, -17.0, 0.0, 1.3, 29.0, 20.0]
+  - [30.0, -19.0, 0.0, 1.1, 30.0, 20.0]
+  - [31.0, -16.0, 0.0, 1.2, 31.0, 20.0]
+  - [32.0, -19.5, 0.0, 1.4, 32.0, 20.0]
 
   # -- Chaos/Diagonals --
-  - [15.0, 10.0, 0.2, -1.0, 35.0, -10.0] # Diagonal crossing path
-  - [35.0, -10.0, -0.2, 1.0, 15.0, 10.0] # Opposing diagonal
+  - [15.0, 10.0, 0.2, -1.0, 45.0, -20.0] # Diagonal crossing path
+  - [35.0, -10.0, -0.2, 1.0, 5.0, 20.0] # Opposing diagonal
 
   # -- Stragglers / Late runners --
   - [25.0, 20.0, 0.0, -1.8, 25.0, -20.0] # Fast runner down the middle
-  - [40.0, -5.0, -0.5, 0.2, 30.0, 5.0]   # Walking along the road, crossing slowly
+  - [40.0, -5.0, -0.5, 0.5, 20.0, 20.0]   # Walking along the road
 
 ped_groups: 
   - [0, 1, 2, 3, 4]       # Right-to-left wave
@@ -87,7 +87,7 @@ map_config:
     - [28.0, -5.0, 4.0, 10.0]
 
 # === Model ===
-sgan_model_path: models/sgan-p-models/zara1_8_model.pt  # Set to a downloaded SGAN checkpoint (required)
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt  # Set to a downloaded SGAN checkpoint (required)
 
 # === Computation ===
 device: "cpu"
