@@ -147,7 +147,7 @@ class SimulationAnimator:
         self.ax_main.legend(
             handles=legend_elements,
             loc='upper center', 
-            bbox_to_anchor=(0.5, -0.3), # Place BELOW the plot
+            bbox_to_anchor=(0.5, -0.15), # Place BELOW the plot
             borderaxespad=0,
             ncol=3, # Spread horizontally
             fontsize=9,
@@ -288,7 +288,7 @@ class SimulationAnimator:
             )
         
         # Metric lines
-        if hasattr(self, 'ax_velocity'):
+        if self.ax_velocity is not None:
             artists['velocity_line'], = self.ax_velocity.plot(
                 [], [], 'b-', linewidth=2
             )
@@ -296,7 +296,7 @@ class SimulationAnimator:
                 [], [], 'bo', markersize=8
             )
         
-        if hasattr(self, 'ax_distance'):
+        if self.ax_distance is not None:
             artists['distance_line'], = self.ax_distance.plot(
                 [], [], 'g-', linewidth=2
             )
@@ -551,6 +551,7 @@ def create_simple_animation(
     show_metrics: bool = True,
     show_planned_path: bool = True,
     trail_length: int = 50,
+    figsize: Tuple[float, float] = (14, 8),
     fps: int = 10,
     **kwargs,
 ) -> SimulationAnimator:
@@ -560,12 +561,13 @@ def create_simple_animation(
         results: Simulation results
         output_path: Path to save animation (None = don't save)
         show: Whether to display the animation
+        figsize: Figure size (width, height)
         **kwargs: Additional arguments passed to create_animation()
         
     Returns:
         SimulationAnimator instance
     """
-    animator = SimulationAnimator(results, map_config=map_config)
+    animator = SimulationAnimator(results, map_config=map_config, figsize=figsize)
     
     # Determine writer from file extension
     writer = 'pillow'  # Default to GIF

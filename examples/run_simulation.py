@@ -121,33 +121,53 @@ def main():
     # Simulator.visualize() is deprecated
     
     # Generate animation if requested
+    # Generate animation if requested
     if args.animate:
         logger.info(f"Generating animation ({args.animation_format.upper()})...")
         output_dir = Path(config.output_path)
         output_dir.mkdir(parents=True, exist_ok=True)
         
         ext = '.gif' if args.animation_format == 'gif' else '.mp4'
-        animation_path = output_dir / f"simulation{ext}"
         
+        # 1. Standard Animation (with metrics)
+        animation_path = output_dir / f"simulation{ext}"
         try:
+            logger.info("Generating standard animation (simulation)...")
             create_simple_animation(
                 results=results,
                 output_path=animation_path,
-                show=False,  # Don't show, just save
+                show=False,
                 show_predictions=True,
                 show_metrics=True,
+                figsize=(14, 8), # Default wide layout
                 fps=args.fps,
                 map_config=getattr(config, 'map_config', None)
             )
-            logger.success(f"✓ Animation saved to {animation_path}")
+            logger.success(f"✓ Standard animation saved to {animation_path}")
         except Exception as e:
-            logger.error(f"Failed to create animation: {e}")
-            logger.info("Make sure you have:")
-            if args.animation_format == 'gif':
-                logger.info("  - pillow installed: pip install pillow")
-            else:
-                logger.info("  - ffmpeg installed: apt-get install ffmpeg (or brew install ffmpeg)")
-                logger.info("  - ffmpeg-python installed: pip install ffmpeg-python")
+            logger.error(f"Failed to create standard animation: {e}")
+
+        # 2. Simple Animation (map only)
+        simple_animation_path = output_dir / f"simulation_simple{ext}"
+        try:
+            logger.info("Generating simple animation (simulation_simple)...")
+            create_simple_animation(
+                results=results,
+                output_path=simple_animation_path,
+                show=False,
+                show_predictions=True,
+                show_metrics=False, # No metrics
+                figsize=(10, 10),   # Square layout
+                fps=args.fps,
+                map_config=getattr(config, 'map_config', None)
+            )
+            logger.success(f"✓ Simple animation saved to {simple_animation_path}")
+        except Exception as e:
+            logger.error(f"Failed to create simple animation: {e}")
+
+        # Troubleshooting tip (shown only once)
+        if args.animation_format == 'mp4':
+             logger.info("If mp4 generation fails, ensure ffmpeg is installed: `brew install ffmpeg`")
     
     # Print summary
     logger.info("=" * 60)
