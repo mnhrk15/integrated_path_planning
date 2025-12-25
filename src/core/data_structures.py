@@ -263,6 +263,7 @@ class SimulationResult:
     predicted_distribution: Optional[np.ndarray] = None  # [n_samples, n_peds, n_steps, 2]
     planned_path: Optional[FrenetPath] = None
     metrics: dict = field(default_factory=dict)
+    processing_times: dict = field(default_factory=dict)
     ego_radius: float = 1.0
     ped_radius: float = 0.3
     state: VehicleState = VehicleState.NORMAL

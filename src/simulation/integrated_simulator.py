@@ -5,6 +5,7 @@ This is the main simulation module that orchestrates all components.
 
 import numpy as np
 import csv
+import time
 from pathlib import Path
 from typing import List, Dict, Optional
 from loguru import logger
@@ -366,6 +367,7 @@ class IntegratedSimulator:
         predicted_dist = None
         dynamic_obstacles = np.empty((0, 0, 2))
         static_obstacles = self.static_obstacle_points.copy()
+        t_pred = 0.0
         
         if ped_state is not None and self.observer.is_ready:
             try:
@@ -373,9 +375,11 @@ class IntegratedSimulator:
                 obs_traj, obs_traj_rel, seq_start_end = self.observer.get_observation()
                 
                 # Predict
+                t_start = time.perf_counter()
                 predicted_traj, predicted_dist = self.predictor.predict_single_best(
                     obs_traj, obs_traj_rel, seq_start_end
                 )
+                t_pred = time.perf_counter() - t_start
                 
                 # Preserve time dimension for dynamic collision checks - NO CONVERSION
                 dynamic_obstacles = self.coord_converter.pass_through_obstacle(
@@ -391,9 +395,11 @@ class IntegratedSimulator:
                 logger.warning(f"Prediction failed: {e}, using current positions")
                 if ped_state is not None:
                     dynamic_obstacles = ped_state.positions[:, None, :]
+                t_pred = 0.0
         elif ped_state is not None:
             # Not enough observations yet, use current positions
             dynamic_obstacles = ped_state.positions[:, None, :]
+            t_pred = 0.0
 
         # Include current pedestrian positions at time t=0 for collision checks
         if ped_state is not None:
@@ -423,6 +429,7 @@ class IntegratedSimulator:
         if target_speed is None:
             target_speed = self.config.ego_target_speed
             
+        t_start = time.perf_counter()
         planned_path = self.planner.plan(
             self.ego_state,
             static_obstacles,
@@ -430,6 +437,7 @@ class IntegratedSimulator:
             target_speed=target_speed,
             constraint_overrides=sm_output.constraint_overrides
         )
+        t_plan = time.perf_counter() - t_start
         
         # Update State Machine based on result
         found_path = (planned_path is not None)
@@ -513,6 +521,7 @@ class IntegratedSimulator:
             planned_path=planned_path,
             ego_radius=self.ego_radius,
             ped_radius=self.ped_radius,
+            processing_times={'prediction': t_pred, 'planning': t_plan}
             # state=self.ego_state.state # Implicitly in ego_state
         )
         
@@ -637,6 +646,10 @@ class IntegratedSimulator:
         ego_jerk = [r.ego_state.jerk for r in self.history]
         min_distances = [r.metrics.get('min_distance', float('inf')) for r in self.history]
         ttc_list = [r.metrics.get('ttc', float('inf')) for r in self.history]
+        
+        # Processing times
+        proc_pred = [r.processing_times.get('prediction', 0.0) for r in self.history]
+        proc_plan = [r.processing_times.get('planning', 0.0) for r in self.history]
 
         ped_positions = [r.ped_state.positions for r in self.history]
         ped_velocities = [r.ped_state.velocities for r in self.history]
@@ -684,6 +697,8 @@ class IntegratedSimulator:
             ego_state=np.array(ego_state_enum), # Store state string
             min_distances=np.array(min_distances),
             ttc=np.array(ttc_list),
+            proc_prediction=np.array(proc_pred),
+            proc_planning=np.array(proc_plan),
             ped_positions=np.array(ped_positions, dtype=object),
             ped_velocities=np.array(ped_velocities, dtype=object),
             ped_goals=np.array(ped_goals, dtype=object),
@@ -704,6 +719,14 @@ class IntegratedSimulator:
         except Exception as e:
             logger.error(f"Failed to calculate metrics: {e}")
             metrics = {}
+
+        # Add processing time stats
+        if proc_pred:
+            metrics['avg_prediction_time'] = sum(proc_pred) / len(proc_pred)
+            metrics['max_prediction_time'] = max(proc_pred)
+        if proc_plan:
+            metrics['avg_planning_time'] = sum(proc_plan) / len(proc_plan)
+            metrics['max_planning_time'] = max(proc_plan)
 
         # --- save results to CSV and TXT ---
         # Prepare context data
