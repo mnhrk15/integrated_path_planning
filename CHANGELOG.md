@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2025-12-26
+
+#### Robustness and Performance Improvements (v3.6)
+- **Prediction Failure Fallback**: Enhanced fallback mechanism when Social-GAN prediction fails
+  - Automatically generates constant velocity trajectory predictions for the full planning horizon
+  - Maintains proper time dimension for collision checking even when prediction fails
+  - Uses current pedestrian velocities for extrapolation
+  - Falls back to default planning horizon (5.0s) if `max_t` is not configured
+- **Re-planning Attempt Limiting**: Added maximum re-planning attempts per step to prevent infinite loops
+  - Default maximum: 3 attempts per step
+  - Counter resets at the start of each new step
+  - System proceeds to emergency stop if maximum attempts reached
+  - Prevents system from getting stuck in re-planning loops
+- **Enhanced Error Handling**: Improved robustness with comprehensive boundary checks
+  - Added array index bounds checking in `calculate_ade_fde()` to prevent `IndexError`
+  - Added `None` value validation in coordinate conversion (`find_nearest_point_on_path()`)
+  - Automatic fallback to global search if local coordinate calculation fails
+  - Clear error messages with actionable information when coordinate conversion fails
+- **Performance Optimization**: Optimized path validation checks
+  - Replaced list comprehensions with generator expressions in `_check_paths()` method
+  - Enables early termination, reducing memory usage and CPU time
+  - Applied to speed, acceleration, and curvature limit checks
+
+### Changed - 2025-12-26
+- **Path Validation**: Optimized constraint checking using generator expressions for better performance
+- **Error Handling**: Enhanced error messages and fallback mechanisms throughout the codebase
+- **State Machine**: Added re-planning attempt tracking to prevent infinite loops
+
+### Fixed - 2025-12-26
+- **Array Index Bounds**: Fixed potential `IndexError` in `calculate_ade_fde()` when evaluating predictions near the end of simulation history
+- **Coordinate Conversion**: Fixed potential `None` reference errors in `find_nearest_point_on_path()` when reference path calculation fails
+- **Memory Efficiency**: Fixed inefficient list comprehension usage that prevented early termination in path validation
+
 ### Added - 2025-12-25
 
 #### Code Quality Improvements (v3.5)

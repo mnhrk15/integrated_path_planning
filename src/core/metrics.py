@@ -63,6 +63,11 @@ def calculate_ade_fde(history: List[SimulationResult], dt: float) -> Tuple[float
             
             for k in range(eval_steps):
                 d_idx = i + 1 + k
+                # Bounds check: ensure d_idx is within history range
+                if d_idx >= len(history):
+                    valid_gt = False
+                    break
+                
                 # Check if pedestrian p exists in ground truth
                 gt_state = history[d_idx].ped_state
                 if p < gt_state.n_peds:

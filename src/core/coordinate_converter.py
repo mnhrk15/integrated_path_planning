@@ -283,9 +283,26 @@ class CoordinateConverter:
         
         rs = best_s
         rx, ry = self.reference_path.calc_position(rs)
+        
+        # Validate that position calculation succeeded
+        if rx is None or ry is None:
+            logger.error(f"Failed to calculate position at s={rs:.2f}, falling back to global search")
+            best_s = self._global_search(x, y)
+            rs = best_s
+            rx, ry = self.reference_path.calc_position(rs)
+            if rx is None or ry is None:
+                raise ValueError(f"Failed to find valid reference point for position ({x:.2f}, {y:.2f})")
+        
         rtheta = self.reference_path.calc_yaw(rs)
         rkappa = self.reference_path.calc_curvature(rs)
         rdkappa = self.reference_path.calc_curvature_rate(rs)
+        
+        # Validate that all required values are available
+        if any(v is None for v in [rtheta, rkappa, rdkappa]):
+            raise ValueError(
+                f"Failed to calculate reference path properties at s={rs:.2f}: "
+                f"yaw={rtheta}, curvature={rkappa}, curvature_rate={rdkappa}"
+            )
         
         return rs, rx, ry, rtheta, rkappa, rdkappa
     
