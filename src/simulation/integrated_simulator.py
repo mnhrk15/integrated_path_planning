@@ -18,7 +18,7 @@ from ..core.data_structures import (
 from ..core.coordinate_converter import CoordinateConverter
 from ..config import SimulationConfig
 from ..planning import CubicSpline2D, FrenetPlanner
-from ..planning.frenet_planner import MAX_T
+# MAX_T is now configurable via config.max_t
 from ..pedestrian.observer import PedestrianObserver
 from ..prediction.trajectory_predictor import TrajectoryPredictor
 from ..core.state_machine import FailSafeStateMachine, VehicleState
@@ -278,6 +278,7 @@ class IntegratedSimulator:
         )
         
         # 4. Initialize trajectory predictor
+        plan_horizon = getattr(config, 'max_t', 5.0)
         self.predictor = TrajectoryPredictor(
             model_path=config.sgan_model_path,
             pred_len=config.pred_len,
@@ -285,7 +286,7 @@ class IntegratedSimulator:
             device=config.device,
             sgan_dt=self.observer.sgan_dt,
             sim_dt=config.dt,
-            plan_horizon=MAX_T,
+            plan_horizon=plan_horizon,
             method=getattr(config, 'prediction_method', 'sgan')
         )
         
@@ -300,6 +301,10 @@ class IntegratedSimulator:
             max_road_width=config.max_road_width,
             robot_radius=self.ego_radius,
             obstacle_radius=config.obstacle_radius,
+            min_t=getattr(config, 'min_t', 4.0),
+            max_t=getattr(config, 'max_t', 5.0),
+            d_t_s=getattr(config, 'd_t_s', 5.0 / 3.6),
+            n_s_sample=getattr(config, 'n_s_sample', 1),
             k_j=config.k_j,
             k_t=config.k_t,
             k_d=config.k_d,

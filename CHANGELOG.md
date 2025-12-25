@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2025-12-16
+
+#### Configuration Improvements (v3.4)
+- **Configurable State Machine Parameters**: All hardcoded values in `FailSafeStateMachine` are now configurable via YAML
+  - Safe distances for state transitions (`state_machine_safe_distance_caution`, `state_machine_safe_distance_emergency`)
+  - Constraint multipliers for CAUTION and EMERGENCY states (acceleration, curvature, speed)
+  - Allows fine-tuning of fail-safe behavior per scenario
+- **Configurable Planner Time Horizon**: Planner time horizon parameters are now configurable
+  - `min_t`, `max_t`: Minimum and maximum prediction time [s]
+  - `d_t_s`, `n_s_sample`: Target speed sampling parameters
+  - Enables scenario-specific optimization of planning horizon
+- Added comprehensive documentation for new configuration parameters in README.md, QUICKSTART.md, and ADDITIONAL_FEATURES.md
+
+### Changed - 2025-12-16
+- **State Machine**: Removed hardcoded values (0.5m, 1.0m safe distances, 1.5/1.2/0.8/3.0/2.0 multipliers) and replaced with configurable parameters
+- **Frenet Planner**: Replaced module-level constants (`MIN_T`, `MAX_T`, `D_T_S`, `N_S_SAMPLE`) with instance variables that use configuration values
+- **Backward Compatibility**: All new parameters have default values matching previous hardcoded values, ensuring existing scenario files work without modification
+
 ### Added - 2025-12-15
 
 #### Social-GAN Model Integration

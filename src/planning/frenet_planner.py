@@ -71,6 +71,10 @@ class FrenetPlanner:
         max_road_width: float = MAX_ROAD_WIDTH,
         robot_radius: float = ROBOT_RADIUS,
         obstacle_radius: float = 0.3,
+        min_t: float = MIN_T,
+        max_t: float = MAX_T,
+        d_t_s: float = D_T_S,
+        n_s_sample: int = N_S_SAMPLE,
         **kwargs
     ):
         self.csp = reference_path
@@ -83,6 +87,12 @@ class FrenetPlanner:
         self.converter = CartesianFrenetConverter()
         self.robot_radius = robot_radius
         self.obstacle_radius = obstacle_radius
+        
+        # Time horizon parameters (use provided values or fallback to module constants)
+        self.min_t = min_t
+        self.max_t = max_t
+        self.d_t_s = d_t_s
+        self.n_s_sample = n_s_sample
 
         # Cost weights (default to module constants; can be overridden via kwargs)
         self.k_j = kwargs.get("k_j", K_J)
@@ -94,7 +104,8 @@ class FrenetPlanner:
         
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
-                   f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m")
+                   f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
+                   f"time_horizon=[{min_t:.1f}, {max_t:.1f}]s")
     
     def plan(
         self,
@@ -217,13 +228,13 @@ class FrenetPlanner:
         """
         frenet_paths = []
         
-        # Sample different time horizons
-        for Ti in np.arange(MIN_T, MAX_T, self.dt):
+        # Sample different time horizons (use instance variables instead of module constants)
+        for Ti in np.arange(self.min_t, self.max_t, self.dt):
             # Longitudinal planning (velocity keeping)
             for tv in np.arange(
-                target_speed - D_T_S * N_S_SAMPLE,
-                target_speed + D_T_S * N_S_SAMPLE,
-                D_T_S
+                target_speed - self.d_t_s * self.n_s_sample,
+                target_speed + self.d_t_s * self.n_s_sample,
+                self.d_t_s
             ):
                 # Prevent reverse trajectories
                 if tv < 0.0:

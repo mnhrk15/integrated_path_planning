@@ -43,10 +43,10 @@ class FailSafeStateMachine:
         elif self.current_state == VehicleState.CAUTION:
             if plan_found and self.consecutive_failures == 0:
                 # If we recovered and planned successfully, try to go back to NORMAL
-                # But maybe we should stay in CAUTION for a bit? 
-                # For simplicity, if we found a path, check safety.
+                # Check safety distance from config
                 min_dist = safety_metrics.get('min_distance', float('inf'))
-                if min_dist > 0.5: # Hardcoded safe distance
+                safe_distance = getattr(self.config, 'state_machine_safe_distance_caution', 0.5)
+                if min_dist > safe_distance:
                     self.current_state = VehicleState.NORMAL
             elif not plan_found:
                 # If CAUTION extraction failed, escalate
@@ -61,7 +61,8 @@ class FailSafeStateMachine:
             # But if a very safe path appears, we could recover
             if plan_found:
                  min_dist = safety_metrics.get('min_distance', float('inf'))
-                 if min_dist > 1.0: # Hardcoded safe distance (emergency recovery)
+                 safe_distance = getattr(self.config, 'state_machine_safe_distance_emergency', 1.0)
+                 if min_dist > safe_distance:
                      self.current_state = VehicleState.CAUTION
             else:
                 # Keep trying to stop
@@ -80,26 +81,30 @@ class FailSafeStateMachine:
             
         elif self.current_state == VehicleState.CAUTION:
             # Relax constraints to find a path
+            accel_mult = getattr(self.config, 'state_machine_caution_accel_multiplier', 1.5)
+            curvature_mult = getattr(self.config, 'state_machine_caution_curvature_multiplier', 1.2)
+            speed_mult = getattr(self.config, 'state_machine_caution_speed_multiplier', 0.8)
             return StateMachineOutput(
                 state=VehicleState.CAUTION,
                 target_speed_override=None, # Keep trying to move, maybe slower?
-                # For now, let's say CAUTION means "move carefully" but allows higher jerk/accel if needed
                 constraint_overrides={
-                    "max_accel": self.config.ego_max_accel * 1.5,
-                    "max_curvature": self.config.ego_max_curvature * 1.2,
-                    "max_speed": self.config.ego_max_speed * 0.8 # Slow down
+                    "max_accel": self.config.ego_max_accel * accel_mult,
+                    "max_curvature": self.config.ego_max_curvature * curvature_mult,
+                    "max_speed": self.config.ego_max_speed * speed_mult
                 }
             )
             
         elif self.current_state == VehicleState.EMERGENCY:
             # STOP immediately
+            accel_mult = getattr(self.config, 'state_machine_emergency_accel_multiplier', 3.0)
+            curvature_mult = getattr(self.config, 'state_machine_emergency_curvature_multiplier', 2.0)
             return StateMachineOutput(
                 state=VehicleState.EMERGENCY,
                 target_speed_override=0.0,
                 # Allow extreme maneuvers to stop
                 constraint_overrides={
-                    "max_accel": self.config.ego_max_accel * 3.0,
-                    "max_curvature": self.config.ego_max_curvature * 2.0
+                    "max_accel": self.config.ego_max_accel * accel_mult,
+                    "max_curvature": self.config.ego_max_curvature * curvature_mult
                 }
             )
             

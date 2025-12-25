@@ -91,6 +91,21 @@ class SimulationConfig:
     d_road_w: float = 0.5
     max_road_width: float = 7.0
     
+    # Planner time horizon parameters
+    min_t: float = 4.0  # Minimum prediction time [s]
+    max_t: float = 5.0  # Maximum prediction time [s]
+    d_t_s: float = 5.0 / 3.6  # Target speed sampling width [m/s]
+    n_s_sample: int = 1  # Sampling number of target speed
+    
+    # State machine parameters
+    state_machine_safe_distance_caution: float = 0.5  # Safe distance for CAUTION->NORMAL transition [m]
+    state_machine_safe_distance_emergency: float = 1.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+    state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
+    state_machine_caution_curvature_multiplier: float = 1.2  # Curvature multiplier in CAUTION state
+    state_machine_caution_speed_multiplier: float = 0.8  # Speed multiplier in CAUTION state
+    state_machine_emergency_accel_multiplier: float = 3.0  # Acceleration multiplier in EMERGENCY state
+    state_machine_emergency_curvature_multiplier: float = 2.0  # Curvature multiplier in EMERGENCY state
+    
     # Pedestrians
     ped_initial_states: list = field(default_factory=list)
     ped_groups: list = field(default_factory=list)
@@ -168,6 +183,17 @@ def save_config(config: SimulationConfig, config_path: str):
         'reference_waypoints_y': config.reference_waypoints_y,
         'd_road_w': config.d_road_w,
         'max_road_width': config.max_road_width,
+        'min_t': config.min_t,
+        'max_t': config.max_t,
+        'd_t_s': config.d_t_s,
+        'n_s_sample': config.n_s_sample,
+        'state_machine_safe_distance_caution': config.state_machine_safe_distance_caution,
+        'state_machine_safe_distance_emergency': config.state_machine_safe_distance_emergency,
+        'state_machine_caution_accel_multiplier': config.state_machine_caution_accel_multiplier,
+        'state_machine_caution_curvature_multiplier': config.state_machine_caution_curvature_multiplier,
+        'state_machine_caution_speed_multiplier': config.state_machine_caution_speed_multiplier,
+        'state_machine_emergency_accel_multiplier': config.state_machine_emergency_accel_multiplier,
+        'state_machine_emergency_curvature_multiplier': config.state_machine_emergency_curvature_multiplier,
         'ped_initial_states': config.ped_initial_states,
         'ped_groups': config.ped_groups,
         'static_obstacles': config.static_obstacles,

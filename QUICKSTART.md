@@ -107,6 +107,8 @@ python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --log-le
 
 # プランナ重み・安全パラメータを上書き（例: YAMLを複製して編集）
 # k_j, k_t, k_d, k_s_dot, k_lat, k_lon, ego_radius, ped_radius, obstacle_radius
+# min_t, max_t, d_t_s, n_s_sample (プランナ時間ホライゾン)
+# state_machine_* (状態マシンパラメータ)
 ```
 
 ### アニメーション生成（NEW! 🆕）
@@ -166,7 +168,7 @@ output/
 
 ## 時間スケールと衝突判定の注意点
 - 観測はシミュレーション `dt` に依らず SGAN 想定の 0.4s 間隔で蓄積されます（内部でダウンサンプリング）。
-- SGAN 出力はシミュレーション `dt`（例: 0.1s）に線形補間され、5s の計画ホライゾンまで等速外挿されます。追加設定は不要です。
+- SGAN 出力はシミュレーション `dt`（例: 0.1s）に線形補間され、設定可能な計画ホライゾン（デフォルト: `max_t`=5.0s）まで等速外挿されます。
 - 衝突判定は動的障害物の同時刻位置を参照し、未来軌道を平坦化せず時間整合でチェックします。
 
 ### データの読み込み
@@ -221,6 +223,23 @@ ped_initial_states:
 ped_groups: [[0]]
 
 static_obstacles: []
+
+# Planner parameters
+d_road_w: 0.3
+max_road_width: 7.0
+min_t: 4.0  # Minimum prediction time [s]
+max_t: 5.0  # Maximum prediction time [s]
+d_t_s: 1.39  # Target speed sampling width [m/s]
+n_s_sample: 1  # Sampling number of target speed
+
+# State machine parameters (optional)
+state_machine_safe_distance_caution: 0.5  # Safe distance for CAUTION->NORMAL [m]
+state_machine_safe_distance_emergency: 1.0  # Safe distance for EMERGENCY->CAUTION [m]
+state_machine_caution_accel_multiplier: 1.5  # Acceleration multiplier in CAUTION
+state_machine_caution_curvature_multiplier: 1.2  # Curvature multiplier in CAUTION
+state_machine_caution_speed_multiplier: 0.8  # Speed multiplier in CAUTION
+state_machine_emergency_accel_multiplier: 3.0  # Acceleration multiplier in EMERGENCY
+state_machine_emergency_curvature_multiplier: 2.0  # Curvature multiplier in EMERGENCY
 
 sgan_model_path: "models/sgan-p-models/zara1_8_model.pt"  # 必須: 学習済みモデルへのパス
 device: "cpu"
