@@ -7,7 +7,7 @@ https://github.com/AtsushiSakai/PythonRobotics
 import math
 import numpy as np
 import bisect
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Union
 
 
 class CubicSpline1D:
@@ -46,80 +46,162 @@ class CubicSpline1D:
             self.d.append(d)
             self.b.append(b)
     
-    def calc_position(self, x: float) -> Optional[float]:
+    def calc_position(self, x: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate y position for given x.
         
         Args:
-            x: x position to calculate y
+            x: x position(s) to calculate y
             
         Returns:
-            y position for given x, or None if x is outside the data range
+            y position(s) for given x. 
+            Returns None if x is scalar and out of range.
+            Returns array with NaNs if x is array and out of range.
         """
-        if x < self.x[0] or x > self.x[-1]:
-            return None
+        if np.isscalar(x):
+            if x < self.x[0] or x > self.x[-1]:
+                return None
+            
+            i = self._search_index(x)
+            dx = x - self.x[i]
+            position = self.a[i] + self.b[i] * dx + \
+                self.c[i] * dx ** 2.0 + self.d[i] * dx ** 3.0
+            return position
         
-        i = self._search_index(x)
-        dx = x - self.x[i]
-        position = self.a[i] + self.b[i] * dx + \
-            self.c[i] * dx ** 2.0 + self.d[i] * dx ** 3.0
+        # Array input
+        x = np.asarray(x)
+        mask = (x >= self.x[0]) & (x <= self.x[-1])
         
-        return position
+        # Compute results for valid points
+        res = np.full_like(x, np.nan, dtype=float)
+        
+        if np.any(mask):
+            x_valid = x[mask]
+            i = self._search_index(x_valid)
+            dx = x_valid - np.array(self.x)[i]
+            
+            a = np.array(self.a)[i]
+            b = np.array(self.b)[i]
+            c = np.array(self.c)[i]
+            d = np.array(self.d)[i]
+            
+            res[mask] = a + b * dx + c * dx ** 2.0 + d * dx ** 3.0
+            
+        return res
     
-    def calc_first_derivative(self, x: float) -> Optional[float]:
+    def calc_first_derivative(self, x: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate first derivative at given x.
         
         Args:
-            x: x position to calculate first derivative
+            x: x position(s) to calculate first derivative
             
         Returns:
-            First derivative for given x, or None if x is outside the data range
+            First derivative(s) for given x.
         """
-        if x < self.x[0] or x > self.x[-1]:
-            return None
+        if np.isscalar(x):
+            if x < self.x[0] or x > self.x[-1]:
+                return None
+            
+            i = self._search_index(x)
+            dx = x - self.x[i]
+            dy = self.b[i] + 2.0 * self.c[i] * dx + 3.0 * self.d[i] * dx ** 2.0
+            return dy
+
+        # Array input
+        x = np.asarray(x)
+        mask = (x >= self.x[0]) & (x <= self.x[-1])
         
-        i = self._search_index(x)
-        dx = x - self.x[i]
-        dy = self.b[i] + 2.0 * self.c[i] * dx + 3.0 * self.d[i] * dx ** 2.0
-        return dy
+        res = np.full_like(x, np.nan, dtype=float)
+        
+        if np.any(mask):
+            x_valid = x[mask]
+            i = self._search_index(x_valid)
+            dx = x_valid - np.array(self.x)[i]
+            
+            b = np.array(self.b)[i]
+            c = np.array(self.c)[i]
+            d = np.array(self.d)[i]
+            
+            res[mask] = b + 2.0 * c * dx + 3.0 * d * dx ** 2.0
+            
+        return res
     
-    def calc_second_derivative(self, x: float) -> Optional[float]:
+    def calc_second_derivative(self, x: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate second derivative at given x.
         
         Args:
-            x: x position to calculate second derivative
+            x: x position(s) to calculate second derivative
             
         Returns:
-            Second derivative for given x, or None if x is outside the data range
+            Second derivative(s) for given x.
         """
-        if x < self.x[0] or x > self.x[-1]:
-            return None
+        if np.isscalar(x):
+            if x < self.x[0] or x > self.x[-1]:
+                return None
+            
+            i = self._search_index(x)
+            dx = x - self.x[i]
+            ddy = 2.0 * self.c[i] + 6.0 * self.d[i] * dx
+            return ddy
+
+        # Array input
+        x = np.asarray(x)
+        mask = (x >= self.x[0]) & (x <= self.x[-1])
         
-        i = self._search_index(x)
-        dx = x - self.x[i]
-        ddy = 2.0 * self.c[i] + 6.0 * self.d[i] * dx
-        return ddy
+        res = np.full_like(x, np.nan, dtype=float)
+        
+        if np.any(mask):
+            x_valid = x[mask]
+            i = self._search_index(x_valid)
+            dx = x_valid - np.array(self.x)[i]
+            
+            c = np.array(self.c)[i]
+            d = np.array(self.d)[i]
+            
+            res[mask] = 2.0 * c + 6.0 * d * dx
+            
+        return res
     
-    def calc_third_derivative(self, x: float) -> Optional[float]:
+    def calc_third_derivative(self, x: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate third derivative at given x.
         
         Args:
-            x: x position to calculate third derivative
+            x: x position(s) to calculate third derivative
             
         Returns:
-            Third derivative for given x, or None if x is outside the data range
+            Third derivative(s) for given x.
         """
-        if x < self.x[0] or x > self.x[-1]:
-            return None
+        if np.isscalar(x):
+            if x < self.x[0] or x > self.x[-1]:
+                return None
+            
+            i = self._search_index(x)
+            dddy = 6.0 * self.d[i]
+            return dddy
+
+        # Array input
+        x = np.asarray(x)
+        mask = (x >= self.x[0]) & (x <= self.x[-1])
         
-        i = self._search_index(x)
-        dddy = 6.0 * self.d[i]
-        return dddy
+        res = np.full_like(x, np.nan, dtype=float)
+        
+        if np.any(mask):
+            x_valid = x[mask]
+            i = self._search_index(x_valid)
+            d = np.array(self.d)[i]
+            res[mask] = 6.0 * d
+            
+        return res
     
-    def _search_index(self, x: float) -> int:
+    def _search_index(self, x: Union[float, np.ndarray]) -> Union[int, np.ndarray]:
         """Search data segment index for given x."""
-        idx = bisect.bisect(self.x, x) - 1
-        # Clamp to valid range [0, nx-2] since b and d arrays have nx-1 elements
-        return min(max(idx, 0), self.nx - 2)
+        if np.isscalar(x):
+            idx = bisect.bisect(self.x, x) - 1
+            return min(max(idx, 0), self.nx - 2)
+        
+        # Array input
+        idx = np.searchsorted(self.x, x, side='right') - 1
+        idx = np.clip(idx, 0, self.nx - 2)
+        return idx
     
     def _calc_A(self, h: np.ndarray) -> np.ndarray:
         """Calculate matrix A for spline coefficient c."""
@@ -170,47 +252,55 @@ class CubicSpline2D:
         s.extend(np.cumsum(self.ds))
         return s
     
-    def calc_position(self, s: float) -> Tuple[Optional[float], Optional[float]]:
+    def calc_position(self, s: Union[float, np.ndarray]) -> Tuple[Union[float, np.ndarray, None], Union[float, np.ndarray, None]]:
         """Calculate position at given arc length.
         
         Args:
             s: Arc length from start
             
         Returns:
-            (x, y) position, or (None, None) if s is outside the path range
+            (x, y) position
         """
         x = self.sx.calc_position(s)
         y = self.sy.calc_position(s)
         return x, y
     
-    def calc_curvature(self, s: float) -> Optional[float]:
+    def calc_curvature(self, s: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate curvature at given arc length.
         
         Args:
             s: Arc length from start
             
         Returns:
-            Curvature, or None if s is outside the path range
+            Curvature
         """
         dx = self.sx.calc_first_derivative(s)
         ddx = self.sx.calc_second_derivative(s)
         dy = self.sy.calc_first_derivative(s)
         ddy = self.sy.calc_second_derivative(s)
         
-        if dx is None or ddx is None or dy is None or ddy is None:
-            return None
+        if np.isscalar(s):
+            if dx is None or ddx is None or dy is None or ddy is None:
+                return None
+            k = (ddy * dx - ddx * dy) / ((dx ** 2 + dy ** 2) ** (3 / 2))
+            return k
         
-        k = (ddy * dx - ddx * dy) / ((dx ** 2 + dy ** 2) ** (3 / 2))
+        # Array input
+        # Note: dx, dy, etc. will contain NaNs where s was out of bounds
+        denom = (dx ** 2 + dy ** 2) ** 1.5
+        # Avoid division by zero warnings if any
+        with np.errstate(invalid='ignore', divide='ignore'):
+             k = (ddy * dx - ddx * dy) / denom
         return k
     
-    def calc_curvature_rate(self, s: float) -> Optional[float]:
+    def calc_curvature_rate(self, s: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate rate of change of curvature at given arc length.
         
         Args:
             s: Arc length from start
             
         Returns:
-            Curvature rate, or None if s is outside the path range
+            Curvature rate
         """
         dx = self.sx.calc_first_derivative(s)
         dy = self.sy.calc_first_derivative(s)
@@ -219,33 +309,45 @@ class CubicSpline2D:
         dddx = self.sx.calc_third_derivative(s)
         dddy = self.sy.calc_third_derivative(s)
         
-        if any(v is None for v in [dx, dy, ddx, ddy, dddx, dddy]):
-            return None
+        if np.isscalar(s):
+            if any(v is None for v in [dx, dy, ddx, ddy, dddx, dddy]):
+                return None
+            
+            a = dx * ddy - dy * ddx
+            b = dx * dddy - dy * dddx
+            c = dx * ddx + dy * ddy
+            d = dx * dx + dy * dy
+            return (b * d - 3.0 * a * c) / (d * d * d)
         
-        a = dx * ddy - dy * ddx
-        b = dx * dddy - dy * dddx
-        c = dx * ddx + dy * ddy
-        d = dx * dx + dy * dy
-        return (b * d - 3.0 * a * c) / (d * d * d)
+        # Array input
+        with np.errstate(invalid='ignore', divide='ignore'):
+            a = dx * ddy - dy * ddx
+            b = dx * dddy - dy * dddx
+            c = dx * ddx + dy * ddy
+            d = dx * dx + dy * dy
+            return (b * d - 3.0 * a * c) / (d * d * d)
     
-    def calc_yaw(self, s: float) -> Optional[float]:
+    def calc_yaw(self, s: Union[float, np.ndarray]) -> Union[float, np.ndarray, None]:
         """Calculate heading angle at given arc length.
         
         Args:
             s: Arc length from start
             
         Returns:
-            Heading angle in radians, or None if s is outside the path range
+            Heading angle in radians
         """
         dx = self.sx.calc_first_derivative(s)
         dy = self.sy.calc_first_derivative(s)
         
-        if dx is None or dy is None:
-            return None
-        
-        yaw = math.atan2(dy, dx)
+        if np.isscalar(s):
+            if dx is None or dy is None:
+                return None
+            yaw = math.atan2(dy, dx)
+            return yaw
+            
+        # Array input
+        yaw = np.arctan2(dy, dx)
         return yaw
-
 
 def calc_spline_course(
     x: List[float], 
