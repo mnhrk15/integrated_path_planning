@@ -450,14 +450,14 @@ class FrenetPlanner:
             if len(fp.x) == 0:
                 continue
             
-            # Check speed limit
-            if any([v > c_max_speed for v in fp.v]):
+            # Check speed limit (use generator expression for early termination)
+            if any(v > c_max_speed for v in fp.v):
                 path_dict['max_speed_error'].append(fp)
-            # Check acceleration limit
-            elif any([abs(a) > c_max_accel for a in fp.a]):
+            # Check acceleration limit (use generator expression for early termination)
+            elif any(abs(a) > c_max_accel for a in fp.a):
                 path_dict['max_accel_error'].append(fp)
-            # Check curvature limit
-            elif any([abs(c) > c_max_curvature for c in fp.c]):
+            # Check curvature limit (use generator expression for early termination)
+            elif any(abs(c) > c_max_curvature for c in fp.c):
                 path_dict['max_curvature_error'].append(fp)
             # Check collision
             elif not self._check_collision(fp, static_obstacles, dynamic_obstacles):

@@ -324,6 +324,8 @@ class IntegratedSimulator:
         # 8. Initialize State Machine
         self.state_machine = FailSafeStateMachine(config)
         self.ego_state.state = self.state_machine.current_state
+        self._replan_attempts = 0  # Track re-planning attempts to prevent infinite loops
+        self._max_replan_attempts = 3  # Maximum number of re-planning attempts per step
 
         # Precompute static obstacles (expanded to point set for collision checks)
         self.static_obstacle_points = self._expand_static_obstacles(
@@ -398,9 +400,25 @@ class IntegratedSimulator:
                 )
                 
             except Exception as e:
-                logger.warning(f"Prediction failed: {e}, using current positions")
+                logger.warning(f"Prediction failed: {e}, using constant velocity extrapolation")
                 if ped_state is not None:
-                    dynamic_obstacles = ped_state.positions[:, None, :]
+                    # Create a simple constant velocity prediction for the planning horizon
+                    # This ensures we have proper time dimension for collision checking
+                    n_peds = ped_state.n_peds
+                    plan_horizon = getattr(self.config, 'max_t', 5.0)  # Default to 5.0s if not set
+                    plan_horizon_steps = max(1, int(plan_horizon / self.config.dt))
+                    
+                    # Use current velocities for extrapolation
+                    current_positions = ped_state.positions  # [n_peds, 2]
+                    current_velocities = ped_state.velocities  # [n_peds, 2]
+                    
+                    # Generate trajectory: [n_peds, n_steps, 2]
+                    dynamic_obstacles = np.zeros((n_peds, plan_horizon_steps, 2))
+                    for step in range(plan_horizon_steps):
+                        t = (step + 1) * self.config.dt
+                        dynamic_obstacles[:, step, :] = current_positions + current_velocities * t
+                else:
+                    dynamic_obstacles = np.empty((0, 0, 2))
                 t_pred = 0.0
         elif ped_state is not None:
             # Not enough observations yet, use current positions
@@ -466,12 +484,17 @@ class IntegratedSimulator:
         # If state CHANGED to a more critical one (NORMAL -> CAUTION or CAUTION -> EMERGENCY)
         # AND we didn't find a path, we should RE-PLAN immediately with the new relaxed constraints
         # to avoid wasting a step doing nothing (or previous emergency stop).
+        # Limit re-planning attempts to prevent infinite loops.
         
-        if not found_path and new_sm_output.state != sm_output.state:
-            logger.warning(f"Planning failed in {sm_output.state}. Transitioning to {new_sm_output.state} and retrying...")
+        if not found_path and new_sm_output.state != sm_output.state and self._replan_attempts < self._max_replan_attempts:
+            logger.warning(
+                f"Planning failed in {sm_output.state}. Transitioning to {new_sm_output.state} "
+                f"and retrying (attempt {self._replan_attempts + 1}/{self._max_replan_attempts})..."
+            )
             
             # Update local state variable to reflect new state for logging/recording
             self.ego_state.state = new_sm_output.state
+            self._replan_attempts += 1
             
             # Re-plan
             target_speed = new_sm_output.target_speed_override
@@ -489,7 +512,15 @@ class IntegratedSimulator:
             if planned_path is not None:
                 logger.info(f"Re-planning successful in {new_sm_output.state}")
             else:
-                logger.error(f"Re-planning failed even in {new_sm_output.state}")
+                logger.error(
+                    f"Re-planning failed even in {new_sm_output.state} "
+                    f"(attempt {self._replan_attempts}/{self._max_replan_attempts})"
+                )
+        elif not found_path and self._replan_attempts >= self._max_replan_attempts:
+            logger.error(
+                f"Maximum re-planning attempts ({self._max_replan_attempts}) reached. "
+                f"Proceeding with emergency stop."
+            )
 
         # 4. Update ego vehicle state
         # Storage for old accel
@@ -541,6 +572,10 @@ class IntegratedSimulator:
         # Update time
         self.time += self.config.dt
         self.step_count += 1
+        
+        # Reset re-planning attempts counter for the next step
+        # (This ensures we can retry re-planning in the next step if needed)
+        self._replan_attempts = 0
         
         return result
 
