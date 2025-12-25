@@ -12,6 +12,7 @@
 6. [時間整合した予測・衝突判定](#6-時間整合した予測衝突判定)
 7. [設定可能な状態マシン](#7-設定可能な状態マシン)
 8. [設定可能なプランナ時間ホライゾン](#8-設定可能なプランナ時間ホライゾン)
+9. [設定値の自動検証](#9-設定値の自動検証)
 
 ---
 
@@ -125,3 +126,85 @@ n_s_sample: 3  # 目標速度±10km/hの範囲で3パターン
 - `max_t`を大きくすると、生成される候補経路数が増加し、計算時間が長くなります
 - `n_s_sample`を増やすと、速度バリエーションが増え、経路探索の精度が向上しますが、計算コストも増加します
 - デフォルト値（`min_t=4.0`, `max_t=5.0`, `n_s_sample=1`）は、精度と速度のバランスが取れた設定です
+
+## 9. 設定値の自動検証 (v3.5 Update)
+
+設定ファイル読み込み時に自動的に設定値の検証が実行され、不正な設定を早期に検出できます。
+
+### 検証項目
+
+**値の範囲チェック:**
+- 正の値が必要なパラメータ（`dt`, `ego_max_accel`, `min_t`, `max_t`など）
+- 非負の値が必要なパラメータ（`ego_target_speed`, `ego_max_speed`など）
+- 特定の範囲内の値（`state_machine_caution_speed_multiplier`は0より大きく1以下）
+
+**整合性チェック:**
+- `ego_max_speed >= ego_target_speed`（最大速度は目標速度以上）
+- `min_t < max_t`（最小予測時間は最大予測時間より小さい）
+- `max_road_width >= d_road_w`（最大道路幅はサンプリング間隔以上）
+- `state_machine_safe_distance_emergency >= state_machine_safe_distance_caution`（推奨）
+
+**形式チェック:**
+- `ego_initial_state`は5要素の配列（`[x, y, yaw, v, a]`）
+- `ped_initial_states`の各要素は6要素の配列（`[x, y, vx, vy, gx, gy]`）
+- `reference_waypoints_x`と`reference_waypoints_y`の長さが一致
+- `reference_waypoints_x`は少なくとも2点必要
+- `static_obstacles`の各要素は4要素の配列（`[x_min, x_max, y_min, y_max]`）
+- `ped_groups`のインデックスが有効な範囲内
+
+**存在確認:**
+- `sgan_model_path`で指定されたファイルが存在する（`sgan`または`lstm`モードの場合）
+- `device`が有効な値（`'cpu'`, `'cuda'`, `'mps'`のいずれか）
+
+### 使用例
+
+**正常な設定:**
+```python
+from src.config import load_config
+
+# 設定ファイルを読み込むと自動的に検証が実行される
+config = load_config('scenarios/scenario_01.yaml')
+# 検証が成功すると、設定が読み込まれる
+```
+
+**不正な設定の場合:**
+```python
+from src.config import load_config, ConfigValidationError
+
+try:
+    config = load_config('scenarios/invalid_scenario.yaml')
+except ConfigValidationError as e:
+    print("設定検証エラー:")
+    print(e)
+    # 出力例:
+    # Configuration validation failed:
+    #   - dt must be positive, got -0.1
+    #   - ego_max_speed (5.0) must be >= ego_target_speed (10.0)
+    #   - min_t (5.0) must be < max_t (4.0)
+```
+
+### エラーメッセージの例
+
+検証に失敗すると、`ConfigValidationError`が発生し、すべての問題点がリストアップされます：
+
+```
+ConfigValidationError: Configuration validation failed:
+  - dt must be positive, got -0.1
+  - total_time must be positive, got -30.0
+  - ego_max_speed (5.0) must be >= ego_target_speed (10.0)
+  - min_t (5.0) must be < max_t (4.0)
+  - reference_waypoints_x (1) must have at least 2 points
+  - reference_waypoints_x (2) and reference_waypoints_y (3) must have the same length
+  - ped_initial_states[0] must have 6 elements [x, y, vx, vy, gx, gy], got 4
+  - Pedestrian group index 5 is out of range [0, 3]
+  - static_obstacles[0]: x_min (10.0) must be < x_max (5.0)
+  - sgan_model_path does not exist: models/nonexistent_model.pt
+  - device must be one of ['cpu', 'cuda', 'mps'], got 'gpu'
+```
+
+### 利点
+
+1. **早期エラー検出**: 実行前に設定の問題を発見できる
+2. **詳細なエラーメッセージ**: 問題箇所を特定しやすい
+3. **デバッグ時間の短縮**: 実行時の予期しないエラーを防止
+4. **設定の品質向上**: 不正な設定による予期しない動作を防止

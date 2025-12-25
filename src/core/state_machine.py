@@ -4,7 +4,11 @@ This module defines the states and transitions for the vehicle's fail-safe behav
 """
 
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..config import SimulationConfig
+
 from .data_structures import VehicleState
 
 @dataclass
@@ -17,12 +21,17 @@ class StateMachineOutput:
 class FailSafeStateMachine:
     """Manages vehicle state transitions based on planning results and safety metrics."""
     
-    def __init__(self, config):
+    def __init__(self, config: 'SimulationConfig') -> None:
+        """Initialize the fail-safe state machine.
+        
+        Args:
+            config: Simulation configuration containing state machine parameters
+        """
         self.config = config
         self.current_state = VehicleState.NORMAL
         self.consecutive_failures = 0
         
-    def update(self, plan_found: bool, safety_metrics: dict) -> StateMachineOutput:
+    def update(self, plan_found: bool, safety_metrics: Dict[str, Any]) -> StateMachineOutput:
         """Update state based on current iteration results.
         
         Args:

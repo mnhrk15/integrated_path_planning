@@ -14,6 +14,7 @@ from ..core.data_structures import (
     EgoVehicleState,
     PedestrianState,
     SimulationResult,
+    compute_safety_metrics_static,
 )
 from ..core.coordinate_converter import CoordinateConverter
 from ..config import SimulationConfig
@@ -447,16 +448,17 @@ class IntegratedSimulator:
         # Update State Machine based on result
         found_path = (planned_path is not None)
         
-        # We need safety metrics for state machine update, but we only compute them *after* moving?
-        # Actually state machine might need to know if we are *currently* too close.
-        # Let's calculate current safety metrics based on CURRENT position (before move)
-        # This is a bit redundant with result.compute_safety_metrics but safer for decision making
-        current_ped_pos = ped_state.positions if ped_state else np.empty((0, 2))
-        current_ego_pos = np.array([self.ego_state.x, self.ego_state.y])
-        dists = np.linalg.norm(current_ped_pos - current_ego_pos, axis=1) if len(current_ped_pos) > 0 else []
-        min_dist = np.min(dists) if len(dists) > 0 else float('inf')
-        
-        current_metrics = {'min_distance': min_dist}
+        # Compute current safety metrics for state machine update (before moving)
+        # Use the shared function to avoid code duplication
+        if ped_state is not None:
+            current_metrics = compute_safety_metrics_static(
+                ego_state=self.ego_state,
+                ped_state=ped_state,
+                ego_radius=self.ego_radius,
+                ped_radius=self.ped_radius
+            )
+        else:
+            current_metrics = {'min_distance': float('inf'), 'collision': False, 'ttc': float('inf')}
         
         # Update SM
         new_sm_output = self.state_machine.update(found_path, current_metrics)

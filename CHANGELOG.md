@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2025-12-25
+
+#### Code Quality Improvements (v3.5)
+- **Type Hints Enhancement**: Added comprehensive type hints throughout the codebase
+  - `FailSafeStateMachine.__init__` now has proper type hints for `config` parameter
+  - `update` method uses `Dict[str, Any]` instead of generic `dict`
+  - Used `TYPE_CHECKING` to avoid circular imports while maintaining type safety
+  - Improved IDE support and static type checking compatibility
+- **Configuration Validation**: Comprehensive validation system for configuration files
+  - `ConfigValidationError` custom exception class for clear error reporting
+  - `validate_config()` function checks value ranges, consistency, and format
+  - Automatic validation on `load_config()` execution
+  - Detailed error messages listing all validation failures
+  - Validates: time parameters, ego vehicle parameters, planner parameters, state machine parameters, reference paths, pedestrian parameters, static obstacles, model paths, and device settings
+- **Code Deduplication**: Refactored safety metrics computation
+  - Created `compute_safety_metrics_static()` function for reusable safety metrics calculation
+  - Removed duplicate code in `IntegratedSimulator.step()` method
+  - `SimulationResult.compute_safety_metrics()` now delegates to the static function
+  - Improved maintainability and consistency
+
+### Changed - 2025-12-25
+- **State Machine**: Enhanced type hints for better IDE support and type checking
+- **Configuration Loading**: Now includes automatic validation with detailed error reporting
+- **Safety Metrics**: Centralized computation logic to eliminate code duplication
+
 ### Added - 2025-12-16
 
 #### Configuration Improvements (v3.4)

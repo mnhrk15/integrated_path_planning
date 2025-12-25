@@ -2,7 +2,7 @@
 
 import yaml
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from dataclasses import dataclass, field
 from loguru import logger
 
@@ -134,6 +134,168 @@ class SimulationConfig:
     config_path: Optional[str] = None
 
 
+class ConfigValidationError(ValueError):
+    """Raised when configuration validation fails."""
+    pass
+
+
+def validate_config(config: SimulationConfig) -> None:
+    """Validate configuration values for consistency and correctness.
+    
+    Args:
+        config: Configuration to validate
+        
+    Raises:
+        ConfigValidationError: If validation fails
+    """
+    errors: List[str] = []
+    
+    # Time parameters
+    if config.dt <= 0:
+        errors.append(f"dt must be positive, got {config.dt}")
+    if config.total_time <= 0:
+        errors.append(f"total_time must be positive, got {config.total_time}")
+    if config.dt > config.total_time:
+        errors.append(f"dt ({config.dt}) must be less than total_time ({config.total_time})")
+    
+    # Observation parameters
+    if config.obs_len <= 0:
+        errors.append(f"obs_len must be positive, got {config.obs_len}")
+    if config.pred_len <= 0:
+        errors.append(f"pred_len must be positive, got {config.pred_len}")
+    if config.num_samples <= 0:
+        errors.append(f"num_samples must be positive, got {config.num_samples}")
+    
+    # Ego vehicle parameters
+    if len(config.ego_initial_state) != 5:
+        errors.append(f"ego_initial_state must have 5 elements [x, y, yaw, v, a], got {len(config.ego_initial_state)}")
+    if config.ego_target_speed < 0:
+        errors.append(f"ego_target_speed must be non-negative, got {config.ego_target_speed}")
+    if config.ego_max_speed < 0:
+        errors.append(f"ego_max_speed must be non-negative, got {config.ego_max_speed}")
+    if config.ego_max_speed < config.ego_target_speed:
+        errors.append(f"ego_max_speed ({config.ego_max_speed}) must be >= ego_target_speed ({config.ego_target_speed})")
+    if config.ego_max_accel <= 0:
+        errors.append(f"ego_max_accel must be positive, got {config.ego_max_accel}")
+    if config.ego_max_curvature <= 0:
+        errors.append(f"ego_max_curvature must be positive, got {config.ego_max_curvature}")
+    if config.ego_radius <= 0:
+        errors.append(f"ego_radius must be positive, got {config.ego_radius}")
+    
+    # Planner parameters
+    if config.d_road_w <= 0:
+        errors.append(f"d_road_w must be positive, got {config.d_road_w}")
+    if config.max_road_width <= 0:
+        errors.append(f"max_road_width must be positive, got {config.max_road_width}")
+    if config.max_road_width < config.d_road_w:
+        errors.append(f"max_road_width ({config.max_road_width}) must be >= d_road_w ({config.d_road_w})")
+    
+    # Planner time horizon parameters
+    if config.min_t <= 0:
+        errors.append(f"min_t must be positive, got {config.min_t}")
+    if config.max_t <= 0:
+        errors.append(f"max_t must be positive, got {config.max_t}")
+    if config.min_t >= config.max_t:
+        errors.append(f"min_t ({config.min_t}) must be < max_t ({config.max_t})")
+    if config.d_t_s <= 0:
+        errors.append(f"d_t_s must be positive, got {config.d_t_s}")
+    if config.n_s_sample <= 0:
+        errors.append(f"n_s_sample must be positive, got {config.n_s_sample}")
+    
+    # State machine parameters
+    if config.state_machine_safe_distance_caution < 0:
+        errors.append(f"state_machine_safe_distance_caution must be non-negative, got {config.state_machine_safe_distance_caution}")
+    if config.state_machine_safe_distance_emergency < 0:
+        errors.append(f"state_machine_safe_distance_emergency must be non-negative, got {config.state_machine_safe_distance_emergency}")
+    if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
+        errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
+    if config.state_machine_caution_accel_multiplier <= 0:
+        errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
+    if config.state_machine_caution_curvature_multiplier <= 0:
+        errors.append(f"state_machine_caution_curvature_multiplier must be positive, got {config.state_machine_caution_curvature_multiplier}")
+    if config.state_machine_caution_speed_multiplier <= 0 or config.state_machine_caution_speed_multiplier > 1.0:
+        errors.append(f"state_machine_caution_speed_multiplier must be in (0, 1], got {config.state_machine_caution_speed_multiplier}")
+    if config.state_machine_emergency_accel_multiplier <= 0:
+        errors.append(f"state_machine_emergency_accel_multiplier must be positive, got {config.state_machine_emergency_accel_multiplier}")
+    if config.state_machine_emergency_curvature_multiplier <= 0:
+        errors.append(f"state_machine_emergency_curvature_multiplier must be positive, got {config.state_machine_emergency_curvature_multiplier}")
+    
+    # Safety parameters
+    if config.ped_radius <= 0:
+        errors.append(f"ped_radius must be positive, got {config.ped_radius}")
+    if config.obstacle_radius <= 0:
+        errors.append(f"obstacle_radius must be positive, got {config.obstacle_radius}")
+    
+    # Reference path
+    if len(config.reference_waypoints_x) < 2:
+        errors.append(f"reference_waypoints_x must have at least 2 points, got {len(config.reference_waypoints_x)}")
+    if len(config.reference_waypoints_y) < 2:
+        errors.append(f"reference_waypoints_y must have at least 2 points, got {len(config.reference_waypoints_y)}")
+    if len(config.reference_waypoints_x) != len(config.reference_waypoints_y):
+        errors.append(f"reference_waypoints_x ({len(config.reference_waypoints_x)}) and reference_waypoints_y ({len(config.reference_waypoints_y)}) must have the same length")
+    
+    # Pedestrian parameters
+    n_peds = len(config.ped_initial_states)
+    if n_peds > 0:
+        for i, ped_state in enumerate(config.ped_initial_states):
+            if len(ped_state) != 6:
+                errors.append(f"ped_initial_states[{i}] must have 6 elements [x, y, vx, vy, gx, gy], got {len(ped_state)}")
+        
+        # Validate pedestrian groups
+        all_group_indices = set()
+        for group in config.ped_groups:
+            for idx in group:
+                if idx < 0 or idx >= n_peds:
+                    errors.append(f"Pedestrian group index {idx} is out of range [0, {n_peds-1}]")
+                all_group_indices.add(idx)
+        
+        # Check if all pedestrians are in at least one group (optional warning, not error)
+        if len(all_group_indices) < n_peds:
+            logger.warning(f"Some pedestrians are not in any group: {set(range(n_peds)) - all_group_indices}")
+    
+    # Static obstacles
+    for i, obs in enumerate(config.static_obstacles):
+        if len(obs) != 4:
+            errors.append(f"static_obstacles[{i}] must have 4 elements [x_min, x_max, y_min, y_max], got {len(obs)}")
+        elif len(obs) == 4:
+            x_min, x_max, y_min, y_max = obs
+            if x_min >= x_max:
+                errors.append(f"static_obstacles[{i}]: x_min ({x_min}) must be < x_max ({x_max})")
+            if y_min >= y_max:
+                errors.append(f"static_obstacles[{i}]: y_min ({y_min}) must be < y_max ({y_max})")
+    
+    # Model parameters
+    if config.prediction_method not in ['cv', 'lstm', 'sgan']:
+        errors.append(f"prediction_method must be one of ['cv', 'lstm', 'sgan'], got '{config.prediction_method}'")
+    if config.prediction_method in ['sgan', 'lstm'] and not config.sgan_model_path:
+        errors.append(f"sgan_model_path is required when prediction_method is '{config.prediction_method}'")
+    if config.sgan_model_path:
+        model_path = Path(config.sgan_model_path)
+        if not model_path.exists():
+            errors.append(f"sgan_model_path does not exist: {config.sgan_model_path}")
+    
+    # Device
+    if config.device not in ['cpu', 'cuda', 'mps']:
+        errors.append(f"device must be one of ['cpu', 'cuda', 'mps'], got '{config.device}'")
+    
+    # Cost weights (should be non-negative, but allow 0 for disabling)
+    cost_weights = {
+        'k_j': config.k_j,
+        'k_t': config.k_t,
+        'k_d': config.k_d,
+        'k_s_dot': config.k_s_dot,
+        'k_lat': config.k_lat,
+        'k_lon': config.k_lon,
+    }
+    for name, value in cost_weights.items():
+        if value < 0:
+            errors.append(f"{name} must be non-negative, got {value}")
+    
+    if errors:
+        error_msg = "Configuration validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        raise ConfigValidationError(error_msg)
+
+
 def load_config(config_path: str) -> SimulationConfig:
     """Load configuration from YAML file.
     
@@ -147,12 +309,30 @@ def load_config(config_path: str) -> SimulationConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
     
-    with open(config_path, 'r') as f:
-        config_dict = yaml.safe_load(f)
+    try:
+        with open(config_path, 'r') as f:
+            config_dict = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Failed to parse YAML file {config_path}: {e}") from e
     
-    config = SimulationConfig(**config_dict)
+    if config_dict is None:
+        raise ValueError(f"YAML file {config_path} is empty or contains no valid content")
+    
+    try:
+        config = SimulationConfig(**config_dict)
+    except TypeError as e:
+        raise ValueError(f"Invalid configuration structure in {config_path}: {e}") from e
+    
     config.config_path = str(config_path)
-    logger.info(f"Configuration loaded from {config_path}")
+    
+    # Validate configuration
+    try:
+        validate_config(config)
+    except ConfigValidationError as e:
+        logger.error(f"Configuration validation failed for {config_path}")
+        raise
+    
+    logger.info(f"Configuration loaded and validated from {config_path}")
     
     return config
 

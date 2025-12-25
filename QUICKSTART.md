@@ -251,6 +251,9 @@ social_force_params:
   ped_repulsion.sigma: 0.7  # Interaction range
   ped_repulsion.v0: 3.5     # Interaction strength
 
+# 注意: 設定ファイル読み込み時に自動的に検証が実行されます
+# 不正な値（負の値、整合性のない設定など）があると ConfigValidationError が発生します
+
 ```
 
 実行：
@@ -364,6 +367,51 @@ animator.show()
 - `simulation.gif` / `simulation.mp4`（`--animate`指定時）: 失敗時は自動で1回リトライし、後処理を実施します。`pillow` (GIF) または `ffmpeg` (MP4) をインストールしてください。
 
 ## トラブルシューティング
+
+### 設定ファイルの検証エラー
+
+**症状:** `ConfigValidationError`が発生する
+
+**原因:** 設定ファイルに不正な値や整合性のない設定が含まれている
+
+**解決策:**
+エラーメッセージを確認して、指摘された問題を修正してください。よくある問題：
+
+```yaml
+# ❌ 間違い: 負の値
+dt: -0.1
+
+# ✅ 正しい: 正の値
+dt: 0.1
+```
+
+```yaml
+# ❌ 間違い: 速度の整合性が取れていない
+ego_max_speed: 5.0
+ego_target_speed: 10.0  # max_speed < target_speed
+
+# ✅ 正しい: max_speed >= target_speed
+ego_max_speed: 10.0
+ego_target_speed: 5.0
+```
+
+```yaml
+# ❌ 間違い: 時間ホライゾンの整合性が取れていない
+min_t: 5.0
+max_t: 4.0  # min_t > max_t
+
+# ✅ 正しい: min_t < max_t
+min_t: 4.0
+max_t: 5.0
+```
+
+検証エラーの例：
+```
+ConfigValidationError: Configuration validation failed:
+  - dt must be positive, got -0.1
+  - ego_max_speed (5.0) must be >= ego_target_speed (10.0)
+  - min_t (5.0) must be < max_t (4.0)
+```
 
 ### Social-GANモデルが見つからない
 

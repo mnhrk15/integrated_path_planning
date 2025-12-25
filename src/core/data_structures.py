@@ -5,7 +5,7 @@ of the system, ensuring type safety and clear interfaces.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any, Union
 import numpy as np
 
 # Import VehicleState but avoid circular dependency if possible is tricky.
@@ -268,7 +268,7 @@ class SimulationResult:
     ped_radius: float = 0.3
     state: VehicleState = VehicleState.NORMAL
     
-    def compute_safety_metrics(self) -> dict:
+    def compute_safety_metrics(self) -> Dict[str, Any]:
         """Compute safety-related metrics.
         
         Returns:
@@ -277,31 +277,62 @@ class SimulationResult:
                 - collision: Whether collision occurred
                 - ttc: Time to collision [s] (if applicable)
         """
-        # Compute minimum distance to pedestrians
-        ego_pos = np.array([self.ego_state.x, self.ego_state.y])
-        distances = np.linalg.norm(self.ped_state.positions - ego_pos, axis=1)
-        min_distance = np.min(distances) if len(distances) > 0 else float('inf')
+        return compute_safety_metrics_static(
+            ego_state=self.ego_state,
+            ped_state=self.ped_state,
+            ego_radius=self.ego_radius,
+            ped_radius=self.ped_radius
+        )
+
+
+def compute_safety_metrics_static(
+    ego_state: EgoVehicleState,
+    ped_state: PedestrianState,
+    ego_radius: float,
+    ped_radius: float
+) -> Dict[str, Any]:
+    """Compute safety-related metrics from ego and pedestrian states.
+    
+    This is a static function that can be called independently, useful for
+    computing metrics before creating a SimulationResult (e.g., for state machine decisions).
+    
+    Args:
+        ego_state: Current ego vehicle state
+        ped_state: Current pedestrian state
+        ego_radius: Collision radius for ego vehicle [m]
+        ped_radius: Collision radius for pedestrians [m]
         
-        combined_radius = self.ego_radius + self.ped_radius
-        collision = min_distance < combined_radius
-        
-        # Time to collision (simplified, along relative approach)
-        ttc = float('inf')
-        if len(distances) > 0:
-            ego_vx = self.ego_state.v * np.cos(self.ego_state.yaw)
-            ego_vy = self.ego_state.v * np.sin(self.ego_state.yaw)
-            ego_vel = np.array([ego_vx, ego_vy])
-            for pos, vel, dist in zip(self.ped_state.positions, self.ped_state.velocities, distances):
-                rel_pos = pos - ego_pos
-                rel_vel = vel - ego_vel
-                rel_speed_along_line = -np.dot(rel_pos, rel_vel) / (np.linalg.norm(rel_pos) + 1e-8)
-                if rel_speed_along_line > 1e-5:
-                    time_to_collision = (dist - combined_radius) / rel_speed_along_line
-                    if time_to_collision >= 0:
-                        ttc = min(ttc, time_to_collision)
-        
-        return {
-            'min_distance': min_distance,
-            'collision': collision,
-            'ttc': ttc
-        }
+    Returns:
+        Dictionary containing:
+            - min_distance: Minimum distance to any pedestrian [m]
+            - collision: Whether collision occurred (bool)
+            - ttc: Time to collision [s] (if applicable)
+    """
+    # Compute minimum distance to pedestrians
+    ego_pos = np.array([ego_state.x, ego_state.y])
+    distances = np.linalg.norm(ped_state.positions - ego_pos, axis=1)
+    min_distance = np.min(distances) if len(distances) > 0 else float('inf')
+    
+    combined_radius = ego_radius + ped_radius
+    collision = min_distance < combined_radius
+    
+    # Time to collision (simplified, along relative approach)
+    ttc = float('inf')
+    if len(distances) > 0:
+        ego_vx = ego_state.v * np.cos(ego_state.yaw)
+        ego_vy = ego_state.v * np.sin(ego_state.yaw)
+        ego_vel = np.array([ego_vx, ego_vy])
+        for pos, vel, dist in zip(ped_state.positions, ped_state.velocities, distances):
+            rel_pos = pos - ego_pos
+            rel_vel = vel - ego_vel
+            rel_speed_along_line = -np.dot(rel_pos, rel_vel) / (np.linalg.norm(rel_pos) + 1e-8)
+            if rel_speed_along_line > 1e-5:
+                time_to_collision = (dist - combined_radius) / rel_speed_along_line
+                if time_to_collision >= 0:
+                    ttc = min(ttc, time_to_collision)
+    
+    return {
+        'min_distance': min_distance,
+        'collision': collision,
+        'ttc': ttc
+    }
