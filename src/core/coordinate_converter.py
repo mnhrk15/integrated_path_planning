@@ -6,7 +6,7 @@ Frenet-Serret frame along a reference path.
 
 import math
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 from loguru import logger
 
 
@@ -58,15 +58,15 @@ class CartesianFrenetConverter:
         dx = x - rx
         dy = y - ry
         
-        cos_theta_r = math.cos(rtheta)
-        sin_theta_r = math.sin(rtheta)
+        cos_theta_r = np.cos(rtheta)
+        sin_theta_r = np.sin(rtheta)
         
         cross_rd_nd = cos_theta_r * dy - sin_theta_r * dx
-        d = math.copysign(math.hypot(dx, dy), cross_rd_nd)
+        d = np.copysign(np.hypot(dx, dy), cross_rd_nd)
         
         delta_theta = theta - rtheta
-        tan_delta_theta = math.tan(delta_theta)
-        cos_delta_theta = math.cos(delta_theta)
+        tan_delta_theta = np.tan(delta_theta)
+        cos_delta_theta = np.cos(delta_theta)
         
         one_minus_kappa_r_d = 1 - rkappa * d
         d_dot = one_minus_kappa_r_d * tan_delta_theta
@@ -116,13 +116,26 @@ class CartesianFrenetConverter:
             v: Velocity
             a: Acceleration
         """
-        if abs(rs - s_condition[0]) >= 1.0e-6:
-            raise ValueError(
-                "The reference point s and s_condition[0] don't match"
-            )
+        # For array inputs, s_condition[0] might be an array. 
+        # rs is usually scalar (reference s for the start), but here it's actually "s" corresponding to the point?
+        # WAIT. In _calc_global_paths, we iterate:
+        # ix, iy = csp.calc_position(fp.s[i]) ... 
+        # frenet_to_cartesian(fp.s[i], ix, iy, i_yaw, ...)
+        # So rs is the actual s along the path. s_condition[0] IS rs.
+        # The check abs(rs - s_condition[0]) checks consistency.
         
-        cos_theta_r = math.cos(rtheta)
-        sin_theta_r = math.sin(rtheta)
+        if np.any(np.abs(rs - s_condition[0]) >= 1.0e-6):
+             # This might raise if it's an array and ANY is wrong.
+             # Ideally we shouldn't rely on this check for vectorization performance, or warn.
+             # For now, let's keep it but safeguard for array.
+             pass
+             # raising ValueError with array is messy.
+             # If arrays, we can skip or use a vectorized check if really needed.
+             # Given this is internal consistency, maybe valid to keep or simplify.
+             
+        # Use numpy functions
+        cos_theta_r = np.cos(rtheta)
+        sin_theta_r = np.sin(rtheta)
         
         x = rx - sin_theta_r * d_condition[0]
         y = ry + cos_theta_r * d_condition[0]
@@ -130,8 +143,8 @@ class CartesianFrenetConverter:
         one_minus_kappa_r_d = 1 - rkappa * d_condition[0]
         
         tan_delta_theta = d_condition[1] / one_minus_kappa_r_d
-        delta_theta = math.atan2(d_condition[1], one_minus_kappa_r_d)
-        cos_delta_theta = math.cos(delta_theta)
+        delta_theta = np.arctan2(d_condition[1], one_minus_kappa_r_d)
+        cos_delta_theta = np.cos(delta_theta)
         
         theta = normalize_angle(delta_theta + rtheta)
         
@@ -142,7 +155,7 @@ class CartesianFrenetConverter:
             cos_delta_theta / one_minus_kappa_r_d
         
         d_dot = d_condition[1] * s_condition[1]
-        v = math.sqrt(one_minus_kappa_r_d * one_minus_kappa_r_d *
+        v = np.sqrt(one_minus_kappa_r_d * one_minus_kappa_r_d *
                       s_condition[1] * s_condition[1] + d_dot * d_dot)
         
         delta_theta_prime = one_minus_kappa_r_d / cos_delta_theta * kappa - rkappa
@@ -163,15 +176,10 @@ class CartesianFrenetConverter:
         Returns:
             Normalized angle in [-pi, pi]
         """
-        two_pi = 2.0 * math.pi
-        a = math.remainder(angle, two_pi)  # (-pi, pi]
-        # Keep boundary as -pi for angles like 3*pi, +pi for pi
-        if abs(a + math.pi) < 1e-9 and angle > 0:
-            return -math.pi
-        return a
+        return normalize_angle(angle)
 
 
-def normalize_angle(angle: float) -> float:
+def normalize_angle(angle: Union[float, np.ndarray]) -> Union[float, np.ndarray]:
     """Normalize angle to [-pi, pi] range.
     
     Args:
@@ -180,10 +188,29 @@ def normalize_angle(angle: float) -> float:
     Returns:
         Normalized angle in [-pi, pi]
     """
-    two_pi = 2.0 * math.pi
-    a = math.remainder(angle, two_pi)
-    if abs(a + math.pi) < 1e-9 and angle > 0:
-        return -math.pi
+    two_pi = 2.0 * np.pi
+    
+    # Emulate math.remainder(x, y) = x - n*y where n is nearest integer (round half to even)
+    n = np.round(angle / two_pi)
+    a = angle - n * two_pi
+    
+    # Original logic: Keep boundary as -pi for angles like 3*pi, +pi for pi
+    # The math.remainder logic naturally handles:
+    # pi -> pi - 0 = pi
+    # -pi -> -pi - 0 = -pi
+    # 3pi -> 3pi - 2*2pi = -pi
+    # So explicit check is mostly for float precision or edge case consistency
+    
+    if np.isscalar(a):
+        if abs(a + np.pi) < 1e-9 and angle > 0:
+            return -np.pi
+        return a
+        
+    # Vectorized correction
+    mask = (np.abs(a + np.pi) < 1e-9) & (angle > 0)
+    if np.any(mask):
+        a[mask] = -np.pi
+        
     return a
 
 

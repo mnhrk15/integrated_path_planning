@@ -364,11 +364,8 @@ class FrenetPlanner:
         
         return total_cost
     
-    def _calc_global_paths(
-        self,
-        fp_list: List[FrenetPath]
-    ) -> List[FrenetPath]:
-        """Convert Frenet paths to global coordinates.
+    def _calc_global_paths(self, fp_list: List[FrenetPath]) -> List[FrenetPath]:
+        """Convert Frenet paths to global coordinates (Vectorized).
         
         Args:
             fp_list: List of Frenet paths
@@ -376,38 +373,141 @@ class FrenetPlanner:
         Returns:
             List of paths with global coordinates filled
         """
-        for fp in fp_list:
-            for i in range(len(fp.s)):
-                ix, iy = self.csp.calc_position(fp.s[i])
-                if ix is None or iy is None:
-                    break
-                
-                i_yaw = self.csp.calc_yaw(fp.s[i])
-                i_kappa = self.csp.calc_curvature(fp.s[i])
-                i_dkappa = self.csp.calc_curvature_rate(fp.s[i])
-                
-                if any(v is None for v in [i_yaw, i_kappa, i_dkappa]):
-                    break
-                
-                s_condition = [fp.s[i], fp.s_d[i], fp.s_dd[i]]
-                d_condition = [fp.d[i], fp.d_d[i], fp.d_dd[i]]
-                
-                try:
-                    x, y, theta, kappa, v, a = self.converter.frenet_to_cartesian(
-                        fp.s[i], ix, iy, i_yaw, i_kappa, i_dkappa,
-                        s_condition, d_condition
-                    )
-                    
-                    fp.x.append(x)
-                    fp.y.append(y)
-                    fp.yaw.append(theta)
-                    fp.c.append(kappa)
-                    fp.v.append(v)
-                    fp.a.append(a)
-                except Exception as e:
-                    logger.debug(f"Error converting to global: {e}")
-                    break
+        if not fp_list:
+            return []
+
+        # 1. Flatten all path points into single arrays
+        all_s = []
+        all_s_d = []
+        all_s_dd = []
+        all_d = []
+        all_d_d = []
+        all_d_dd = []
         
+        # Track start/end indices for each path to reconstruct later
+        path_indices = [0]
+        current_idx = 0
+        
+        valid_fps = []
+        
+        for fp in fp_list:
+            # Skip paths with no points
+            if not fp.s:
+                valid_fps.append(None) # Placeholder
+                path_indices.append(current_idx)
+                continue
+                
+            n_points = len(fp.s)
+            
+            all_s.extend(fp.s)
+            all_s_d.extend(fp.s_d)
+            all_s_dd.extend(fp.s_dd)
+            all_d.extend(fp.d)
+            all_d_d.extend(fp.d_d)
+            all_d_dd.extend(fp.d_dd)
+            
+            current_idx += n_points
+            path_indices.append(current_idx)
+            valid_fps.append(fp)
+            
+        if current_idx == 0:
+            return fp_list
+            
+        # Convert to numpy arrays
+        # Use simple array conversion; data type inference is usually fine
+        s_arr = np.array(all_s)
+        s_d_arr = np.array(all_s_d)
+        s_dd_arr = np.array(all_s_dd)
+        d_arr = np.array(all_d)
+        d_d_arr = np.array(all_d_d)
+        d_dd_arr = np.array(all_d_dd)
+        
+        # 2. Vectorized Reference Path Calculations
+        # Calculate reference points for ALL s values at once
+        # CubicSpline operations are now vectorized
+        ix_arr, iy_arr = self.csp.calc_position(s_arr)
+        i_yaw_arr = self.csp.calc_yaw(s_arr)
+        i_k_arr = self.csp.calc_curvature(s_arr)
+        i_dk_arr = self.csp.calc_curvature_rate(s_arr)
+        
+        # Check for invalid values (out of spline range)
+        # We can use numpy's isnan check.
+        # If the reference path returns None (scalar) or NaN (array)
+        # Since we use array input, we expect NaNs for out of bounds
+        
+        # If any essential reference value is NaN, that point is invalid
+        valid_mask = ~(np.isnan(ix_arr) | np.isnan(i_yaw_arr))
+        
+        # 3. Vectorized Frenet -> Cartesian Conversion
+        # We process ALL points, even invalid ones (results will be garbage or NaN), 
+        # then filter during reconstruction.
+        
+        # Prepare conditions tuples (arrays)
+        s_condition = (s_arr, s_d_arr, s_dd_arr)
+        d_condition = (d_arr, d_d_arr, d_dd_arr)
+        
+        # Call vectorized converter
+        # Note: rs=s_arr because we found the reference point AT s (Frenet definition)
+        x_arr, y_arr, yaw_arr, k_arr, v_arr, a_arr = self.converter.frenet_to_cartesian(
+            s_arr, ix_arr, iy_arr, i_yaw_arr, i_k_arr, i_dk_arr,
+            s_condition, d_condition
+        )
+        
+        # 4. Reconstruct Paths
+        for i, fp in enumerate(valid_fps):
+            if fp is None:
+                continue
+                
+            start_idx = path_indices[i]
+            end_idx = path_indices[i+1]
+            
+            # Extract segment for this path
+            # Apply mask to filter out invalid points (out of range reference) within this segment
+            # IMPORTANT: original code broke *early* on first invalid point.
+            # We should simulate that: take points until first invalid.
+            
+            segment_valid = valid_mask[start_idx:end_idx]
+            
+            # Find index of first False (invalid)
+            # np.argmin on boolean array returns index of first False if it exists? 
+            # No, False is 0. If all True, returns 0. If some False, returns index of first False.
+            # Check if there are ANY False
+            if not np.all(segment_valid):
+                # subset until first invalid
+                first_invalid = np.argmin(segment_valid)
+                # If first_invalid is 0 and it's invalid, length is 0.
+                valid_len = first_invalid
+            else:
+                valid_len = end_idx - start_idx
+            
+            if valid_len == 0:
+                # Empty path (failed immediately)
+                fp.x = []
+                fp.y = []
+                fp.yaw = []
+                fp.c = []
+                fp.v = []
+                fp.a = []
+                continue
+                
+            # Slice arrays
+            # We must convert numpy arrays back to lists as expected by data structure
+            idx_range = slice(start_idx, start_idx + valid_len)
+            
+            fp.x = x_arr[idx_range].tolist()
+            fp.y = y_arr[idx_range].tolist()
+            fp.yaw = yaw_arr[idx_range].tolist()
+            fp.c = k_arr[idx_range].tolist()
+            fp.v = v_arr[idx_range].tolist()
+            fp.a = a_arr[idx_range].tolist()
+            
+            # Also truncate the coordinate inputs to match valid output length
+            # Original code loop: for i in range(len(fp.s))... if fail break.
+            # So fp.s etc were NOT truncated in original object, but fp.x / fp.y were shorter.
+            # FrenetPath.__len__ uses min length of all fields, so that's fine.
+            # But for cleanliness, should we truncate input fields?
+            # Original code did NOT truncate inputs. We keep inputs as is.
+            
         return fp_list
     
     def _check_paths(

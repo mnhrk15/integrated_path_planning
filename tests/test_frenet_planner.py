@@ -17,14 +17,36 @@ def mock_spline():
     spline.s = [0, 100.0]
     
     # Mock calc_position: returns (s, 0)
-    spline.calc_position.side_effect = lambda s: (s, 0.0) if 0 <= s <= 100 else (None, None)
+    # Handle both scalar and array inputs
+    def side_effect_position(s):
+        if np.isscalar(s):
+            return (s, 0.0) if 0 <= s <= 100 else (None, None)
+        else:
+            s_arr = np.array(s)
+            mask = (s_arr >= 0) & (s_arr <= 100)
+            
+            x = np.where(mask, s_arr, np.nan)
+            y = np.where(mask, 0.0, np.nan)
+            return x, y
+            
+    spline.calc_position.side_effect = side_effect_position
     
     # Mock calc_yaw: returns 0 (facing East)
-    spline.calc_yaw.return_value = 0.0
+    # Support array for consistency
+    def side_effect_yaw(s):
+        if np.isscalar(s):
+            return 0.0
+        return np.zeros_like(s)
+    spline.calc_yaw.side_effect = side_effect_yaw
     
     # Mock curvature: straight line -> 0
-    spline.calc_curvature.return_value = 0.0
-    spline.calc_curvature_rate.return_value = 0.0
+    def side_effect_zero(s):
+        if np.isscalar(s):
+            return 0.0
+        return np.zeros_like(s)
+        
+    spline.calc_curvature.side_effect = side_effect_zero
+    spline.calc_curvature_rate.side_effect = side_effect_zero
     
     return spline
 
