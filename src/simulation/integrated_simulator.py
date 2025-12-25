@@ -14,11 +14,12 @@ from ..core.data_structures import (
     EgoVehicleState,
     PedestrianState,
     SimulationResult,
+    compute_safety_metrics_static,
 )
 from ..core.coordinate_converter import CoordinateConverter
 from ..config import SimulationConfig
 from ..planning import CubicSpline2D, FrenetPlanner
-from ..planning.frenet_planner import MAX_T
+# MAX_T is now configurable via config.max_t
 from ..pedestrian.observer import PedestrianObserver
 from ..prediction.trajectory_predictor import TrajectoryPredictor
 from ..core.state_machine import FailSafeStateMachine, VehicleState
@@ -278,6 +279,7 @@ class IntegratedSimulator:
         )
         
         # 4. Initialize trajectory predictor
+        plan_horizon = getattr(config, 'max_t', 5.0)
         self.predictor = TrajectoryPredictor(
             model_path=config.sgan_model_path,
             pred_len=config.pred_len,
@@ -285,7 +287,7 @@ class IntegratedSimulator:
             device=config.device,
             sgan_dt=self.observer.sgan_dt,
             sim_dt=config.dt,
-            plan_horizon=MAX_T,
+            plan_horizon=plan_horizon,
             method=getattr(config, 'prediction_method', 'sgan')
         )
         
@@ -300,6 +302,10 @@ class IntegratedSimulator:
             max_road_width=config.max_road_width,
             robot_radius=self.ego_radius,
             obstacle_radius=config.obstacle_radius,
+            min_t=getattr(config, 'min_t', 4.0),
+            max_t=getattr(config, 'max_t', 5.0),
+            d_t_s=getattr(config, 'd_t_s', 5.0 / 3.6),
+            n_s_sample=getattr(config, 'n_s_sample', 1),
             k_j=config.k_j,
             k_t=config.k_t,
             k_d=config.k_d,
@@ -442,16 +448,17 @@ class IntegratedSimulator:
         # Update State Machine based on result
         found_path = (planned_path is not None)
         
-        # We need safety metrics for state machine update, but we only compute them *after* moving?
-        # Actually state machine might need to know if we are *currently* too close.
-        # Let's calculate current safety metrics based on CURRENT position (before move)
-        # This is a bit redundant with result.compute_safety_metrics but safer for decision making
-        current_ped_pos = ped_state.positions if ped_state else np.empty((0, 2))
-        current_ego_pos = np.array([self.ego_state.x, self.ego_state.y])
-        dists = np.linalg.norm(current_ped_pos - current_ego_pos, axis=1) if len(current_ped_pos) > 0 else []
-        min_dist = np.min(dists) if len(dists) > 0 else float('inf')
-        
-        current_metrics = {'min_distance': min_dist}
+        # Compute current safety metrics for state machine update (before moving)
+        # Use the shared function to avoid code duplication
+        if ped_state is not None:
+            current_metrics = compute_safety_metrics_static(
+                ego_state=self.ego_state,
+                ped_state=ped_state,
+                ego_radius=self.ego_radius,
+                ped_radius=self.ped_radius
+            )
+        else:
+            current_metrics = {'min_distance': float('inf'), 'collision': False, 'ttc': float('inf')}
         
         # Update SM
         new_sm_output = self.state_machine.update(found_path, current_metrics)

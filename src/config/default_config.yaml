@@ -26,6 +26,21 @@ ego_radius: 1.0  # Collision radius for ego vehicle [m]
 d_road_w: 0.3  # Lateral sampling width [m] (Balanced: 1.0=Fast, 0.2=Precise)
 max_road_width: 7.0  # Maximum lateral search width [m]
 
+# === Planner Time Horizon Parameters ===
+min_t: 4.0  # Minimum prediction time [s]
+max_t: 5.0  # Maximum prediction time [s]
+d_t_s: 1.39  # Target speed sampling width [m/s] (5.0 km/h)
+n_s_sample: 1  # Sampling number of target speed
+
+# === State Machine Parameters ===
+state_machine_safe_distance_caution: 0.5  # Safe distance for CAUTION->NORMAL transition [m]
+state_machine_safe_distance_emergency: 1.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+state_machine_caution_accel_multiplier: 1.5  # Acceleration multiplier in CAUTION state
+state_machine_caution_curvature_multiplier: 1.2  # Curvature multiplier in CAUTION state
+state_machine_caution_speed_multiplier: 0.8  # Speed multiplier in CAUTION state
+state_machine_emergency_accel_multiplier: 3.0  # Acceleration multiplier in EMERGENCY state
+state_machine_emergency_curvature_multiplier: 2.0  # Curvature multiplier in EMERGENCY state
+
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2  # Collision radius for pedestrians [m]
 obstacle_radius: 0.2  # Collision radius for generic obstacles [m]

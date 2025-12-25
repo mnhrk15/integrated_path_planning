@@ -26,10 +26,13 @@
 
 ### 時間整合性と衝突判定の挙動
 - 観測はシミュレーション `dt` に依らず SGAN の想定サンプリング 0.4s 間隔でダウンサンプリングされます。
-- SGAN 出力はプランナ/シミュレーション `dt`（デフォルト 0.1s）に線形補間され、5s の計画ホライゾンまで等速外挿して時間幅を揃えます。
+- SGAN 出力はプランナ/シミュレーション `dt`（デフォルト 0.1s）に線形補間され、設定可能な計画ホライゾン（デフォルト: `max_t`=5.0s）まで等速外挿して時間幅を揃えます。
 - 衝突判定は動的障害物の「同時刻位置」のみを評価し、将来軌道を平坦化しません（過剰な停止・回避を防止）。
 - **緊急回避 (v1.7 Update)**: 通常の経路計画が解を見つけられない場合、一時的に加速度や曲率の制約を緩和して衝突回避経路を探索するフォールバック機能を搭載しています。
 - **Fail-Safe State Machine (v1.9 Update)**: アドホックな条件分岐を廃止し、`NORMAL` -> `CAUTION` -> `EMERGENCY` の状態遷移による堅牢なフェイルセーフ機構を導入しました。計画失敗時に自動的に制約を緩和し、最終的には安全に停止します。
+- **設定可能な状態マシン (v3.4 Update)**: 状態マシンの安全距離や制約緩和係数をYAML設定で調整可能になりました。シナリオごとに最適な挙動を設定できます。
+- **設定可能なプランナ時間ホライゾン (v3.4 Update)**: プランナーの予測時間範囲（`min_t`, `max_t`）や速度サンプリングパラメータを設定ファイルで制御可能になりました。
+- **設定値の自動検証 (v3.5 Update)**: 設定ファイル読み込み時に自動的に設定値の検証が実行され、不正な設定を早期に検出できます。詳細なエラーメッセージで問題箇所を特定しやすくなりました。
 
 ### パフォーマンスとロバスト性 (v1.1 Update)
 - **高速化**: 衝突判定のベクトル化（NumPy Broadcasting）により、数百の障害物が存在しても 0.06ms 程度で判定可能です。
@@ -239,20 +242,48 @@ integrated_path_planning/
 
 ## 主な設定項目（YAML）
 
-- 時間: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len` (default=12), `num_samples` (SGAN予測サンプル数, 推奨: 20)
-- Ego: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature` (default=1.0)
-- 計画パラメータ: `d_road_w` (横方向サンプリング間隔, default=0.3), `max_road_width` (最大横探索幅)
-- 安全パラメータ: `ego_radius` (自車半径), `ped_radius` (プランナ用マージン), `obstacle_radius`
+### 基本パラメータ
+- **時間**: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len` (default=12), `num_samples` (SGAN予測サンプル数, 推奨: 20)
+- **Ego車両**: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature` (default=1.0)
+- **安全パラメータ**: `ego_radius` (自車半径), `ped_radius` (プランナ用マージン), `obstacle_radius`
   - `social_force_params.agent_radius`: 歩行者シミュレータ内での歩行者の物理半径
-- プランナ重み（任意上書き）: 
+- **経路**: `reference_waypoints_x`, `reference_waypoints_y`
+- **歩行者**: `ped_initial_states`, `ped_groups`
+- **障害物**: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
+- **予測モデル**: `sgan_model_path`（必須。未設定の場合はエラー）
+- **デバイス/出力**: `device`, `output_path`, `visualization_enabled`
+
+### プランナパラメータ
+- **横方向サンプリング**: `d_road_w` (横方向サンプリング間隔, default=0.3), `max_road_width` (最大横探索幅)
+- **時間ホライゾン**: `min_t` (最小予測時間 [s], default=4.0), `max_t` (最大予測時間 [s], default=5.0)
+- **速度サンプリング**: `d_t_s` (目標速度サンプリング幅 [m/s], default=1.39), `n_s_sample` (サンプリング数, default=1)
+- **コスト重み（任意上書き）**: 
   - `k_lat`: 横方向偏差の重み（低いと障害物回避で大きく避けるようになる）
   - `k_j`: ジャークの重み（低いとキビキビ動く）
   - `k_t`, `k_d`, `k_s_dot`, `k_lon`
-- 経路: `reference_waypoints_x`, `reference_waypoints_y`
-- 歩行者: `ped_initial_states`, `ped_groups`
-- 障害物: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
-- 予測モデル: `sgan_model_path`（必須。未設定の場合はエラー）
-- デバイス/出力: `device`, `output_path`, `visualization_enabled`
+
+### 状態マシンパラメータ（v3.4 Update）
+- **安全距離**: 
+  - `state_machine_safe_distance_caution` (CAUTION→NORMAL遷移の安全距離 [m], default=0.5)
+  - `state_machine_safe_distance_emergency` (EMERGENCY→CAUTION遷移の安全距離 [m], default=1.0)
+- **CAUTION状態の制約緩和**: 
+  - `state_machine_caution_accel_multiplier` (加速度倍率, default=1.5)
+  - `state_machine_caution_curvature_multiplier` (曲率倍率, default=1.2)
+  - `state_machine_caution_speed_multiplier` (速度倍率, default=0.8)
+- **EMERGENCY状態の制約緩和**: 
+  - `state_machine_emergency_accel_multiplier` (加速度倍率, default=3.0)
+  - `state_machine_emergency_curvature_multiplier` (曲率倍率, default=2.0)
+
+これらのパラメータにより、シナリオごとに状態マシンとプランナーの挙動を細かく調整できます。
+
+### 設定値の検証 (v3.5 Update)
+- **自動検証**: 設定ファイル読み込み時に自動的に設定値の検証が実行されます
+- **検証項目**:
+  - 値の範囲チェック（正の値、非負の値など）
+  - 整合性チェック（`min_t < max_t`, `ego_max_speed >= ego_target_speed`など）
+  - 形式チェック（配列の長さ、ファイルの存在確認など）
+- **エラーメッセージ**: 検証失敗時は詳細なエラーメッセージが表示され、問題箇所を特定しやすくなります
+- **例**: 不正な設定を読み込もうとすると`ConfigValidationError`が発生し、具体的な問題点がリストアップされます
 
 ## 保存される出力
  
