@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [4.0.0] - 2025-12-25
+### Added
+- **Vectorized Frenet Planner**: Complete rewrite of the Frenet Planner core logic using NumPy vectorization.
+  - `VectorizedPolynomialSolver` for batch polynomial coefficient calculation.
+  - `_generate_frenet_paths_vectorized` for batch trajectory generation.
+  - `_calc_global_paths_vectorized`, `_check_paths_vectorized`, `_select_best_path_vectorized` for vectorized evaluation.
+  - Performance improvements targeting 10Hz-100Hz planning loop.
+
+### Fixed
+- **NaN Propagation Regression**: Fixed a critical issue where paths extending beyond the reference spline (NaN coordinates) or having undefined kinematics (NaN v/a/c) were incorrectly marked as valid. Added strict NaN checks in `_check_paths_vectorized`.
+
+### Removed
+- Legacy loop-based planner methods (`_generate_frenet_paths`, etc.) and `QuinticPolynomial`/`QuarticPolynomial` classes to streamline the codebase.
+
 ### Added - 2025-12-26
 
 #### Robustness and Performance Improvements (v3.6)
