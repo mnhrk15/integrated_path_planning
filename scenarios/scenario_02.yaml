@@ -72,8 +72,8 @@ ped_groups:
 # === Static Obstacles ===
 # Corridor walls
 static_obstacles:
-  - [-5.0, 55.0, -5.0, -5.0] # Bottom wall
-  - [-5.0, 55.0, 5.0, 5.0]   # Top wall
+  - [-5.0, 55.0, -6.0, -5.0] # Bottom wall (y: -6.0 to -5.0)
+  - [-5.0, 55.0, 5.0, 6.0]   # Top wall (y: 5.0 to 6.0)
 
 # === Map Visualization ===
 map_config:
