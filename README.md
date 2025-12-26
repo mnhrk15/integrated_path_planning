@@ -43,8 +43,6 @@
 - **安定化**: SGANの予測が途切れた後（12ステップ以降）の外挿処理に速度制限（max 2.5m/s）を設け、非現実的な挙動を抑制しました。
 - **予測失敗時のフォールバック (v3.6 Update)**: Social-GAN予測が失敗した場合、等速直線運動モデルで計画ホライゾン分の軌道を自動生成し、適切な時間次元を保持します。これにより予測失敗時でも安全な衝突判定が可能です。
 - **堅牢なエラーハンドリング (v3.6 Update)**: 座標変換やメトリクス計算での境界条件チェックを強化し、`IndexError`や`None`参照エラーを防止しました。
-- **Planner Vectorization (v4.0 Update)**: `FrenetPlanner` logic has been completely vectorized using NumPy broadcasting and custom batch polynomial solvers (`VectorizedPolynomialSolver`). Replaces nested loops with tensor operations, achieving drastic speedups for trajectory generation and validation.
-- **Robustness (v4.0 Update)**: Explicit NaN checks for both coordinates and kinematics (`v`, `a`, `c`) prevent invalid trajectories from propagating.
 
 ### シミュレーションエンジン (v1.2 Update)
 - **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。
