@@ -10,13 +10,13 @@ in a Frenet Frame" (2010)
 
 import copy
 import numpy as np
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
 from loguru import logger
 
 from ..core.data_structures import FrenetPath, FrenetState, EgoVehicleState
 from ..core.coordinate_converter import CartesianFrenetConverter
 from .cubic_spline import CubicSpline2D
-from .quintic_polynomial import QuinticPolynomial, QuarticPolynomial
 
 
 # Planning parameters
@@ -42,6 +42,37 @@ K_LON = 1.0  # Longitudinal cost weight
 
 # Safety
 ROBOT_RADIUS = 2.0  # Robot radius [m]
+
+
+@dataclass(frozen=True)
+class TimeCache:
+    """Cached time powers and inverse matrices for polynomial generation."""
+    t: np.ndarray
+    t2: np.ndarray
+    t3: np.ndarray
+    t4: np.ndarray
+    t5: np.ndarray
+    quartic_A_inv: np.ndarray
+    quintic_A_inv: np.ndarray
+
+
+@dataclass(frozen=True)
+class LongitudinalProfile:
+    """Precomputed longitudinal trajectory components for a target velocity."""
+    t: np.ndarray
+    s: np.ndarray
+    s_d: np.ndarray
+    s_dd: np.ndarray
+    s_ddd: np.ndarray
+
+
+@dataclass(frozen=True)
+class LateralProfile:
+    """Precomputed lateral trajectory components for a target offset."""
+    d: np.ndarray
+    d_d: np.ndarray
+    d_dd: np.ndarray
+    d_ddd: np.ndarray
 
 
 class FrenetPlanner:
@@ -230,31 +261,43 @@ class FrenetPlanner:
         
         # Sample different time horizons (use instance variables instead of module constants)
         for Ti in np.arange(self.min_t, self.max_t, self.dt):
-            # Longitudinal planning (velocity keeping)
-            for tv in np.arange(
+            time_cache = self._build_time_cache(Ti)
+            tv_values = np.arange(
                 target_speed - self.d_t_s * self.n_s_sample,
                 target_speed + self.d_t_s * self.n_s_sample,
                 self.d_t_s
-            ):
-                # Prevent reverse trajectories
-                if tv < 0.0:
-                    continue
+            )
+            tv_values = tv_values[tv_values >= 0.0]
+            if tv_values.size == 0:
+                continue
 
-                # Generate longitudinal trajectory
-                fp_lon = self._generate_longitudinal_trajectory(
-                    frenet_state, tv, Ti
-                )
-                
-                # Sample different lateral positions
-                for di in np.arange(-self.max_road_width, self.max_road_width, self.d_road_w):
-                    # Generate lateral trajectory
-                    fp = self._generate_lateral_trajectory(
-                        fp_lon, di, frenet_state, Ti
+            di_values = np.arange(-self.max_road_width, self.max_road_width, self.d_road_w)
+            if di_values.size == 0:
+                continue
+
+            lon_profiles = self._build_longitudinal_profiles(
+                frenet_state, tv_values, Ti, time_cache
+            )
+            lat_profiles = self._build_lateral_profiles(
+                frenet_state, di_values, Ti, time_cache
+            )
+            if not lon_profiles or not lat_profiles:
+                continue
+
+            for lon_profile in lon_profiles:
+                for lat_profile in lat_profiles:
+                    fp = FrenetPath(
+                        t=lon_profile.t,
+                        s=lon_profile.s,
+                        s_d=lon_profile.s_d,
+                        s_dd=lon_profile.s_dd,
+                        s_ddd=lon_profile.s_ddd,
+                        d=lat_profile.d,
+                        d_d=lat_profile.d_d,
+                        d_dd=lat_profile.d_dd,
+                        d_ddd=lat_profile.d_ddd,
                     )
-                    
-                    # Calculate cost
                     fp.cost = self._calculate_cost(fp, target_speed)
-                    
                     frenet_paths.append(fp)
         
         return frenet_paths
@@ -263,7 +306,8 @@ class FrenetPlanner:
         self,
         frenet_state: FrenetState,
         target_velocity: float,
-        time: float
+        time: float,
+        time_cache: "TimeCache"
     ) -> FrenetPath:
         """Generate longitudinal trajectory using quartic polynomial.
         
@@ -277,20 +321,23 @@ class FrenetPlanner:
         """
         fp = FrenetPath()
         
-        lon_qp = QuarticPolynomial(
-            frenet_state.s,
-            frenet_state.s_d,
-            frenet_state.s_dd,
-            target_velocity,
-            0.0,
-            time
-        )
-        
-        fp.t = [t for t in np.arange(0.0, time, self.dt)]
-        fp.s = [lon_qp.calc_point(t) for t in fp.t]
-        fp.s_d = [lon_qp.calc_first_derivative(t) for t in fp.t]
-        fp.s_dd = [lon_qp.calc_second_derivative(t) for t in fp.t]
-        fp.s_ddd = [lon_qp.calc_third_derivative(t) for t in fp.t]
+        t = time_cache.t
+        t2 = time_cache.t2
+        t3 = time_cache.t3
+        t4 = time_cache.t4
+        a0 = frenet_state.s
+        a1 = frenet_state.s_d
+        a2 = frenet_state.s_dd / 2.0
+        b = np.array([
+            target_velocity - a1 - 2.0 * a2 * time,
+            -2.0 * a2
+        ])
+        a3, a4 = time_cache.quartic_A_inv @ b
+        fp.t = t.tolist()
+        fp.s = (a0 + a1 * t + a2 * t2 + a3 * t3 + a4 * t4).tolist()
+        fp.s_d = (a1 + 2.0 * a2 * t + 3.0 * a3 * t2 + 4.0 * a4 * t3).tolist()
+        fp.s_dd = (2.0 * a2 + 6.0 * a3 * t + 12.0 * a4 * t2).tolist()
+        fp.s_ddd = (6.0 * a3 + 24.0 * a4 * t).tolist()
         
         return fp
     
@@ -299,7 +346,8 @@ class FrenetPlanner:
         fp_lon: FrenetPath,
         lateral_offset: float,
         frenet_state: FrenetState,
-        time: float
+        time: float,
+        time_cache: "TimeCache"
     ) -> FrenetPath:
         """Generate lateral trajectory using quintic polynomial.
         
@@ -314,22 +362,140 @@ class FrenetPlanner:
         """
         fp = copy.deepcopy(fp_lon)
         
-        lat_qp = QuinticPolynomial(
-            frenet_state.d,
-            frenet_state.d_d,
-            frenet_state.d_dd,
-            lateral_offset,
-            0.0,
-            0.0,
-            time
-        )
-        
-        fp.d = [lat_qp.calc_point(t) for t in fp.t]
-        fp.d_d = [lat_qp.calc_first_derivative(t) for t in fp.t]
-        fp.d_dd = [lat_qp.calc_second_derivative(t) for t in fp.t]
-        fp.d_ddd = [lat_qp.calc_third_derivative(t) for t in fp.t]
+        t = time_cache.t
+        t2 = time_cache.t2
+        t3 = time_cache.t3
+        t4 = time_cache.t4
+        t5 = time_cache.t5
+        a0 = frenet_state.d
+        a1 = frenet_state.d_d
+        a2 = frenet_state.d_dd / 2.0
+        b = np.array([
+            lateral_offset - a0 - a1 * time - a2 * time * time,
+            -a1 - 2.0 * a2 * time,
+            -2.0 * a2
+        ])
+        a3, a4, a5 = time_cache.quintic_A_inv @ b
+        fp.d = (a0 + a1 * t + a2 * t2 + a3 * t3 + a4 * t4 + a5 * t5).tolist()
+        fp.d_d = (a1 + 2.0 * a2 * t + 3.0 * a3 * t2 + 4.0 * a4 * t3 + 5.0 * a5 * t4).tolist()
+        fp.d_dd = (2.0 * a2 + 6.0 * a3 * t + 12.0 * a4 * t2 + 20.0 * a5 * t3).tolist()
+        fp.d_ddd = (6.0 * a3 + 24.0 * a4 * t + 60.0 * a5 * t2).tolist()
         
         return fp
+
+    def _build_time_cache(
+        self,
+        time: float
+    ) -> "TimeCache":
+        """Precompute time powers and coefficient inverses for vectorized evaluation."""
+        t = np.arange(0.0, time, self.dt)
+        t2 = t * t
+        t3 = t2 * t
+        t4 = t2 * t2
+        t5 = t4 * t
+        t_scalar = float(time)
+        quartic_A = np.array([
+            [3.0 * t_scalar ** 2, 4.0 * t_scalar ** 3],
+            [6.0 * t_scalar, 12.0 * t_scalar ** 2]
+        ])
+        quintic_A = np.array([
+            [t_scalar ** 3, t_scalar ** 4, t_scalar ** 5],
+            [3.0 * t_scalar ** 2, 4.0 * t_scalar ** 3, 5.0 * t_scalar ** 4],
+            [6.0 * t_scalar, 12.0 * t_scalar ** 2, 20.0 * t_scalar ** 3]
+        ])
+        return TimeCache(
+            t=t,
+            t2=t2,
+            t3=t3,
+            t4=t4,
+            t5=t5,
+            quartic_A_inv=np.linalg.inv(quartic_A),
+            quintic_A_inv=np.linalg.inv(quintic_A)
+        )
+
+    def _build_longitudinal_profiles(
+        self,
+        frenet_state: FrenetState,
+        target_velocities: np.ndarray,
+        time: float,
+        time_cache: TimeCache
+    ) -> List[LongitudinalProfile]:
+        t = time_cache.t
+        t2 = time_cache.t2
+        t3 = time_cache.t3
+        t4 = time_cache.t4
+
+        a0 = frenet_state.s
+        a1 = frenet_state.s_d
+        a2 = frenet_state.s_dd / 2.0
+
+        tv_values = np.asarray(target_velocities, dtype=float)
+        b = np.column_stack([
+            tv_values - a1 - 2.0 * a2 * time,
+            np.full(tv_values.shape, -2.0 * a2)
+        ])
+        coeffs = b @ time_cache.quartic_A_inv.T
+        a3 = coeffs[:, 0][:, None]
+        a4 = coeffs[:, 1][:, None]
+
+        s = a0 + a1 * t + a2 * t2 + a3 * t3 + a4 * t4
+        s_d = a1 + 2.0 * a2 * t + 3.0 * a3 * t2 + 4.0 * a4 * t3
+        s_dd = 2.0 * a2 + 6.0 * a3 * t + 12.0 * a4 * t2
+        s_ddd = 6.0 * a3 + 24.0 * a4 * t
+
+        profiles = []
+        for idx in range(tv_values.shape[0]):
+            profiles.append(LongitudinalProfile(
+                t=t,
+                s=s[idx],
+                s_d=s_d[idx],
+                s_dd=s_dd[idx],
+                s_ddd=s_ddd[idx],
+            ))
+        return profiles
+
+    def _build_lateral_profiles(
+        self,
+        frenet_state: FrenetState,
+        lateral_offsets: np.ndarray,
+        time: float,
+        time_cache: TimeCache
+    ) -> List[LateralProfile]:
+        t = time_cache.t
+        t2 = time_cache.t2
+        t3 = time_cache.t3
+        t4 = time_cache.t4
+        t5 = time_cache.t5
+
+        a0 = frenet_state.d
+        a1 = frenet_state.d_d
+        a2 = frenet_state.d_dd / 2.0
+
+        di_values = np.asarray(lateral_offsets, dtype=float)
+        b = np.column_stack([
+            di_values - a0 - a1 * time - a2 * time * time,
+            np.full(di_values.shape, -a1 - 2.0 * a2 * time),
+            np.full(di_values.shape, -2.0 * a2)
+        ])
+        coeffs = b @ time_cache.quintic_A_inv.T
+        a3 = coeffs[:, 0][:, None]
+        a4 = coeffs[:, 1][:, None]
+        a5 = coeffs[:, 2][:, None]
+
+        d = a0 + a1 * t + a2 * t2 + a3 * t3 + a4 * t4 + a5 * t5
+        d_d = a1 + 2.0 * a2 * t + 3.0 * a3 * t2 + 4.0 * a4 * t3 + 5.0 * a5 * t4
+        d_dd = 2.0 * a2 + 6.0 * a3 * t + 12.0 * a4 * t2 + 20.0 * a5 * t3
+        d_ddd = 6.0 * a3 + 24.0 * a4 * t + 60.0 * a5 * t2
+
+        profiles = []
+        for idx in range(di_values.shape[0]):
+            profiles.append(LateralProfile(
+                d=d[idx],
+                d_d=d_d[idx],
+                d_dd=d_dd[idx],
+                d_ddd=d_ddd[idx],
+            ))
+        return profiles
     
     def _calculate_cost(
         self,
@@ -346,11 +512,11 @@ class FrenetPlanner:
             Total cost
         """
         # Lateral costs
-        Jp = sum(np.power(fp.d_ddd, 2))  # Lateral jerk
+        Jp = np.sum(np.square(fp.d_ddd))  # Lateral jerk
         Jd = (fp.d[-1]) ** 2  # Final lateral offset
         
         # Longitudinal costs
-        Js = sum(np.power(fp.s_ddd, 2))  # Longitudinal jerk
+        Js = np.sum(np.square(fp.s_ddd))  # Longitudinal jerk
         Jv = (target_speed - fp.s_d[-1]) ** 2  # Speed deviation
         
         # Time cost
@@ -502,21 +668,50 @@ class FrenetPlanner:
             1e-6
         )
         sq_rubicon = inflated_radius ** 2
+
+        # Coarse AABB filter to skip unnecessary distance checks
+        path_min = np.min(path_points, axis=0) - inflated_radius
+        path_max = np.max(path_points, axis=0) + inflated_radius
         
         # 1. Static obstacles: Check all path points against all obstacles
         # Shape: (n_path, 1, 2) - (1, n_static, 2) -> (n_path, n_static, 2)
         if static_obstacles is not None and len(static_obstacles) > 0:
-            diff = path_points[:, None, :] - static_obstacles[None, :, :]
-            sq_dists = np.sum(diff ** 2, axis=2)
-            if np.any(sq_dists <= sq_rubicon):
-                return False
+            static_mask = (
+                (static_obstacles[:, 0] >= path_min[0]) &
+                (static_obstacles[:, 0] <= path_max[0]) &
+                (static_obstacles[:, 1] >= path_min[1]) &
+                (static_obstacles[:, 1] <= path_max[1])
+            )
+            if not np.any(static_mask):
+                static_candidates = None
+            else:
+                static_candidates = static_obstacles[static_mask]
+
+            if static_candidates is not None and len(static_candidates) > 0:
+                diff = path_points[:, None, :] - static_candidates[None, :, :]
+                sq_dists = np.sum(diff ** 2, axis=2)
+                if np.any(sq_dists <= sq_rubicon):
+                    return False
 
         # 2. Dynamic obstacles: Check time-aligned points
         if (dynamic_obstacles is not None and 
             dynamic_obstacles.size > 0 and 
             dynamic_obstacles.shape[-1] == 2):
             
-            n_obs, n_time, _ = dynamic_obstacles.shape
+            # Coarse filter by obstacle trajectory AABB
+            obs_min = np.min(dynamic_obstacles, axis=1)
+            obs_max = np.max(dynamic_obstacles, axis=1)
+            dyn_mask = (
+                (obs_max[:, 0] >= path_min[0]) &
+                (obs_min[:, 0] <= path_max[0]) &
+                (obs_max[:, 1] >= path_min[1]) &
+                (obs_min[:, 1] <= path_max[1])
+            )
+            if not np.any(dyn_mask):
+                return True
+
+            dynamic_candidates = dynamic_obstacles[dyn_mask]
+            n_obs, n_time, _ = dynamic_candidates.shape
             
             # Map each path point index to a time index in the obstacle array
             # time_indices[i] corresponds to the time step for path point i
@@ -529,7 +724,7 @@ class FrenetPlanner:
             # Shape: [n_path, n_obs, 2]
             # dynamic_obstacles is [n_obs, n_time, 2] -> transpose to [n_time, n_obs, 2]
             # Then fancy index with time_indices -> [n_path, n_obs, 2]
-            relevant_obs = dynamic_obstacles.transpose(1, 0, 2)[time_indices]
+            relevant_obs = dynamic_candidates.transpose(1, 0, 2)[time_indices]
             
             # Vectorized distance check
             # path_points: [n_path, 2] -> [n_path, 1, 2]

@@ -182,14 +182,23 @@ class FrenetPath:
         # This prevents IndexError when some lists are shorter due to conversion failures
         if len(self.t) == 0:
             return 0
-        # Check all required lists and return the minimum length
+
+        def _seq_len(seq) -> int:
+            if seq is None:
+                return 0
+            try:
+                return len(seq)
+            except TypeError:
+                return 0
+
+        # Check all required sequences and return the minimum length
         lengths = [
-            len(self.t),
-            len(self.x) if self.x else 0,
-            len(self.y) if self.y else 0,
-            len(self.yaw) if self.yaw else 0,
-            len(self.v) if self.v else 0,
-            len(self.a) if self.a else 0,
+            _seq_len(self.t),
+            _seq_len(self.x),
+            _seq_len(self.y),
+            _seq_len(self.yaw),
+            _seq_len(self.v),
+            _seq_len(self.a),
         ]
         return min(lengths) if lengths else 0
     
