@@ -169,17 +169,6 @@
 - [x] **Model Standardization**
   - デフォルトの学習済みモデルを `zara1_12_model.pt` に更新（より適切な回避行動の予測のため）
 
-### ✅ Phase 14: Planner Vectorization (v4.0.0 - NEW!)
-
-- [x] **Fully Vectorized Planner Logic**
-  - Completely rewrote `FrenetPlanner` core to use NumPy broadcasting instead of nested loops.
-  - Implemented `VectorizedPolynomialSolver` for batch calculation of quartic and quintic polynomials.
-  - Achieved significant speedup (targeting 100Hz+) for trajectory generation and validation.
-- [x] **Optimized Solvers**
-  - Implemented explicit analytical inverse for 3x3 matrices in quintic solver to avoid generic solver overhead.
-- [x] **Robustness Fixes**
-  - Implemented strict NaN checks for both coordinates (`x`, `y`) and kinematic fields (`v`, `a`, `c`) to prevent invalid trajectories.
-
 
 ### ✅ 追加機能
 
@@ -542,7 +531,6 @@ def test_trajectory_prediction():
 ### 最適化と改善 (v1.1) 🚀
 
 - 🚀 **衝突判定のベクトル化**: ループ処理を廃止し、NumPy Broadcastingで数百の障害物を一括判定 (0.06ms/call)
-- 🚀 **Planner Vectorization (v4.0)**: Replaced loop-based trajectory generation with tensor operations (`_generate_frenet_paths_vectorized`), enabling massive parallelism in path evaluation.
 - 🚀 **座標探索の高速化**: キャッシュ付き局所探索により、経路上の最近点探索コストを大幅削減
 - 🛡️ **予測のロバスト化**: 速度クランプ付き外挿ロジックにより、SGAN予測後の挙動安定化
 - 🔧 **API修正**: 誤解を招くメソッド名を修正 (`global_to_frenet_obstacle` -> `pass_through_obstacle`)
