@@ -17,14 +17,40 @@ def mock_spline():
     spline.s = [0, 100.0]
     
     # Mock calc_position: returns (s, 0)
-    spline.calc_position.side_effect = lambda s: (s, 0.0) if 0 <= s <= 100 else (None, None)
+    def calc_pos_side_effect(s):
+        s_arr = np.atleast_1d(s)
+        x = np.where((s_arr >= 0) & (s_arr <= 100), s_arr, np.nan)
+        y = np.where((s_arr >= 0) & (s_arr <= 100), 0.0, np.nan)
+        
+        # Return scalars if input was scalar
+        if np.isscalar(s) or s_arr.size == 1:
+            if np.isnan(x[0]):
+                return None, None
+            return float(x[0]), float(y[0])
+        return x, y
+
+    spline.calc_position.side_effect = calc_pos_side_effect
     
     # Mock calc_yaw: returns 0 (facing East)
-    spline.calc_yaw.return_value = 0.0
+    def calc_yaw_side_effect(s):
+        s_arr = np.atleast_1d(s)
+        yaw = np.zeros_like(s_arr)
+        if np.isscalar(s) or s_arr.size == 1:
+            return 0.0
+        return yaw
+
+    spline.calc_yaw.side_effect = calc_yaw_side_effect
     
     # Mock curvature: straight line -> 0
-    spline.calc_curvature.return_value = 0.0
-    spline.calc_curvature_rate.return_value = 0.0
+    def return_zero(s):
+        s_arr = np.atleast_1d(s)
+        z = np.zeros_like(s_arr)
+        if np.isscalar(s) or s_arr.size == 1:
+            return 0.0
+        return z
+
+    spline.calc_curvature.side_effect = return_zero
+    spline.calc_curvature_rate.side_effect = return_zero
     
     return spline
 

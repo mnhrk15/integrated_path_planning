@@ -520,7 +520,7 @@ class FrenetPlanner:
         self,
         fp_list: List[FrenetPath]
     ) -> List[FrenetPath]:
-        """Convert Frenet paths to global coordinates.
+        """Convert Frenet paths to global coordinates (Vectorized).
         
         Args:
             fp_list: List of Frenet paths
@@ -528,37 +528,113 @@ class FrenetPlanner:
         Returns:
             List of paths with global coordinates filled
         """
-        for fp in fp_list:
-            for i in range(len(fp.s)):
-                ix, iy = self.csp.calc_position(fp.s[i])
-                if ix is None or iy is None:
-                    break
+        if not fp_list:
+            return []
+
+        # 1. Flatten all path points
+        # Pre-allocate arrays for better performance
+        total_points = sum(len(fp.s) for fp in fp_list)
+        if total_points == 0:
+            return fp_list
+
+        all_s = np.zeros(total_points)
+        all_s_d = np.zeros(total_points)
+        all_s_dd = np.zeros(total_points)
+        all_d = np.zeros(total_points)
+        all_d_d = np.zeros(total_points)
+        all_d_dd = np.zeros(total_points)
+        
+        split_indices = np.zeros(len(fp_list), dtype=int)
+        
+        cursor = 0
+        for i, fp in enumerate(fp_list):
+            n = len(fp.s)
+            all_s[cursor:cursor+n] = fp.s
+            all_s_d[cursor:cursor+n] = fp.s_d
+            all_s_dd[cursor:cursor+n] = fp.s_dd
+            all_d[cursor:cursor+n] = fp.d
+            all_d_d[cursor:cursor+n] = fp.d_d
+            all_d_dd[cursor:cursor+n] = fp.d_dd
+            cursor += n
+            split_indices[i] = cursor
+
+        # 2. Batch calculate reference points using vectorized CubicSpline
+        # Note: CubicSpline2D handles bounds checks internally (returns NaN)
+        ix, iy = self.csp.calc_position(all_s)
+        i_yaw = self.csp.calc_yaw(all_s)
+        i_kappa = self.csp.calc_curvature(all_s)
+        i_dkappa = self.csp.calc_curvature_rate(all_s)
+
+        # 3. Batch conversion
+        # CoordinateConverter.frenet_to_cartesian is now vectorized
+        s_condition = (all_s, all_s_d, all_s_dd)
+        d_condition = (all_d, all_d_d, all_d_dd)
+        
+        try:
+             x, y, theta, kappa, v, a = self.converter.frenet_to_cartesian(
+                all_s, ix, iy, i_yaw, i_kappa, i_dkappa,
+                s_condition, d_condition
+            )
+        except Exception as e:
+            logger.error(f"Vectorized conversion failed: {e}")
+            # Fallback or empty return? 
+            # If conversion fails for one point, it might be due to NaNs.
+            # We continue, let the NaN values propagate, and filter later if needed.
+            # But here we just re-raise or return broken paths.
+            # Usually vector calls shouldn't raise exceptions unless dimension mismatch.
+            return fp_list
+
+        # 4. Unflatten results and populate paths
+        # x, y, etc. are numpy arrays. Split them back.
+        # np.split expects indices where splits occur (excluding 0, up to end)
+        # split_indices contains end indices for each segment. 
+        # We need to drop the last one for np.split, or just iterate with cursor.
+        # Iterating with cursor is faster than np.split for many small arrays
+        
+        cursor = 0
+        for i, end_index in enumerate(split_indices):
+            fp = fp_list[i]
+            # Ensure we cast to list as per data structure expectation
+            # Use tolist() which is fast for numpy elements
+            # Truncate path if it contains NaNs (e.g. goes out of spline bounds)
+            # This replicates the behavior of the loop-based implementation which stopped
+            # appending when calc_position returned None.
+            x_segment = x[cursor:end_index]
+            nan_mask = np.isnan(x_segment)
+            
+            if np.any(nan_mask):
+                # Find first NaN index
+                first_nan_idx = np.argmax(nan_mask)
                 
-                i_yaw = self.csp.calc_yaw(fp.s[i])
-                i_kappa = self.csp.calc_curvature(fp.s[i])
-                i_dkappa = self.csp.calc_curvature_rate(fp.s[i])
-                
-                if any(v is None for v in [i_yaw, i_kappa, i_dkappa]):
-                    break
-                
-                s_condition = [fp.s[i], fp.s_d[i], fp.s_dd[i]]
-                d_condition = [fp.d[i], fp.d_d[i], fp.d_dd[i]]
-                
-                try:
-                    x, y, theta, kappa, v, a = self.converter.frenet_to_cartesian(
-                        fp.s[i], ix, iy, i_yaw, i_kappa, i_dkappa,
-                        s_condition, d_condition
-                    )
-                    
-                    fp.x.append(x)
-                    fp.y.append(y)
-                    fp.yaw.append(theta)
-                    fp.c.append(kappa)
-                    fp.v.append(v)
-                    fp.a.append(a)
-                except Exception as e:
-                    logger.debug(f"Error converting to global: {e}")
-                    break
+                # If first point is NaN, whole path is invalid/empty for global coords
+                if first_nan_idx == 0:
+                    fp.x = []
+                    fp.y = []
+                    fp.yaw = []
+                    fp.c = []
+                    fp.v = []
+                    fp.a = []
+                else:
+                    # Truncate valid portion
+                    # Convert to list for assignment
+                    fp.x = x_segment[:first_nan_idx].tolist()
+                    fp.y = y[cursor:end_index][:first_nan_idx].tolist()
+                    fp.yaw = theta[cursor:end_index][:first_nan_idx].tolist()
+                    fp.c = kappa[cursor:end_index][:first_nan_idx].tolist()
+                    fp.v = v[cursor:end_index][:first_nan_idx].tolist()
+                    fp.a = a[cursor:end_index][:first_nan_idx].tolist()
+            else:
+                # No NaNs, copy full reference
+                fp.x = x_segment.tolist()
+                fp.y = y[cursor:end_index].tolist()
+                fp.yaw = theta[cursor:end_index].tolist()
+                fp.c = kappa[cursor:end_index].tolist()
+                fp.v = v[cursor:end_index].tolist()
+                fp.a = a[cursor:end_index].tolist()
+            
+
+        
+            cursor = end_index
         
         return fp_list
     

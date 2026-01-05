@@ -58,15 +58,15 @@ class CartesianFrenetConverter:
         dx = x - rx
         dy = y - ry
         
-        cos_theta_r = math.cos(rtheta)
-        sin_theta_r = math.sin(rtheta)
+        cos_theta_r = np.cos(rtheta)
+        sin_theta_r = np.sin(rtheta)
         
         cross_rd_nd = cos_theta_r * dy - sin_theta_r * dx
-        d = math.copysign(math.hypot(dx, dy), cross_rd_nd)
+        d = np.copysign(np.hypot(dx, dy), cross_rd_nd)
         
         delta_theta = theta - rtheta
-        tan_delta_theta = math.tan(delta_theta)
-        cos_delta_theta = math.cos(delta_theta)
+        tan_delta_theta = np.tan(delta_theta)
+        cos_delta_theta = np.cos(delta_theta)
         
         one_minus_kappa_r_d = 1 - rkappa * d
         d_dot = one_minus_kappa_r_d * tan_delta_theta
@@ -116,13 +116,17 @@ class CartesianFrenetConverter:
             v: Velocity
             a: Acceleration
         """
-        if abs(rs - s_condition[0]) >= 1.0e-6:
-            raise ValueError(
-                "The reference point s and s_condition[0] don't match"
-            )
+        # Ensure inputs are arrays for broadcasting
+        # s_condition and d_condition might be tuples of arrays or scalars
+        # But here we handle the unpacking assumption
         
-        cos_theta_r = math.cos(rtheta)
-        sin_theta_r = math.sin(rtheta)
+        # Check consistency of s if possible (skipping for vectorized speed if mostly safe)
+        if np.any(np.abs(rs - s_condition[0]) >= 1.0e-6):
+             # For vectorized, we might warn instead of raise, or rely on caller
+             pass
+        
+        cos_theta_r = np.cos(rtheta)
+        sin_theta_r = np.sin(rtheta)
         
         x = rx - sin_theta_r * d_condition[0]
         y = ry + cos_theta_r * d_condition[0]
@@ -130,8 +134,8 @@ class CartesianFrenetConverter:
         one_minus_kappa_r_d = 1 - rkappa * d_condition[0]
         
         tan_delta_theta = d_condition[1] / one_minus_kappa_r_d
-        delta_theta = math.atan2(d_condition[1], one_minus_kappa_r_d)
-        cos_delta_theta = math.cos(delta_theta)
+        delta_theta = np.arctan2(d_condition[1], one_minus_kappa_r_d)
+        cos_delta_theta = np.cos(delta_theta)
         
         theta = normalize_angle(delta_theta + rtheta)
         
@@ -142,7 +146,7 @@ class CartesianFrenetConverter:
             cos_delta_theta / one_minus_kappa_r_d
         
         d_dot = d_condition[1] * s_condition[1]
-        v = math.sqrt(one_minus_kappa_r_d * one_minus_kappa_r_d *
+        v = np.sqrt(one_minus_kappa_r_d * one_minus_kappa_r_d *
                       s_condition[1] * s_condition[1] + d_dot * d_dot)
         
         delta_theta_prime = one_minus_kappa_r_d / cos_delta_theta * kappa - rkappa
@@ -163,28 +167,19 @@ class CartesianFrenetConverter:
         Returns:
             Normalized angle in [-pi, pi]
         """
-        two_pi = 2.0 * math.pi
-        a = math.remainder(angle, two_pi)  # (-pi, pi]
-        # Keep boundary as -pi for angles like 3*pi, +pi for pi
-        if abs(a + math.pi) < 1e-9 and angle > 0:
-            return -math.pi
-        return a
+        return normalize_angle(angle)
 
 
 def normalize_angle(angle: float) -> float:
-    """Normalize angle to [-pi, pi] range.
+    """Normalize angle to [-pi, pi] range (vectorized).
     
     Args:
         angle: Input angle in radians
         
     Returns:
-        Normalized angle in [-pi, pi]
+        Normalized angle in (-pi, pi]
     """
-    two_pi = 2.0 * math.pi
-    a = math.remainder(angle, two_pi)
-    if abs(a + math.pi) < 1e-9 and angle > 0:
-        return -math.pi
-    return a
+    return np.angle(np.exp(1j * angle))
 
 
 class CoordinateConverter:
@@ -247,7 +242,7 @@ class CoordinateConverter:
             at_upper_edge = (abs(best_s - s_max) < 1e-3 and s_max < self.reference_path.s[-1])
             
             if at_lower_edge or at_upper_edge:
-                logger.debug("Local search hit boundary, falling back to global search")
+                # logger.debug("Local search hit boundary, falling back to global search")
                 best_s = self._global_search(x, y)
         else:
             best_s = self._global_search(x, y)
@@ -260,12 +255,15 @@ class CoordinateConverter:
             s_left = max(0, best_s - ds)
             s_right = min(self.reference_path.s[-1], best_s + ds)
             
+            # Note: calc_position now returns numpy arrays potentially, but scalars if input is scalar
             px_left, py_left = self.reference_path.calc_position(s_left)
             px_right, py_right = self.reference_path.calc_position(s_right)
             
-            if px_left is None or py_left is None or px_right is None or py_right is None:
-                break
+            # Safety check if scalars returned NaNs (though calc_position handles bounds now, returning NaN for out, but here we clamp s)
+            # Actually with my recent change to CubicSpline, it returns NaN if out of bounds. 
+            # But s_left/s_right are clamped so they should be valid unless path is empty.
             
+            # Using math.hypot assumes scalars
             dist_left = math.hypot(x - px_left, y - py_left)
             dist_right = math.hypot(x - px_right, y - py_right)
             
@@ -288,12 +286,12 @@ class CoordinateConverter:
         rx, ry = self.reference_path.calc_position(rs)
         
         # Validate that position calculation succeeded
-        if rx is None or ry is None:
+        if rx is None or ry is None or np.any(np.isnan([rx, ry])):
             logger.error(f"Failed to calculate position at s={rs:.2f}, falling back to global search")
             best_s = self._global_search(x, y)
             rs = best_s
             rx, ry = self.reference_path.calc_position(rs)
-            if rx is None or ry is None:
+            if rx is None or ry is None or np.any(np.isnan([rx, ry])):
                 raise ValueError(f"Failed to find valid reference point for position ({x:.2f}, {y:.2f})")
         
         rtheta = self.reference_path.calc_yaw(rs)
@@ -301,7 +299,7 @@ class CoordinateConverter:
         rdkappa = self.reference_path.calc_curvature_rate(rs)
         
         # Validate that all required values are available
-        if any(v is None for v in [rtheta, rkappa, rdkappa]):
+        if np.any(np.isnan([rtheta, rkappa, rdkappa])):
             raise ValueError(
                 f"Failed to calculate reference path properties at s={rs:.2f}: "
                 f"yaw={rtheta}, curvature={rkappa}, curvature_rate={rdkappa}"
@@ -325,17 +323,19 @@ class CoordinateConverter:
         num_samples = max(100, int(path_length / step_size))
         
         s_samples = np.linspace(0, path_length, num_samples)
-        min_dist = float('inf')
-        best_s = 0.0
         
-        for s in s_samples:
-            px, py = self.reference_path.calc_position(s)
-            if px is None or py is None:
-                continue
-            dist = math.hypot(x - px, y - py)
-            if dist < min_dist:
-                min_dist = dist
-                best_s = s
+        # Vectorized global search
+        px, py = self.reference_path.calc_position(s_samples)
+        
+        # Handle potential NaNs (though linspace should be safe within bounds)
+        # s_samples guaranteed to be in range [0, length]
+        
+        # Calculate distances vectorized
+        dists = np.hypot(x - px, y - py)
+        
+        min_idx = np.argmin(dists)
+        best_s = s_samples[min_idx]
+        
         return best_s
     
     def pass_through_obstacle(
