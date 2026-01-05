@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2026-01-05 (v3.7)
+
+#### Full Vectorization (v3.7)
+- **Vectorized Path Generation**: Completely vectorized the generation of Frenet path polynomials (quartic/quintic), replacing iterative loops with efficient numpy array operations.
+- **Vectorized Coordinate Conversion**: Implemented batch processing for `frenet_to_cartesian` transformation, significantly reducing overhead for large path sets.
+- **Vectorized Global Path Calculation**: Optimized the conversion of candidate Frenet paths to global coordinates using batch spline evaluation.
+
+#### Robustness Improvements (v3.7)
+- **Robust NaN Handling**: Implemented safeguards in `CubicSpline` to return `NaN` for out-of-bounds access instead of raising errors or returning invalid values.
+- **Path Truncation**: Added logic to automatically truncate paths when `NaN` values are encountered (e.g., at map boundaries), ensuring only valid trajectory segments are used for collision checking.
+
 ### Added - 2025-12-26
 
 #### Robustness and Performance Improvements (v3.6)

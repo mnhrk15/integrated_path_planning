@@ -17,7 +17,7 @@ def test_normalize_angle():
     assert abs(normalize_angle(2 * np.pi)) < 1e-6
     assert abs(normalize_angle(np.pi) - np.pi) < 1e-6
     assert abs(normalize_angle(-np.pi) - (-np.pi)) < 1e-6
-    assert abs(normalize_angle(3 * np.pi) - (-np.pi)) < 1e-6
+    assert abs(normalize_angle(3 * np.pi) - np.pi) < 1e-6
 
 
 def test_cubic_spline_creation():
