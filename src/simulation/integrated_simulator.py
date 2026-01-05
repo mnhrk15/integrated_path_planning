@@ -355,26 +355,11 @@ class IntegratedSimulator:
             
         logger.info("Warmup complete. Observer is ready.")
     
-    def step(self) -> SimulationResult:
-        """Execute one simulation step.
-        
-        Returns:
-            Simulation result for this step
-        """
-        # 1. Advance pedestrian simulation
-        ped_state = None
-        if self.pedestrian_sim is not None:
-            self.pedestrian_sim.step(self.ego_state)
-            ped_state = self.pedestrian_sim.get_state()
-            
-            # Update observer
-            self.observer.update(ped_state)
-        
-        # 2. Predict pedestrian trajectories
+    def _update_prediction(self, ped_state: Optional[PedestrianState]):
+        """Update and retrieve pedestrian predictions."""
         predicted_traj = None
         predicted_dist = None
         dynamic_obstacles = np.empty((0, 0, 2))
-        static_obstacles = self.static_obstacle_points.copy()
         t_pred = 0.0
         
         if ped_state is not None and self.observer.is_ready:
@@ -437,15 +422,16 @@ class IntegratedSimulator:
                 )
                 if not already_has_current:
                     dynamic_obstacles = np.concatenate([current_positions, dynamic_obstacles], axis=1)
-        
-        # 3. Plan path with State Machine
-        
-        # Determine constraints based on current state (before planning)
-        # In the first step, we are in NORMAL unless initialized otherwise.
-        # But we actually want the *result* of the previous step to drive this one's constraints?
-        # Or do we want to iterate?
-        # Let's try to plan with *current* state.
-        
+                    
+        return predicted_traj, predicted_dist, dynamic_obstacles, t_pred
+
+    def _execute_planning_cycle(
+        self, 
+        static_obstacles: np.ndarray, 
+        dynamic_obstacles: np.ndarray,
+        ped_state: Optional[PedestrianState]
+    ):
+        """Execute planning cycle with state machine management and retries."""
         # Get planner config from state machine
         sm_output = self.state_machine._get_planner_config()
         
@@ -521,8 +507,11 @@ class IntegratedSimulator:
                 f"Maximum re-planning attempts ({self._max_replan_attempts}) reached. "
                 f"Proceeding with emergency stop."
             )
+            
+        return planned_path, t_plan
 
-        # 4. Update ego vehicle state
+    def _update_ego_state(self, planned_path):
+        """Update ego vehicle state based on planned path."""
         # Storage for old accel
         old_a = self.ego_state.a
         
@@ -543,6 +532,31 @@ class IntegratedSimulator:
             logger.warning("No valid path found. Applying stop.")
             self._apply_emergency_stop(old_a)
             self.ego_state.state = self.state_machine.current_state
+
+    def step(self) -> SimulationResult:
+        """Execute one simulation step.
+        
+        Returns:
+            Simulation result for this step
+        """
+        # 1. Advance pedestrian simulation
+        ped_state = None
+        if self.pedestrian_sim is not None:
+            self.pedestrian_sim.step(self.ego_state)
+            ped_state = self.pedestrian_sim.get_state()
+            
+            # Update observer
+            self.observer.update(ped_state)
+        
+        # 2. Predict pedestrian trajectories
+        predicted_traj, predicted_dist, dynamic_obstacles, t_pred = self._update_prediction(ped_state)
+
+        # 3. Plan path with State Machine
+        static_obstacles = self.static_obstacle_points.copy()
+        planned_path, t_plan = self._execute_planning_cycle(static_obstacles, dynamic_obstacles, ped_state)
+
+        # 4. Update ego vehicle state
+        self._update_ego_state(planned_path)
         
         # 5. Create result
         result = SimulationResult(
