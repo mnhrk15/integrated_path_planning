@@ -253,8 +253,10 @@ class CoordinateConverter:
             best_s = self._global_search(x, y)
         
         # Refine with local search (gradient descent-like)
-        ds = 0.1
-        for _ in range(10):
+        # Start with a step size related to the global grid resolution (0.1m)
+        # And allow enough iterations to converge to sub-centimeter precision
+        ds = 0.2  # Start slightly larger than expected grid error
+        for _ in range(20):  # Increase iterations for better convergence
             s_left = max(0, best_s - ds)
             s_right = min(self.reference_path.s[-1], best_s + ds)
             
@@ -276,6 +278,7 @@ class CoordinateConverter:
             elif dist_right < dist_curr and dist_right < dist_left:
                 best_s = s_right
             else:
+                # If current is best, reduce step size to refine
                 ds *= 0.5
         
         # Cache for next time
@@ -306,9 +309,22 @@ class CoordinateConverter:
         
         return rs, rx, ry, rtheta, rkappa, rdkappa
     
+    def cartesian_to_frenet(self, *args, **kwargs):
+        """Wrapper for CartesianFrenetConverter.cartesian_to_frenet."""
+        return self.converter.cartesian_to_frenet(*args, **kwargs)
+
+    def frenet_to_cartesian(self, *args, **kwargs):
+        """Wrapper for CartesianFrenetConverter.frenet_to_cartesian."""
+        return self.converter.frenet_to_cartesian(*args, **kwargs)
+    
     def _global_search(self, x: float, y: float) -> float:
-        """Perform global search for nearest point (expensive)."""
-        s_samples = np.linspace(0, self.reference_path.s[-1], 1000)
+        """Perform global search for nearest point."""
+        # Use finer grid for global search (e.g., 0.1m resolution)
+        path_length = self.reference_path.s[-1]
+        step_size = 0.1
+        num_samples = max(100, int(path_length / step_size))
+        
+        s_samples = np.linspace(0, path_length, num_samples)
         min_dist = float('inf')
         best_s = 0.0
         

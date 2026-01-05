@@ -115,7 +115,9 @@ class FrenetPlanner:
         self.dt = dt
         self.d_road_w = d_road_w
         self.max_road_width = max_road_width
-        self.converter = CartesianFrenetConverter()
+        # Use high-level CoordinateConverter which handles nearest point search
+        from ..core.coordinate_converter import CoordinateConverter
+        self.converter = CoordinateConverter(reference_path)
         self.robot_radius = robot_radius
         self.obstacle_radius = obstacle_radius
         
@@ -199,28 +201,12 @@ class FrenetPlanner:
         Returns:
             Ego vehicle state in Frenet coordinates, or None if conversion fails
         """
-        # Find nearest point on reference path
-        s_samples = np.linspace(0, self.csp.s[-1], 1000)
-        min_dist = float('inf')
-        best_s = 0.0
-        
-        for s in s_samples:
-            px, py = self.csp.calc_position(s)
-            if px is None or py is None:
-                continue
-            dist = np.hypot(ego_state.x - px, ego_state.y - py)
-            if dist < min_dist:
-                min_dist = dist
-                best_s = s
-        
-        # Get reference point properties
-        rs = best_s
-        rx, ry = self.csp.calc_position(rs)
-        rtheta = self.csp.calc_yaw(rs)
-        rkappa = self.csp.calc_curvature(rs)
-        rdkappa = self.csp.calc_curvature_rate(rs)
-        
-        if any(v is None for v in [rx, ry, rtheta, rkappa, rdkappa]):
+        try:
+            rs, rx, ry, rtheta, rkappa, rdkappa = self.converter.find_nearest_point_on_path(
+                ego_state.x, ego_state.y
+            )
+        except Exception as e:
+            logger.error(f"Failed to find nearest point: {e}")
             return None
         
         # Convert to Frenet
