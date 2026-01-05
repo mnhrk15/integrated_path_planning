@@ -61,8 +61,15 @@ def test_cartesian_to_frenet(planner):
     frenet_state = planner._cartesian_to_frenet_state(ego_state)
     
     assert frenet_state is not None
-    assert np.isclose(frenet_state.s, 10.0, atol=0.5) # Approximate check due to search grid
-    assert np.isclose(frenet_state.d, 2.0, atol=0.1)
+    assert np.isclose(frenet_state.s, 10.0, atol=0.05) # Stricter check
+    assert np.isclose(frenet_state.d, 2.0, atol=0.05)
+    
+    # Test off-grid point to verify sub-grid precision
+    # Grid is likely 0.1m step. try x=10.053
+    ego_state_off = EgoVehicleState(x=10.053, y=2.0, yaw=0.0, v=5.0, a=0.0)
+    fs_off = planner._cartesian_to_frenet_state(ego_state_off)
+    assert np.isclose(fs_off.s, 10.053, atol=0.01) # 1cm precision expected
+    assert np.isclose(fs_off.d, 2.0, atol=0.01)
     
 def test_path_generation(planner):
     """Test that paths are generated."""
