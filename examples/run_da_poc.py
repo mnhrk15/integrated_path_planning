@@ -80,7 +80,7 @@ def main():
                   flush=True)
 
     df = pd.DataFrame(rows)
-    outdir = Path("output/poc_da_s2")
+    outdir = Path("output") / ("poc_da_" + Path(args.scenario).stem)
     outdir.mkdir(parents=True, exist_ok=True)
     df.to_csv(outdir / "all_runs.csv", index=False)
 
