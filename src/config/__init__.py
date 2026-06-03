@@ -91,6 +91,10 @@ class SimulationConfig:
     d_road_w: float = 0.5
     max_road_width: float = 7.0
     
+    # Distribution-aware (chance-constrained) planning
+    distribution_aware_planning: bool = False  # Consume the full prediction distribution in collision checking
+    chance_epsilon: float = 0.0  # Allowed fraction of colliding samples (0.0 = robust/worst-case)
+
     # Planner time horizon parameters
     min_t: float = 4.0  # Minimum prediction time [s]
     max_t: float = 5.0  # Maximum prediction time [s]

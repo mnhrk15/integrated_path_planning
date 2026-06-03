@@ -134,7 +134,12 @@ class FrenetPlanner:
         self.k_s_dot = kwargs.get("k_s_dot", K_S_DOT)
         self.k_lat = kwargs.get("k_lat", K_LAT)
         self.k_lon = kwargs.get("k_lon", K_LON)
-        
+
+        # Chance-constrained planning: allowed fraction of colliding prediction
+        # samples (0.0 = robust/worst-case). Only used when a prediction
+        # distribution is supplied to plan().
+        self.chance_epsilon = float(kwargs.get("chance_epsilon", 0.0))
+
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
                    f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
@@ -146,17 +151,22 @@ class FrenetPlanner:
         static_obstacles: np.ndarray,
         dynamic_obstacles: Optional[np.ndarray] = None,
         target_speed: float = TARGET_SPEED,
-        constraint_overrides: Optional[Dict[str, float]] = None
+        constraint_overrides: Optional[Dict[str, float]] = None,
+        dynamic_obstacles_distribution: Optional[np.ndarray] = None
     ) -> Optional[FrenetPath]:
         """Plan optimal trajectory from current state.
-        
+
         Args:
             ego_state: Current ego vehicle state
             static_obstacles: Static obstacle positions [n_obstacles, 2]
             dynamic_obstacles: Dynamic obstacles with time dimension [n_obs, time_steps, 2]
             target_speed: Desired target speed [m/s]
             constraint_overrides: Optional dictionary to override constraints (e.g. max_accel)
-            
+            dynamic_obstacles_distribution: Optional sampled prediction distribution
+                [n_samples, n_obs, time_steps, 2]. When provided, collision checking
+                is chance-constrained over the samples (see ``chance_epsilon``) instead
+                of using the single representative ``dynamic_obstacles``.
+
         Returns:
             Best trajectory, or None if no valid trajectory found
         """
@@ -177,7 +187,10 @@ class FrenetPlanner:
         fp_list = self._calc_global_paths(fp_list)
         
         # Check path validity
-        fp_dict = self._check_paths(fp_list, static_obstacles, dynamic_obstacles, constraint_overrides)
+        fp_dict = self._check_paths(
+            fp_list, static_obstacles, dynamic_obstacles, constraint_overrides,
+            dynamic_obstacles_distribution
+        )
         
         # Select best path
         best_path = self._select_best_path(fp_dict)
@@ -643,7 +656,8 @@ class FrenetPlanner:
         fp_list: List[FrenetPath],
         static_obstacles: np.ndarray,
         dynamic_obstacles: Optional[np.ndarray] = None,
-        constraint_overrides: Optional[Dict[str, float]] = None
+        constraint_overrides: Optional[Dict[str, float]] = None,
+        dynamic_obstacles_distribution: Optional[np.ndarray] = None
     ) -> dict:
         """Check path validity and categorize paths.
         
@@ -687,14 +701,30 @@ class FrenetPlanner:
             # Check curvature limit (use generator expression for early termination)
             elif any(abs(c) > c_max_curvature for c in fp.c):
                 path_dict['max_curvature_error'].append(fp)
-            # Check collision
-            elif not self._check_collision(fp, static_obstacles, dynamic_obstacles):
+            # Check collision (chance-constrained over the distribution when provided)
+            elif not self._path_is_collision_free(
+                fp, static_obstacles, dynamic_obstacles, dynamic_obstacles_distribution
+            ):
                 path_dict['collision_error'].append(fp)
             else:
                 path_dict['ok'].append(fp)
         
         return path_dict
     
+    def _path_is_collision_free(
+        self,
+        fp: FrenetPath,
+        static_obstacles: np.ndarray,
+        dynamic_obstacles: Optional[np.ndarray],
+        dynamic_distribution: Optional[np.ndarray]
+    ) -> bool:
+        """Route to single-sample or chance-constrained collision checking."""
+        if dynamic_distribution is not None and dynamic_distribution.size > 0:
+            return self._check_collision_distribution(
+                fp, static_obstacles, dynamic_distribution, self.chance_epsilon
+            )
+        return self._check_collision(fp, static_obstacles, dynamic_obstacles)
+
     def _check_collision(
         self,
         fp: FrenetPath,
@@ -702,103 +732,151 @@ class FrenetPlanner:
         dynamic_obstacles: Optional[np.ndarray] = None
     ) -> bool:
         """Check if path collides with obstacles (vectorized implementation).
-        
+
         Args:
             fp: Frenet path
             static_obstacles: Static obstacle positions [n_obstacles, 2]
             dynamic_obstacles: Dynamic obstacle trajectories [n_obs, time_steps, 2]
-            
+
         Returns:
             True if no collision, False otherwise
         """
-        if len(fp.x) == 0:
+        geom = self._path_collision_geometry(fp)
+        if geom is None:
             return True
-        
-        # Ensure consistency between t and x/y/s
-        # x, y calculation might stop early if path goes out of bounds, 
-        # but t is pre-calculated. We must synchronize them.
+        path_points, path_t, path_min, path_max, sq_rubicon = geom
+
+        if self._hits_static(path_points, path_min, path_max, static_obstacles, sq_rubicon):
+            return False
+        if self._hits_dynamic(path_points, path_t, path_min, path_max, dynamic_obstacles, sq_rubicon):
+            return False
+        return True
+
+    def _check_collision_distribution(
+        self,
+        fp: FrenetPath,
+        static_obstacles: np.ndarray,
+        dynamic_distribution: np.ndarray,
+        epsilon: float
+    ) -> bool:
+        """Chance-constrained collision check over a sampled prediction distribution.
+
+        A path is feasible if it stays collision-free under at least a
+        ``(1 - epsilon)`` fraction of the sampled futures (``epsilon = 0`` enforces
+        the robust/worst-case constraint that no sample collides). Static obstacles
+        are always treated as hard constraints.
+
+        Args:
+            fp: Frenet path
+            static_obstacles: Static obstacle positions [n_obstacles, 2]
+            dynamic_distribution: Sampled trajectories [n_samples, n_obs, time_steps, 2]
+            epsilon: Allowed fraction of colliding samples
+
+        Returns:
+            True if the path satisfies the chance constraint, False otherwise
+        """
+        geom = self._path_collision_geometry(fp)
+        if geom is None:
+            return True
+        path_points, path_t, path_min, path_max, sq_rubicon = geom
+
+        # Static obstacles are sample-independent and remain hard constraints.
+        if self._hits_static(path_points, path_min, path_max, static_obstacles, sq_rubicon):
+            return False
+
+        if dynamic_distribution is None or dynamic_distribution.size == 0:
+            return True
+
+        n_samples = dynamic_distribution.shape[0]
+        max_violations = int(np.floor(epsilon * n_samples))
+        violations = 0
+        for k in range(n_samples):
+            if self._hits_dynamic(
+                path_points, path_t, path_min, path_max,
+                dynamic_distribution[k], sq_rubicon
+            ):
+                violations += 1
+                if violations > max_violations:
+                    return False
+        return True
+
+    def _path_collision_geometry(self, fp: FrenetPath):
+        """Precompute path points, time stamps, AABB, and squared safety radius.
+
+        Returns ``None`` for an empty path, otherwise a tuple
+        ``(path_points, path_t, path_min, path_max, sq_rubicon)``.
+        """
+        if len(fp.x) == 0:
+            return None
+
+        # x/y may stop early if the path leaves the spline domain, but t is
+        # pre-computed, so synchronize their lengths.
         min_len = min(len(fp.x), len(fp.t))
-        
         path_x = np.array(fp.x[:min_len])
         path_y = np.array(fp.y[:min_len])
         path_t = np.array(fp.t[:min_len])
-        
         path_points = np.stack([path_x, path_y], axis=1)  # [n_path, 2]
-        
-        inflated_radius = max(
-            self.robot_radius + self.obstacle_radius,
-            1e-6
-        )
-        sq_rubicon = inflated_radius ** 2
 
-        # Coarse AABB filter to skip unnecessary distance checks
+        inflated_radius = max(self.robot_radius + self.obstacle_radius, 1e-6)
+        sq_rubicon = inflated_radius ** 2
         path_min = np.min(path_points, axis=0) - inflated_radius
         path_max = np.max(path_points, axis=0) + inflated_radius
-        
-        # 1. Static obstacles: Check all path points against all obstacles
-        # Shape: (n_path, 1, 2) - (1, n_static, 2) -> (n_path, n_static, 2)
-        if static_obstacles is not None and len(static_obstacles) > 0:
-            static_mask = (
-                (static_obstacles[:, 0] >= path_min[0]) &
-                (static_obstacles[:, 0] <= path_max[0]) &
-                (static_obstacles[:, 1] >= path_min[1]) &
-                (static_obstacles[:, 1] <= path_max[1])
-            )
-            if not np.any(static_mask):
-                static_candidates = None
-            else:
-                static_candidates = static_obstacles[static_mask]
+        return path_points, path_t, path_min, path_max, sq_rubicon
 
-            if static_candidates is not None and len(static_candidates) > 0:
-                diff = path_points[:, None, :] - static_candidates[None, :, :]
-                sq_dists = np.sum(diff ** 2, axis=2)
-                if np.any(sq_dists <= sq_rubicon):
-                    return False
+    def _hits_static(self, path_points, path_min, path_max, static_obstacles, sq_rubicon) -> bool:
+        """Return True if any path point collides with a static obstacle."""
+        if static_obstacles is None or len(static_obstacles) == 0:
+            return False
 
-        # 2. Dynamic obstacles: Check time-aligned points
-        if (dynamic_obstacles is not None and 
-            dynamic_obstacles.size > 0 and 
-            dynamic_obstacles.shape[-1] == 2):
-            
-            # Coarse filter by obstacle trajectory AABB
-            obs_min = np.min(dynamic_obstacles, axis=1)
-            obs_max = np.max(dynamic_obstacles, axis=1)
-            dyn_mask = (
-                (obs_max[:, 0] >= path_min[0]) &
-                (obs_min[:, 0] <= path_max[0]) &
-                (obs_max[:, 1] >= path_min[1]) &
-                (obs_min[:, 1] <= path_max[1])
-            )
-            if not np.any(dyn_mask):
-                return True
+        static_mask = (
+            (static_obstacles[:, 0] >= path_min[0]) &
+            (static_obstacles[:, 0] <= path_max[0]) &
+            (static_obstacles[:, 1] >= path_min[1]) &
+            (static_obstacles[:, 1] <= path_max[1])
+        )
+        if not np.any(static_mask):
+            return False
 
-            dynamic_candidates = dynamic_obstacles[dyn_mask]
-            n_obs, n_time, _ = dynamic_candidates.shape
-            
-            # Map each path point index to a time index in the obstacle array
-            # time_indices[i] corresponds to the time step for path point i
-            time_indices = np.round(path_t / self.dt).astype(int)
-            
-            # Clamp indices to valid range [0, n_time - 1]
-            time_indices = np.clip(time_indices, 0, n_time - 1)
-            
-            # Select relevant obstacle positions for each path point
-            # Shape: [n_path, n_obs, 2]
-            # dynamic_obstacles is [n_obs, n_time, 2] -> transpose to [n_time, n_obs, 2]
-            # Then fancy index with time_indices -> [n_path, n_obs, 2]
-            relevant_obs = dynamic_candidates.transpose(1, 0, 2)[time_indices]
-            
-            # Vectorized distance check
-            # path_points: [n_path, 2] -> [n_path, 1, 2]
-            # relevant_obs: [n_path, n_obs, 2]
-            diff = path_points[:, None, :] - relevant_obs
-            sq_dists = np.sum(diff ** 2, axis=2)
-            
-            if np.any(sq_dists <= sq_rubicon):
-                return False
+        static_candidates = static_obstacles[static_mask]
+        diff = path_points[:, None, :] - static_candidates[None, :, :]
+        sq_dists = np.sum(diff ** 2, axis=2)
+        return bool(np.any(sq_dists <= sq_rubicon))
 
-        return True
-    
+    def _hits_dynamic(self, path_points, path_t, path_min, path_max, dynamic_obstacles, sq_rubicon) -> bool:
+        """Return True if the path collides with one set of time-stamped obstacles.
+
+        ``dynamic_obstacles`` has shape [n_obs, time_steps, 2].
+        """
+        if (dynamic_obstacles is None or
+                dynamic_obstacles.size == 0 or
+                dynamic_obstacles.shape[-1] != 2):
+            return False
+
+        # Coarse filter by obstacle trajectory AABB
+        obs_min = np.min(dynamic_obstacles, axis=1)
+        obs_max = np.max(dynamic_obstacles, axis=1)
+        dyn_mask = (
+            (obs_max[:, 0] >= path_min[0]) &
+            (obs_min[:, 0] <= path_max[0]) &
+            (obs_max[:, 1] >= path_min[1]) &
+            (obs_min[:, 1] <= path_max[1])
+        )
+        if not np.any(dyn_mask):
+            return False
+
+        dynamic_candidates = dynamic_obstacles[dyn_mask]
+        n_time = dynamic_candidates.shape[1]
+
+        # Map each path point index to a time index in the obstacle array.
+        time_indices = np.round(path_t / self.dt).astype(int)
+        time_indices = np.clip(time_indices, 0, n_time - 1)
+
+        # [n_obs, n_time, 2] -> [n_time, n_obs, 2] -> fancy index -> [n_path, n_obs, 2]
+        relevant_obs = dynamic_candidates.transpose(1, 0, 2)[time_indices]
+        diff = path_points[:, None, :] - relevant_obs
+        sq_dists = np.sum(diff ** 2, axis=2)
+        return bool(np.any(sq_dists <= sq_rubicon))
+
     def _select_best_path(
         self,
         path_dict: dict

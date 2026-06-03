@@ -329,9 +329,14 @@ class IntegratedSimulator:
             k_d=config.k_d,
             k_s_dot=config.k_s_dot,
             k_lat=config.k_lat,
-            k_lon=config.k_lon
+            k_lon=config.k_lon,
+            chance_epsilon=getattr(config, 'chance_epsilon', 0.0)
         )
-        
+
+        # Distribution-aware planning: feed the full prediction distribution to the
+        # planner's chance-constrained collision check instead of one sample.
+        self.distribution_aware_planning = getattr(config, 'distribution_aware_planning', False)
+
         # 6. Initialize coordinate converter
         self.coord_converter = CoordinateConverter(self.reference_path)
         
@@ -378,8 +383,9 @@ class IntegratedSimulator:
         predicted_traj = None
         predicted_dist = None
         dynamic_obstacles = np.empty((0, 0, 2))
+        dynamic_obstacles_dist = None
         t_pred = 0.0
-        
+
         if ped_state is not None and self.observer.is_ready:
             try:
                 # Get observations
@@ -396,7 +402,12 @@ class IntegratedSimulator:
                 dynamic_obstacles = self.coord_converter.pass_through_obstacle(
                     predicted_traj
                 )
-                
+
+                # For distribution-aware planning, keep the full sample set (global
+                # coordinates, same pass-through as the representative sample).
+                if self.distribution_aware_planning and predicted_dist is not None:
+                    dynamic_obstacles_dist = np.asarray(predicted_dist)
+
                 logger.debug(
                     f"Predicted {predicted_traj.shape[0]} pedestrian trajectories "
                     f"for {predicted_traj.shape[1]} steps"
@@ -440,14 +451,27 @@ class IntegratedSimulator:
                 )
                 if not already_has_current:
                     dynamic_obstacles = np.concatenate([current_positions, dynamic_obstacles], axis=1)
-                    
-        return predicted_traj, predicted_dist, dynamic_obstacles, t_pred
+
+            # Mirror the current-position prepend for each distribution sample so the
+            # time alignment matches the single-sample obstacles.
+            if dynamic_obstacles_dist is not None and dynamic_obstacles_dist.size > 0:
+                n_samples = dynamic_obstacles_dist.shape[0]
+                cur_dist = np.broadcast_to(
+                    current_positions[None, ...],
+                    (n_samples,) + current_positions.shape
+                )
+                dynamic_obstacles_dist = np.concatenate(
+                    [cur_dist, dynamic_obstacles_dist], axis=2
+                )
+
+        return predicted_traj, predicted_dist, dynamic_obstacles, dynamic_obstacles_dist, t_pred
 
     def _execute_planning_cycle(
-        self, 
-        static_obstacles: np.ndarray, 
+        self,
+        static_obstacles: np.ndarray,
         dynamic_obstacles: np.ndarray,
-        ped_state: Optional[PedestrianState]
+        ped_state: Optional[PedestrianState],
+        dynamic_obstacles_distribution: Optional[np.ndarray] = None
     ):
         """Execute planning cycle with state machine management and retries."""
         # Get planner config from state machine
@@ -463,7 +487,8 @@ class IntegratedSimulator:
             static_obstacles,
             dynamic_obstacles,
             target_speed=target_speed,
-            constraint_overrides=sm_output.constraint_overrides
+            constraint_overrides=sm_output.constraint_overrides,
+            dynamic_obstacles_distribution=dynamic_obstacles_distribution
         )
         t_plan = time.perf_counter() - t_start
         
@@ -510,9 +535,10 @@ class IntegratedSimulator:
                 static_obstacles,
                 dynamic_obstacles,
                 target_speed=target_speed,
-                constraint_overrides=new_sm_output.constraint_overrides
+                constraint_overrides=new_sm_output.constraint_overrides,
+                dynamic_obstacles_distribution=dynamic_obstacles_distribution
             )
-            
+
             if planned_path is not None:
                 logger.info(f"Re-planning successful in {new_sm_output.state}")
             else:
@@ -567,11 +593,14 @@ class IntegratedSimulator:
             self.observer.update(ped_state)
         
         # 2. Predict pedestrian trajectories
-        predicted_traj, predicted_dist, dynamic_obstacles, t_pred = self._update_prediction(ped_state)
+        predicted_traj, predicted_dist, dynamic_obstacles, dynamic_obstacles_dist, t_pred = \
+            self._update_prediction(ped_state)
 
         # 3. Plan path with State Machine
         static_obstacles = self.static_obstacle_points.copy()
-        planned_path, t_plan = self._execute_planning_cycle(static_obstacles, dynamic_obstacles, ped_state)
+        planned_path, t_plan = self._execute_planning_cycle(
+            static_obstacles, dynamic_obstacles, ped_state, dynamic_obstacles_dist
+        )
 
         # 4. Update ego vehicle state
         self._update_ego_state(planned_path)

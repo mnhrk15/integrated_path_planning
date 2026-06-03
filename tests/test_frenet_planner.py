@@ -152,6 +152,42 @@ def test_collision_check_dynamic(planner):
     dynamic_obs[0, 0, :] = [10.0, 5.0]
     assert planner._check_collision(fp, None, dynamic_obs) is True
 
+def test_collision_check_distribution_chance_constrained(planner):
+    """Chance-constrained check tolerates up to floor(epsilon*N) colliding samples."""
+    fp = FrenetPath()
+    fp.x = [10.0, 11.0]
+    fp.y = [0.0, 0.0]
+    fp.t = [0.0, 0.1]  # -> time indices [0, 1]
+
+    # 4 samples, 1 pedestrian, 2 steps. Only sample 0 collides (at path point 0).
+    far = [[100.0, 100.0], [100.0, 100.0]]
+    hit = [[10.0, 0.0], [100.0, 100.0]]
+    dist = np.array([hit, far, far, far])[:, None, :, :]  # [4, 1, 2, 2]
+    assert dist.shape == (4, 1, 2, 2)
+
+    # epsilon=0 (robust): a single colliding sample makes the path infeasible.
+    assert planner._check_collision_distribution(fp, None, dist, 0.0) is False
+    # epsilon=0.25 -> floor(0.25*4)=1 violation allowed -> feasible.
+    assert planner._check_collision_distribution(fp, None, dist, 0.25) is True
+    # epsilon=0.2 -> floor(0.2*4)=0 -> infeasible again.
+    assert planner._check_collision_distribution(fp, None, dist, 0.2) is False
+
+def test_collision_check_distribution_static_is_hard(planner):
+    """Static obstacles remain hard constraints regardless of epsilon."""
+    fp = FrenetPath()
+    fp.x = [10.0, 11.0]
+    fp.y = [0.0, 0.0]
+    fp.t = [0.0, 0.1]
+
+    far = [[100.0, 100.0], [100.0, 100.0]]
+    dist = np.array([far, far])[:, None, :, :]  # no dynamic collisions
+    static_obs = np.array([[10.0, 0.0]])  # directly on the path
+
+    # Even when all dynamic violations are allowed, the static obstacle blocks it.
+    assert planner._check_collision_distribution(fp, static_obs, dist, 1.0) is False
+    # Without the static obstacle the path is feasible.
+    assert planner._check_collision_distribution(fp, None, dist, 0.0) is True
+
 def test_plan_end_to_end(planner):
     """Test the full plan() method."""
     ego_state = EgoVehicleState(x=0.0, y=0.0, yaw=0.0, v=5.0, a=0.0)
