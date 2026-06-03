@@ -38,13 +38,7 @@ max_road_width: 7.0
 ped_radius: 0.2
 obstacle_radius: 0.2
 
-# === Planner Cost Weights (optional) ===
-k_j: 0.5
-k_t: 1.0
-k_d: 1.0
-k_s_dot: 0.5
-k_lat: 1.5
-k_lon: 1.0
+# === Planner Cost Weights: unified to defaults (all 1.0) ===
 
 # === Reference Path (Right Turn) ===
 # From West (-30, 2.5) to South (2.5, -30)

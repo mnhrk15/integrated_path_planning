@@ -34,13 +34,7 @@ max_road_width: 7.0
 ped_radius: 0.2
 obstacle_radius: 0.2
 
-# === Planner Cost Weights (optional) ===
-k_j: 0.5
-k_t: 1.0
-k_d: 0.5
-k_s_dot: 1.0
-k_lat: 0.5
-k_lon: 1.0
+# === Planner Cost Weights: unified to defaults (all 1.0) ===
 
 # === Reference Path ===
 # Straight corridor
