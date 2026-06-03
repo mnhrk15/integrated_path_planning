@@ -70,7 +70,12 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
             history = simulator.run(n_steps=steps)
             
             # Calculate metrics
-            metrics = calculate_aggregate_metrics(history, config.dt)
+            metrics = calculate_aggregate_metrics(
+                history,
+                config.dt,
+                prediction_dt=simulator.observer.sgan_dt,
+                prediction_steps=config.pred_len,
+            )
             
             # Add additional efficiency metrics
             total_time = history[-1].time
@@ -83,8 +88,10 @@ def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "ben
                 "Collisions": metrics['collision_count'],
                 "Min TTC (s)": metrics['min_ttc'],
                 "Max Jerk": metrics['max_jerk'],
-                "ADE (m)": metrics['ade'],
-                "FDE (m)": metrics['fde'],
+                "Standard ADE (m)": metrics['ade'],
+                "Standard FDE (m)": metrics['fde'],
+                "Planning ADE (m)": metrics['planning_ade'],
+                "Planning FDE (m)": metrics['planning_fde'],
                 "Total Time (s)": total_time,
                 "Avg Speed (m/s)": avg_speed,
                 "Steps": len(history)

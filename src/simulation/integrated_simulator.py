@@ -59,8 +59,10 @@ class PedestrianSimulator:
         self.dt = dt
         self.initial_states = initial_states
         self.time = 0.0
-        self.ego_agent_index = -1  # Index of the ego agent in the state array
         self.ego_radius = ego_radius
+        self.ego_repulsion_sigma = 0.7
+        self.ego_repulsion_v0 = 3.5
+        self._ego_position: Optional[np.ndarray] = None
         
         # Check for PySocialForce availability
         if not PYSOCIALFORCE_AVAILABLE:
@@ -76,6 +78,77 @@ class PedestrianSimulator:
             social_force_params=social_force_params
         )
 
+    @staticmethod
+    def _set_nested_config_value(config: Dict, key: str, value) -> None:
+        """Set a dotted configuration key in a nested dictionary."""
+        parts = key.split(".")
+        target = config
+        for part in parts[:-1]:
+            target = target.setdefault(part, {})
+        target[parts[-1]] = value
+
+    def _apply_social_force_params(self, social_force_params: Optional[Dict]) -> None:
+        """Apply wrapper and PySocialForce parameters after initialization."""
+        if not social_force_params:
+            return
+
+        legacy_aliases = {
+            "ped_repulsion.sigma": "ego_repulsion.sigma",
+            "ped_repulsion.v0": "ego_repulsion.v0",
+        }
+        normalized_params = dict(social_force_params)
+        for old_key, new_key in legacy_aliases.items():
+            if old_key in normalized_params and new_key not in normalized_params:
+                logger.warning(f"'{old_key}' is deprecated; use '{new_key}'")
+                normalized_params[new_key] = normalized_params[old_key]
+
+        self.ego_repulsion_sigma = float(
+            normalized_params.get("ego_repulsion.sigma", self.ego_repulsion_sigma)
+        )
+        self.ego_repulsion_v0 = float(
+            normalized_params.get("ego_repulsion.v0", self.ego_repulsion_v0)
+        )
+        if self.ego_repulsion_sigma <= 0:
+            raise ValueError("ego_repulsion.sigma must be positive")
+        if self.ego_repulsion_v0 < 0:
+            raise ValueError("ego_repulsion.v0 must be non-negative")
+
+        for key, value in normalized_params.items():
+            if key.startswith("ego_repulsion.") or key in legacy_aliases:
+                continue
+            self._set_nested_config_value(self.sim.config.config, key, value)
+
+        agent_radius = normalized_params.get(
+            "agent_radius",
+            normalized_params.get("scene.agent_radius"),
+        )
+        if agent_radius is not None:
+            self.sim.peds.agent_radius = float(agent_radius)
+
+    def _overwrite_ego_state(self, ego_state: EgoVehicleState) -> None:
+        """Store the externally planned ego state for pedestrian interaction."""
+        self._ego_position = np.array([ego_state.x, ego_state.y], dtype=float)
+
+    def _compute_ego_repulsive_force(self) -> np.ndarray:
+        """Compute an explicit ego-to-pedestrian repulsive force."""
+        forces = np.zeros((self.sim.peds.size(), 2))
+        if self._ego_position is None or self.ego_repulsion_v0 == 0:
+            return forces
+
+        positions = self.sim.peds.pos()
+        deltas = positions - self._ego_position
+        distances = np.linalg.norm(deltas, axis=1)
+        directions = np.zeros_like(deltas)
+        nonzero = distances > 1e-9
+        directions[nonzero] = deltas[nonzero] / distances[nonzero, None]
+
+        clearance = np.maximum(
+            distances - (self.ego_radius + float(self.sim.peds.agent_radius)),
+            0.0,
+        )
+        magnitudes = self.ego_repulsion_v0 * np.exp(-clearance / self.ego_repulsion_sigma)
+        return directions * magnitudes[:, None]
+
     def _init_pysocialforce(
         self, 
         groups: Optional[List[List[int]]] = None, 
@@ -87,13 +160,6 @@ class PedestrianSimulator:
         # Convert states to PySocialForce format
         # [N, 6] -> state
         
-        # Add a dummy agent for the Ego vehicle at the end
-        # Position it far away initially so it doesn't disturb initialization
-        n_peds = self.initial_states.shape[0]
-        ego_dummy = np.array([[9999.0, 9999.0, 0.0, 0.0, 9999.0, 9999.0]])
-        state = np.vstack([self.initial_states, ego_dummy])
-        self.ego_agent_index = n_peds
-        
         # Initialize simulator
         # PySocialForce expects obstacles as list of line segments or polygons
         # Here we assume obstacles is a list of [x_min, x_max, y_min, y_max] box lists
@@ -104,63 +170,33 @@ class PedestrianSimulator:
                 if len(obs) == 4:  # [x_min, x_max, y_min, y_max]
                     x_min, x_max, y_min, y_max = obs
                     # Box as 4 lines, filtering out zero-length segments
-                    # PySocialForce expects (x1, y1, x2, y2)
+                    # PySocialForce expects (x1, x2, y1, y2)
                     segments = [
-                        (x_min, y_min, x_max, y_min), # Bottom edge
-                        (x_max, y_min, x_max, y_max), # Right edge
-                        (x_max, y_max, x_min, y_max), # Top edge
-                        (x_min, y_max, x_min, y_min)  # Left edge
+                        (x_min, x_max, y_min, y_min), # Bottom edge
+                        (x_max, x_max, y_min, y_max), # Right edge
+                        (x_max, x_min, y_max, y_max), # Top edge
+                        (x_min, x_min, y_max, y_min)  # Left edge
                     ]
                     for s in segments:
-                        # Check if length > epsilon (s is x1, y1, x2, y2)
+                        # Check if length > epsilon (s is x1, x2, y1, y2)
                         # Calculates Euclidean distance squared to be safe, or just check component diffs
-                        dx = s[2] - s[0]
-                        dy = s[3] - s[1]
+                        dx = s[1] - s[0]
+                        dy = s[3] - s[2]
                         if (dx*dx + dy*dy) > 1e-12:
                             psf_obstacles.append(s)
         
         self.sim = psf.Simulator(
-            state=state,
+            state=self.initial_states,
             groups=groups,
             obstacles=psf_obstacles if psf_obstacles else None,
             config_file=config_file
         )
 
-        # Apply custom parameters if provided
-        if social_force_params and hasattr(self.sim, 'config'):
-            for key, value in social_force_params.items():
-                # Support nested keys with dot notation (e.g. "ped_repulsion.sigma")
-                if "." in key:
-                    section, subkey = key.split(".", 1)
-                    if hasattr(self.sim.config, section):
-                        section_obj = getattr(self.sim.config, section)
-                        if isinstance(section_obj, dict):
-                             section_obj[subkey] = value
-                        else:
-                             setattr(section_obj, subkey, value)
-                else:
-                    setattr(self.sim.config, key, value)
-                    
-        # Also try to update specific force parameters if exposed
-        if social_force_params:
-             # Basic handling for common PySocialForce parameters if directly exposed
-             pass
+        self._apply_social_force_params(social_force_params)
         
         # Manually set dt (step_width)
         if hasattr(self.sim, 'peds'):
             self.sim.peds.step_width = self.dt
-            # Make Ego agent larger to reflect vehicle size
-            # PySocialForce defaults to 0.3 or 0.4
-            if hasattr(self.sim.peds, 'agent_radius'):
-                # Handle varying implementations of agent radius
-                # If it's a scalar, we can't change it per agent easily without modifying library
-                # If it's an array, we can set the specific index
-                if isinstance(self.sim.peds.agent_radius, np.ndarray):
-                     self.sim.peds.agent_radius[self.ego_agent_index] = self.ego_radius
-                elif isinstance(self.sim.peds.agent_radius, list):
-                     self.sim.peds.agent_radius[self.ego_agent_index] = self.ego_radius
-                else:
-                    logger.debug("Could not set specific radius for Ego agent in PySocialForce")
 
     def step(self, ego_state: Optional[EgoVehicleState] = None, n: int = 1):
         """Advance simulation by n time steps.
@@ -170,23 +206,12 @@ class PedestrianSimulator:
             n: Number of time steps to simulate
         """
         if self.sim:
-            # Update Ego agent state before stepping
-            if ego_state is not None and self.ego_agent_index >= 0:
-                # Update position and velocity
-                # state: [x, y, vx, vy, gx, gy, tau]
-                self.sim.peds.state[self.ego_agent_index, 0] = ego_state.x
-                self.sim.peds.state[self.ego_agent_index, 1] = ego_state.y
-                self.sim.peds.state[self.ego_agent_index, 2] = ego_state.v * np.cos(ego_state.yaw)
-                self.sim.peds.state[self.ego_agent_index, 3] = ego_state.v * np.sin(ego_state.yaw)
-                
-                # Update goal to be far ahead to avoid goal forces pulling it backward
-                # Or just keep it as is (far away)
-                # Ideally, we want the car to be a moving obstacle, not really influenced by forces
-                # But in this step, we mainly care about its influence on OTHERS.
-                # Since we overwrite its state next time, its own force update doesn't matter much.
-            
-            self.sim.step(n)
-            self.time += n * self.dt
+            for _ in range(n):
+                if ego_state is not None:
+                    self._overwrite_ego_state(ego_state)
+                force = self.sim.compute_forces() + self._compute_ego_repulsive_force()
+                self.sim.peds.step(force)
+                self.time += self.dt
         else:
             raise RuntimeError("Simulator not initialized correctly.")
 
@@ -194,23 +219,16 @@ class PedestrianSimulator:
         """Get current pedestrian state.
         
         Returns:
-            Current pedestrian state (excluding Ego agent)
+            Current pedestrian state
         """
         if self.sim:
             # PySocialForce state: [N, 7] (x, y, vx, vy, gx, gy, tau)
             full_state = self.sim.peds.state
             
-            # Exclude Ego agent
-            if self.ego_agent_index >= 0:
-                # Assuming Ego is at the end
-                state = full_state[:self.ego_agent_index]
-            else:
-                state = full_state
-            
             return PedestrianState(
-                positions=state[:, 0:2].copy(),
-                velocities=state[:, 2:4].copy(),
-                goals=state[:, 4:6].copy(),
+                positions=full_state[:, 0:2].copy(),
+                velocities=full_state[:, 2:4].copy(),
+                goals=full_state[:, 4:6].copy(),
                 timestamp=self.time
             )
         else:
@@ -771,7 +789,12 @@ class IntegratedSimulator:
         # --- Metrics Calculation (Always run for export) ---
         try:
             from ..core.metrics import calculate_aggregate_metrics
-            metrics = calculate_aggregate_metrics(self.history, self.config.dt)
+            metrics = calculate_aggregate_metrics(
+                self.history,
+                self.config.dt,
+                prediction_dt=self.observer.sgan_dt,
+                prediction_steps=self.config.pred_len,
+            )
         except Exception as e:
             logger.error(f"Failed to calculate metrics: {e}")
             metrics = {}

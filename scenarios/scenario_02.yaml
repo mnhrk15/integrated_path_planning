@@ -9,8 +9,8 @@ total_time: 30.0
 
 # === Social Force Parameters (Tuning) ===
 social_force_params:
-  ped_repulsion.sigma: 0.3
-  ped_repulsion.v0: 2.1
+  ego_repulsion.sigma: 0.3
+  ego_repulsion.v0: 2.1
   agent_radius: 0.2
 
 # === Observation Parameters ===

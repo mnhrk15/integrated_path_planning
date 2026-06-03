@@ -51,7 +51,12 @@ def run_single(scenario_path: str, method: str, seed: int) -> dict | None:
     try:
         simulator = IntegratedSimulator(config)
         history = simulator.run()
-        metrics = calculate_aggregate_metrics(history, config.dt)
+        metrics = calculate_aggregate_metrics(
+            history,
+            config.dt,
+            prediction_dt=simulator.observer.sgan_dt,
+            prediction_steps=config.pred_len,
+        )
         total_time = history[-1].time
         avg_speed = float(np.mean([r.ego_state.v for r in history]))
         return {
@@ -64,6 +69,8 @@ def run_single(scenario_path: str, method: str, seed: int) -> dict | None:
             "collision_count": metrics["collision_count"],
             "ade": round(metrics["ade"], 4),
             "fde": round(metrics["fde"], 4),
+            "planning_ade": round(metrics["planning_ade"], 4),
+            "planning_fde": round(metrics["planning_fde"], 4),
         }
     except Exception as e:
         logger.error(f"{method} seed={seed} failed: {e}")
@@ -168,7 +175,17 @@ def main():
     logger.info(f"Raw data saved to {output_dir / 'all_runs.csv'}")
 
     # Compute summary stats
-    metrics_cols = ["time_s", "speed_ms", "min_dist_m", "min_ttc_s", "collision_count"]
+    metrics_cols = [
+        "time_s",
+        "speed_ms",
+        "min_dist_m",
+        "min_ttc_s",
+        "collision_count",
+        "ade",
+        "fde",
+        "planning_ade",
+        "planning_fde",
+    ]
     summary_rows = []
     for method in ["CV", "LSTM", "SGAN"]:
         method_df = df[df["method"] == method]

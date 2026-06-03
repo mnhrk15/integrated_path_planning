@@ -115,15 +115,22 @@ class DashboardGenerator:
 
     def _plot_summary_table(self, ax, metrics: dict):
         """Render summary table."""
+        def fmt_metric(value, precision=3):
+            if value is None or not np.isfinite(value):
+                return "n/a"
+            return f"{value:.{precision}f}"
+
         # Format data
         data = [
             ["Metric", "Value", "Unit"],
             ["Min Distance", f"{metrics.get('min_dist', 0):.2f}", "m"],
-            ["Min TTC", f"{metrics.get('min_ttc', np.inf):.2f}", "s"],
+            ["Min TTC", fmt_metric(metrics.get('min_ttc'), 2), "s"],
             ["Collisions", f"{int(metrics.get('collision_count', 0))}", "#"],
             ["Max Jerk", f"{metrics.get('max_jerk', 0):.2f}", "m/s³"],
-            ["ADE (Pred)", f"{metrics.get('ade', 0):.3f}", "m"],
-            ["FDE (Pred)", f"{metrics.get('fde', 0):.3f}", "m"],
+            ["ADE (Standard)", fmt_metric(metrics.get('ade')), "m"],
+            ["FDE (Standard)", fmt_metric(metrics.get('fde')), "m"],
+            ["ADE (Planning)", fmt_metric(metrics.get('planning_ade')), "m"],
+            ["FDE (Planning)", fmt_metric(metrics.get('planning_fde')), "m"],
         ]
         
         table = ax.table(

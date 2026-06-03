@@ -8,10 +8,9 @@ total_time: 20.0
 
 # === Social Force Parameters (Tuning) ===
 social_force_params:
-  # Increase repulsion field range (sigma) and strength (v0)
-  # Standard PySocialForce defaults: sigma=0.3, v0=2.1
-  ped_repulsion.sigma: 0.7 
-  ped_repulsion.v0: 3.5 
+  # Increase ego-repulsion field range (sigma) and strength (v0)
+  ego_repulsion.sigma: 0.7
+  ego_repulsion.v0: 3.5
   agent_radius: 0.4
 
 
