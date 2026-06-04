@@ -176,3 +176,25 @@ def test_aggregate_metrics_exports_standard_and_planning_names():
     assert metrics["planning_fde"] == pytest.approx(0.0)
     assert metrics["ade_eval_count"] == 1
     assert metrics["planning_eval_count"] == 1
+
+
+def test_aggregate_metrics_reports_comfort_accel_and_jerk():
+    """Comfort metrics: mean |accel| and RMS jerk over the ego-state series."""
+    history = [_result([[0.0, 0.0]]), _result([[1.0, 0.0]])]
+    history[0].ego_state.a, history[0].ego_state.jerk = 1.0, 2.0
+    history[1].ego_state.a, history[1].ego_state.jerk = -3.0, -4.0
+
+    metrics = calculate_aggregate_metrics(
+        history,
+        dt=0.1,
+        prediction_dt=0.1,
+        prediction_steps=1,
+    )
+
+    # mean(|1|, |-3|) = 2.0 ; max(|a|) = 3.0
+    assert metrics["mean_accel"] == pytest.approx(2.0)
+    assert metrics["max_accel"] == pytest.approx(3.0)
+    # sqrt(mean(2^2, 4^2)) = sqrt(10) ; mean(|jerk|) = 3.0 ; max = 4.0
+    assert metrics["rms_jerk"] == pytest.approx(np.sqrt(10.0))
+    assert metrics["mean_jerk"] == pytest.approx(3.0)
+    assert metrics["max_jerk"] == pytest.approx(4.0)

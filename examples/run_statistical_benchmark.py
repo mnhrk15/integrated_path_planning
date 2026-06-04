@@ -69,6 +69,8 @@ def run_single(scenario_path: str, method: str, seed: int) -> dict | None:
             "collision_count": metrics["collision_count"],
             "ade": round(metrics["ade"], 4),
             "fde": round(metrics["fde"], 4),
+            "mean_accel": round(metrics["mean_accel"], 4),
+            "rms_jerk": round(metrics["rms_jerk"], 4),
             "planning_ade": round(metrics["planning_ade"], 4),
             "planning_fde": round(metrics["planning_fde"], 4),
         }
@@ -183,6 +185,8 @@ def main():
         "collision_count",
         "ade",
         "fde",
+        "mean_accel",
+        "rms_jerk",
         "planning_ade",
         "planning_fde",
     ]
