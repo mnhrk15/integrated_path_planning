@@ -147,10 +147,17 @@ class FrenetPlanner:
             kwargs.get("collision_margin_inflation", 1.0)
         )
 
+        # Optional multi-circle ego footprint (EgoFootprint). When set, every
+        # collision check evaluates all footprint circles (radius
+        # footprint.radius) placed along the candidate-path heading instead of
+        # the single robot_radius circle at the path point.
+        self.footprint = kwargs.get("footprint", None)
+
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
                    f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
                    f"margin_inflation={self.collision_margin_inflation}, "
+                   f"footprint={'multi_circle' if self.footprint is not None else 'circle'}, "
                    f"time_horizon=[{min_t:.1f}, {max_t:.1f}]s")
     
     def plan(
@@ -816,6 +823,12 @@ class FrenetPlanner:
         ``dynamic_margin_inflation`` scales the combined radius used against
         dynamic obstacles only; static obstacles always use the nominal radius.
 
+        With a multi-circle footprint, each path point is expanded into one
+        point per footprint circle (offset along the path heading) and the
+        safety radius becomes ``footprint.radius + obstacle_radius``; the
+        downstream static/dynamic checks are unchanged because ``path_t`` is
+        expanded in lockstep.
+
         Returns ``None`` for an empty path, otherwise a tuple
         ``(path_points, path_t, path_min, path_max, sq_rubicon, sq_rubicon_dyn)``.
         """
@@ -830,7 +843,27 @@ class FrenetPlanner:
         path_t = np.array(fp.t[:min_len])
         path_points = np.stack([path_x, path_y], axis=1)  # [n_path, 2]
 
-        inflated_radius = max(self.robot_radius + self.obstacle_radius, 1e-6)
+        if self.footprint is None:
+            ego_radius = self.robot_radius
+        else:
+            ego_radius = self.footprint.radius
+            # fp.yaw can be shorter than fp.x (heading from point differences);
+            # pad by holding the last value.
+            yaw = np.array(fp.yaw[:min_len])
+            if len(yaw) < min_len:
+                pad = yaw[-1] if len(yaw) > 0 else 0.0
+                yaw = np.concatenate([yaw, np.full(min_len - len(yaw), pad)])
+            directions = np.stack([np.cos(yaw), np.sin(yaw)], axis=1)  # [n_path, 2]
+            # [n_circles, n_path, 2] -> [n_circles * n_path, 2]
+            offset_points = (
+                path_points[None, :, :]
+                + self.footprint.offsets[:, None, None] * directions[None, :, :]
+            )
+            n_circles = len(self.footprint.offsets)
+            path_points = offset_points.reshape(n_circles * min_len, 2)
+            path_t = np.tile(path_t, n_circles)
+
+        inflated_radius = max(ego_radius + self.obstacle_radius, 1e-6)
         dyn_radius = inflated_radius * dynamic_margin_inflation
         sq_rubicon = inflated_radius ** 2
         sq_rubicon_dyn = dyn_radius ** 2

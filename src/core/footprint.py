@@ -45,6 +45,26 @@ class EgoFootprint:
         return np.array([x, y]) + self.offsets[:, None] * direction
 
 
+def rectangle_surface_distance(points: np.ndarray, length: float,
+                               width: float) -> np.ndarray:
+    """Distance from points (vehicle frame, [n, 2]) to an L x W rectangle.
+
+    Zero for points inside the rectangle; the rectangle is centred on the
+    origin with its long axis along +x.
+    """
+    dx = np.maximum(np.abs(points[:, 0]) - length / 2, 0.0)
+    dy = np.maximum(np.abs(points[:, 1]) - width / 2, 0.0)
+    return np.hypot(dx, dy)
+
+
+def world_to_vehicle_frame(points: np.ndarray, x: float, y: float,
+                           yaw: float) -> np.ndarray:
+    """Transform world-frame points [n, 2] into the vehicle frame at (x, y, yaw)."""
+    c, s = np.cos(yaw), np.sin(yaw)
+    rot = np.array([[c, s], [-s, c]])
+    return (points - np.array([x, y])) @ rot.T
+
+
 def footprint_from_config(config) -> "EgoFootprint | None":
     """Build the ego footprint from a SimulationConfig.
 

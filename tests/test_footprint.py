@@ -102,6 +102,68 @@ class TestSafetyMetricsWithFootprint:
         assert m['ttc'] == float('inf')
 
 
+class TestPlannerFootprint:
+    @staticmethod
+    def _planner(**kwargs):
+        from unittest.mock import MagicMock
+        from src.planning.frenet_planner import FrenetPlanner
+        from src.planning.cubic_spline import CubicSpline2D
+        spline = MagicMock(spec=CubicSpline2D)
+        spline.s = [0, 100.0]
+        return FrenetPlanner(reference_path=spline, dt=0.1, **kwargs)
+
+    @staticmethod
+    def _straight_path(n=10, dt=0.1):
+        from src.planning.frenet_planner import FrenetPath
+        fp = FrenetPath()
+        fp.x = [i * 1.0 for i in range(n)]
+        fp.y = [0.0] * n
+        fp.t = [i * dt for i in range(n)]
+        fp.yaw = [0.0] * n
+        return fp
+
+    def test_geometry_expands_points_per_circle(self):
+        fp_model = EgoFootprint.multi_circle(4.5, 2.0, 3)
+        planner = self._planner(robot_radius=1.0, obstacle_radius=0.2, footprint=fp_model)
+        path = self._straight_path(n=10)
+        points, t, _, _, sq_rubicon, _ = planner._path_collision_geometry(path)
+        assert points.shape == (30, 2)
+        assert len(t) == 30
+        assert sq_rubicon == pytest.approx((1.25 + 0.2) ** 2)
+
+    def test_static_nose_collision_detected_only_with_footprint(self):
+        # Path ends at x=9; obstacle at (10.4, 0) is 1.4 m beyond the last
+        # path point: outside the legacy 1.2 m radius but inside the reach of
+        # the nose circle (offset 1.5 m, threshold 1.45 m)
+        obstacle = np.array([[10.4, 0.0]])
+        path_kwargs = dict(robot_radius=1.0, obstacle_radius=0.2)
+
+        legacy = self._planner(**path_kwargs)
+        assert legacy._check_collision(self._straight_path(), obstacle)
+
+        fp_model = EgoFootprint.multi_circle(4.5, 2.0, 3)
+        multi = self._planner(**path_kwargs, footprint=fp_model)
+        assert not multi._check_collision(self._straight_path(), obstacle)
+
+    def test_distribution_check_uses_footprint(self):
+        # Dynamic sample sitting at the nose for the whole horizon
+        fp_model = EgoFootprint.multi_circle(4.5, 2.0, 3)
+        planner = self._planner(robot_radius=1.0, obstacle_radius=0.2, footprint=fp_model)
+        path = self._straight_path()
+        distribution = np.full((1, 1, 10, 2), [10.4, 0.0])
+        assert not planner._check_collision_distribution(
+            path, np.empty((0, 2)), distribution, epsilon=0.0
+        )
+
+    def test_yaw_shorter_than_path_is_padded(self):
+        fp_model = EgoFootprint.multi_circle(4.5, 2.0, 3)
+        planner = self._planner(robot_radius=1.0, obstacle_radius=0.2, footprint=fp_model)
+        path = self._straight_path(n=10)
+        path.yaw = path.yaw[:-1]  # heading from diffs is one element short
+        points, t, _, _, _, _ = planner._path_collision_geometry(path)
+        assert points.shape == (30, 2)
+
+
 class TestFootprintConfig:
     def test_default_config_is_legacy_circle(self):
         config = SimulationConfig()

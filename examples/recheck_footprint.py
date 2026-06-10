@@ -29,7 +29,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.core.footprint import EgoFootprint
+from src.core.footprint import (
+    EgoFootprint,
+    rectangle_surface_distance,
+    world_to_vehicle_frame,
+)
 
 REPO = Path(__file__).parent.parent
 OUTDIR = REPO / "output" / "footprint_recheck"
@@ -64,9 +68,7 @@ def reconstruct_yaw(ego_x: np.ndarray, ego_y: np.ndarray) -> np.ndarray:
 
 def rect_clearance(ped_local: np.ndarray) -> np.ndarray:
     """Distance from pedestrian centres (vehicle frame) to the rectangle."""
-    dx = np.maximum(np.abs(ped_local[:, 0]) - VEHICLE_LENGTH / 2, 0.0)
-    dy = np.maximum(np.abs(ped_local[:, 1]) - VEHICLE_WIDTH / 2, 0.0)
-    return np.hypot(dx, dy)
+    return rectangle_surface_distance(ped_local, VEHICLE_LENGTH, VEHICLE_WIDTH)
 
 
 def recheck(npz_path: Path) -> dict:
@@ -100,9 +102,7 @@ def recheck(npz_path: Path) -> dict:
             np.linalg.norm(peds[None, :, :] - centers[:, None, :], axis=2)
         )
 
-        c, s = np.cos(yaw[i]), np.sin(yaw[i])
-        rot = np.array([[c, s], [-s, c]])  # world -> vehicle frame
-        ped_local = (peds - center) @ rot.T
+        ped_local = world_to_vehicle_frame(peds, ego_x[i], ego_y[i], yaw[i])
         rect_min[i] = np.min(rect_clearance(ped_local))
 
     legacy_collisions = int(np.sum(legacy_min < EGO_RADIUS + PED_RADIUS))
