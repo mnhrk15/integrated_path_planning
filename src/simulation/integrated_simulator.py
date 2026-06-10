@@ -510,7 +510,8 @@ class IntegratedSimulator:
                 footprint=self.ego_footprint
             )
         else:
-            current_metrics = {'min_distance': float('inf'), 'collision': False, 'ttc': float('inf')}
+            current_metrics = {'min_distance': float('inf'), 'collision': False,
+                               'ttc': float('inf'), 'clearance': float('inf')}
         
         # Update SM
         new_sm_output = self.state_machine.update(found_path, current_metrics)

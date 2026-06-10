@@ -47,6 +47,7 @@ from src.core.footprint import (
     rectangle_surface_distance,
     world_to_vehicle_frame,
 )
+from src.core.data_structures import VehicleState
 from src.core.metrics import calculate_aggregate_metrics
 from src.simulation.integrated_simulator import IntegratedSimulator
 from examples.run_statistical_benchmark import set_seed, resolve_model_path
@@ -172,6 +173,10 @@ def run_one(scenario: str, condition: str, method: str, seed: int,
         "ade": float(m["ade"]),
         "fde": float(m["fde"]),
         "rms_jerk": float(m["rms_jerk"]),
+        "caution_steps": sum(
+            1 for r in history if r.ego_state.state == VehicleState.CAUTION),
+        "emergency_steps": sum(
+            1 for r in history if r.ego_state.state == VehicleState.EMERGENCY),
     }
     row.update(observational_footprint_metrics(history))
     return row

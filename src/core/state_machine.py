@@ -30,7 +30,21 @@ class FailSafeStateMachine:
         self.config = config
         self.current_state = VehicleState.NORMAL
         self.consecutive_failures = 0
-        
+        # Recovery thresholds operate on clearance (= min_distance minus the
+        # combined collision radius) so their meaning does not depend on the
+        # footprint mode. The config keys keep their legacy single-circle
+        # semantics (centre-to-pedestrian distance), hence the conversion:
+        # min_distance > safe_distance  <=>  clearance > safe_distance - combined
+        combined_radius = (
+            getattr(config, 'ego_radius', 1.0) + getattr(config, 'ped_radius', 0.2)
+        )
+        self.clearance_caution = (
+            getattr(config, 'state_machine_safe_distance_caution', 0.5) - combined_radius
+        )
+        self.clearance_emergency = (
+            getattr(config, 'state_machine_safe_distance_emergency', 1.0) - combined_radius
+        )
+
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any]) -> StateMachineOutput:
         """Update state based on current iteration results.
         
@@ -52,10 +66,9 @@ class FailSafeStateMachine:
         elif self.current_state == VehicleState.CAUTION:
             if plan_found and self.consecutive_failures == 0:
                 # If we recovered and planned successfully, try to go back to NORMAL
-                # Check safety distance from config
-                min_dist = safety_metrics.get('min_distance', float('inf'))
-                safe_distance = getattr(self.config, 'state_machine_safe_distance_caution', 0.5)
-                if min_dist > safe_distance:
+                # Check safety clearance from config
+                clearance = safety_metrics.get('clearance', float('inf'))
+                if clearance > self.clearance_caution:
                     self.current_state = VehicleState.NORMAL
             elif not plan_found:
                 # If CAUTION extraction failed, escalate
@@ -69,9 +82,8 @@ class FailSafeStateMachine:
             # In EMERGENCY, we usually stay until stopped or explicitly reset
             # But if a very safe path appears, we could recover
             if plan_found:
-                 min_dist = safety_metrics.get('min_distance', float('inf'))
-                 safe_distance = getattr(self.config, 'state_machine_safe_distance_emergency', 1.0)
-                 if min_dist > safe_distance:
+                 clearance = safety_metrics.get('clearance', float('inf'))
+                 if clearance > self.clearance_emergency:
                      self.current_state = VehicleState.CAUTION
             else:
                 # Keep trying to stop
