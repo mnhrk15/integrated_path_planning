@@ -31,6 +31,13 @@ Ground truth が決定論的な力学平衡で生成されるため、LSTM の S
 - 注意: P-ADE は標準 ADE と評価ホライゾン・解像度が異なる（ローリング評価、プランナ dt、5 s までの等速外挿込み）ため、**絶対値の列間比較は不可**。手法間の行比較のみに使う。CV の P-ADE はフォールバックと同一モデルである点も解釈時に留意。
 - 残り（★2 後半）: NLL 併記、および SFM パラメータの per-agent ランダム化（分布幅の出典調査が前提）は未実施。
 
+**実施結果（2026-06-10、★2 後半の前提 = 分布幅の出典調査。完了 — 実装・NLL は未着手）:**
+
+- **λ=0.11±0.07 の真の出典を特定**: Johansson, Helbing & Shukla, "Specification of a Microscopic Pedestrian Model by Evolutionary Adjustment to Video Tracking Data," Advances in Complex Systems 11(2), 2008 (arXiv:0810.4587)。本文に "the optimal value of the anisotropy parameter was λ = 0.11 ± 0.07"、Table 1 に circular 仕様 A=0.42±0.26, B=1.65±1.01, λ=0.12±0.07（仕様ごとの値も記載）。Sensors 2024 への帰属が誤りだっただけで値自体は実在。ただし (i) この λ は Helbing 系の後方異方性（0≤λ≤1）であり、pysocialforce の `lambda_importance`（相対速度の重み、Moussaïd 仕様で 2.0±0.2）とは**別パラメータ**、(ii) ± はビデオ3本にわたる良好フィット集合の幅（フィット変動）で厳密な個体間分布ではない。同論文は「フィットネスの 0 からの乖離は主に歩行者挙動の異質性による」と明言しており、per-agent ランダム化の動機付けには使える。
+- **per-agent ランダム化の本命出典は Moussaïd et al., Proc. R. Soc. B 276:2755 (2009, arXiv:0908.3131)**。pysocialforce が実装するまさにその相互作用仕様（Eq. 6; γ=0.35, n=2, n′=3, λ=2.0 が `.venv` の default.toml と一致）の較正元で、**希望速度の個体間分布 v0 ~ N(1.29, 0.19) m/s（"normally distributed", mean±sd、被験者40名）**、τ=0.54±0.05 s、A=4.5±0.3、γ=0.35±0.01、n=2.0±0.1、n′=3.0±0.7、λ=2.0±0.2 を報告。v0 の ±0.19 のみが個体間 SD で、τ 以下の ± はフィット不確かさ（個体間分布の根拠にならない）。Weidmann の N(1.34, 0.26)（文献総覧の古典値）と整合的で、両者を併引用すれば分布幅 0.19〜0.26 m/s を正当化できる。
+- 実装フック（コード確認済み）: pysocialforce の `DesiredForce` は `peds.max_speeds`（= `max_speed_multiplier` × 初期速度ノルム）を希望速度として駆動するため、**`sim.peds.max_speeds` への per-agent サンプル代入だけで v0 ランダム化が完結**する。τ は state 配列に per-agent 列が存在するが `DesiredForce` はスカラー config（`relaxation_time`）を読むためフォース側のパッチが必要 → v0 のみのランダム化を推奨（出典の強さとも整合）。
+- 補助文献: Seer et al., Transp. Res. Procedia 2:724 (2014) は235歩行者の per-trajectory 非線形回帰でパラメータ分布を推定（個体別較正の方法論先例。本文 PDF は有料壁で具体値未取得）。個体異質性が集団流特性を変える先例として Campanella, Hoogendoorn & Daamen, TRR 2124 (2009)。
+
 ### A-2. 衝突ゼロ＝天井効果でシナリオの識別力が不足
 
 全123ランで衝突ゼロ、S3 の MinTTC は全手法 0.85 s で幾何学的に飽和（LSTM–SGAN 差 0.002 s は p=4.7e-3 で統計的には有意だが実用上無意味）。「安全性の差を検出する実験」としては感度不足。interPlan（Hallgarten et al., IROS 2024）は、集計スコアの良さが out-of-distribution シナリオでの脆弱性を隠すことを実証している。
@@ -181,4 +188,4 @@ novelty 維持には「**歩行者予測器を、SFM による双方向の歩行
 
 - コードに関する主張（A-4 の衝突幾何、MinDist の中心間距離定義、★1/★2 の実装箇所と工数見積もり）は 2026-06-10 に実装と突合済み。
 - 知識カットオフ以降の文献のうち本文の論拠となる arXiv:2510.14677、arXiv:2603.10407 はarXiv上で実在・内容一致を確認済み。その他の文献も調査時にarXiv/出版社ページで確認済み。
-- 2026-06-10 に本ドキュメント全体の再検証を実施（コード主張・実験数値・論文本文・全引用文献の4系統突合）。引用 arXiv ID は全件実在（arXiv:2511.11567 含む）。同時に以下を修正済み: (1) A-4 の出典記述 — 論文 Fig. 3 キャプションに車両寸法の記載はなく実装側のみ、(2) A-1 — Sensors 2024 の λ=0.11±0.07 は同論文に存在せず（個体間異質性の実証でもない）、Anderson et al. の手法記述と N(1.34, 0.26) の出典を訂正、(3) B-1 — Latent Corridors の適応方向（synthetic→real）と Li et al. の内容（車両ドメイン合成データ事前学習）を訂正、(4) C-1/C-3 — Ren et al. に RKHS は無い、arXiv:2502.10585 は GMM ではなく単一ガウス近似、(5) 実験数値の丸め（S2 Time コスト下限 +1.77 s、S1 inflation 1.5 のゴール未到達 13/20、SGAN S3 ADE p=0.159 の境界性）。なお実験2の「LSTM の20サンプル」は正しい（`run_da_poc.py` はベースシナリオ YAML の num_samples=20 を使用し、モデルパスのみ切替）。
+- 2026-06-10 に本ドキュメント全体の再検証を実施（コード主張・実験数値・論文本文・全引用文献の4系統突合）。引用 arXiv ID は全件実在（arXiv:2511.11567 含む）。同時に以下を修正済み: (1) A-4 の出典記述 — 論文 Fig. 3 キャプションに車両寸法の記載はなく実装側のみ、(2) A-1 — Sensors 2024 の λ=0.11±0.07 は同論文に存在せず（個体間異質性の実証でもない）、Anderson et al. の手法記述と N(1.34, 0.26) の出典を訂正（追記: 同値の真の出典は Johansson et al. 2008 と後日特定、A-1 の★2後半実施結果ブロック参照）、(3) B-1 — Latent Corridors の適応方向（synthetic→real）と Li et al. の内容（車両ドメイン合成データ事前学習）を訂正、(4) C-1/C-3 — Ren et al. に RKHS は無い、arXiv:2502.10585 は GMM ではなく単一ガウス近似、(5) 実験数値の丸め（S2 Time コスト下限 +1.77 s、S1 inflation 1.5 のゴール未到達 13/20、SGAN S3 ADE p=0.159 の境界性）。なお実験2の「LSTM の20サンプル」は正しい（`run_da_poc.py` はベースシナリオ YAML の num_samples=20 を使用し、モデルパスのみ切替）。
