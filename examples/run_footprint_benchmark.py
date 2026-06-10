@@ -68,11 +68,15 @@ VEHICLE_WIDTH = 2.0
 OBS_FOOTPRINT = EgoFootprint.multi_circle(VEHICLE_LENGTH, VEHICLE_WIDTH, 3)
 PED_RADIUS = 0.2
 
-# Paper campaign CSVs for the per-seed behavior-preservation check
+# Paper campaign CSVs for the per-seed behavior-preservation check.
+# comfort_s{1,2,3} are the campaigns the paper tables were produced from
+# (verified: regenerating with current code reproduces them bit-exactly);
+# the older statistical_benchmark{,_s2,_s3} dirs are stale pre-715d7b3
+# precursors and must not be used as anchors.
 PAPER_CSVS = {
-    "scenario_01": "output/statistical_benchmark/all_runs.csv",
-    "scenario_02": "output/statistical_benchmark_s2/all_runs.csv",
-    "scenario_03": "output/statistical_benchmark_s3/all_runs.csv",
+    "scenario_01": "output/comfort_s1/all_runs.csv",
+    "scenario_02": "output/comfort_s2/all_runs.csv",
+    "scenario_03": "output/comfort_s3/all_runs.csv",
 }
 
 
@@ -174,9 +178,8 @@ def behavior_check(df: pd.DataFrame, repo: Path) -> list:
     """Verify the circle condition preserves current-code behavior per seed.
 
     Primary anchor: the margin-control campaign caches (same code state,
-    exact identity expected). Secondary, informational: the paper campaign
-    CSVs, which predate commit 715d7b3 (ego-pedestrian repulsion fix and
-    ADE/FDE rework) and are therefore expected to drift.
+    exact identity expected). Secondary: the paper campaign CSVs
+    (comfort_s*), which agree to CSV rounding precision.
     """
     lines = ["### Primary: margin-control campaign caches (exact identity expected)", ""]
     anchors = {"sgan": "sgan_single_inf1.00", "lstm": "lstm_single"}
@@ -201,8 +204,8 @@ def behavior_check(df: pd.DataFrame, repo: Path) -> list:
             status = "PASS" if max_diff == 0.0 else "FAIL"
             lines.append(f"- {scen}/{method}: {status} over {n} seeds (max|Δ|={max_diff:.2e})")
 
-    lines += ["", "### Informational: paper campaign CSVs "
-              "(pre-715d7b3 code state; drift expected in ade/min_dist)", ""]
+    lines += ["", "### Paper campaign CSVs (comfort_s*; rounding-level "
+              "agreement expected: CSVs round time to 2dp, others to 4dp)", ""]
     for scen, csv_rel in PAPER_CSVS.items():
         csv_path = repo / csv_rel
         sub = df[(df["scenario"] == scen) & (df["condition"] == "circle")]
