@@ -20,6 +20,12 @@ the cache on every invocation.
 Usage:
     python examples/run_da_poc.py [--seeds N] [--scenarios A.yaml,B.yaml]
                                   [--conditions label1,label2] [--outdir DIR]
+                                  [--ego-footprint circle|multi_circle]
+                                  [--ego-footprint-n-circles N] [--total-time T]
+
+--ego-footprint/--total-time re-verify the campaign under a different collision
+geometry / time cap (A-4 issue 5(i)); they require a non-default --outdir
+because cached runs do not key on them.
 """
 import argparse
 import json
@@ -60,7 +66,8 @@ CONDITIONS = [
 BASELINE_LABEL = "sgan_single_inf1.00"
 
 
-def run_one(scenario, method, distribution_aware, epsilon, inflation, seed):
+def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
+            ego_footprint=None, n_circles=None, total_time=None):
     set_seed(seed)
     config = load_config(scenario)
     config.prediction_method = method
@@ -68,6 +75,12 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed):
     config.distribution_aware_planning = distribution_aware
     config.chance_epsilon = epsilon
     config.collision_margin_inflation = inflation
+    if ego_footprint is not None:
+        config.ego_footprint = ego_footprint
+    if n_circles is not None:
+        config.ego_footprint_n_circles = n_circles
+    if total_time is not None:
+        config.total_time = total_time
     resolve_model_path(config, method)
 
     sim = IntegratedSimulator(config)
@@ -77,8 +90,13 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed):
         prediction_dt=sim.observer.sgan_dt,
         prediction_steps=config.pred_len,
     )
+    end_time = float(history[-1].time)
     return {
-        "time_s": float(history[-1].time),
+        "ego_footprint": config.ego_footprint,
+        "n_circles": int(config.ego_footprint_n_circles),
+        "time_cap": float(config.total_time),
+        "goal_reached": bool(end_time < config.total_time - 1.5 * config.dt),
+        "time_s": end_time,
         "speed_ms": float(np.mean([r.ego_state.v for r in history])),
         "min_dist_m": float(m["min_dist"]),
         "min_ttc_s": float(m["min_ttc"]),
@@ -116,7 +134,20 @@ def main():
     ap.add_argument("--conditions", default="",
                     help="Comma-separated condition labels (default: all)")
     ap.add_argument("--outdir", default="output/exp_margin_control")
+    ap.add_argument("--ego-footprint", choices=["circle", "multi_circle"], default=None,
+                    help="Override ego_footprint for all runs (use a separate "
+                         "--outdir: cached runs do not key on this)")
+    ap.add_argument("--ego-footprint-n-circles", type=int, default=None,
+                    help="Override ego_footprint_n_circles (multi_circle only)")
+    ap.add_argument("--total-time", type=float, default=None,
+                    help="Override total_time [s] for all scenarios (use a "
+                         "separate --outdir: cached runs do not key on this)")
     args = ap.parse_args()
+
+    if ((args.ego_footprint or args.total_time) and
+            args.outdir == "output/exp_margin_control"):
+        ap.error("--ego-footprint/--total-time change run semantics but are not "
+                 "part of the cache key; use a separate --outdir")
 
     scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
@@ -139,7 +170,10 @@ def main():
                 if cpath.exists():
                     continue
                 try:
-                    r = run_one(scenario, method, da, eps, inflation, seed)
+                    r = run_one(scenario, method, da, eps, inflation, seed,
+                                ego_footprint=args.ego_footprint,
+                                n_circles=args.ego_footprint_n_circles,
+                                total_time=args.total_time)
                 except Exception:
                     failed += 1
                     print(f"[{done}/{total}] FAILED {Path(scenario).stem} "
@@ -168,6 +202,9 @@ def main():
     column_order = ["scenario", "condition", "method", "distribution_aware",
                     "epsilon", "inflation", "seed", "time_s", "speed_ms",
                     "min_dist_m", "min_ttc_s", "collision_count", "ade", "fde"]
+    # Footprint/cap fields only exist in caches written by newer code
+    column_order += [c for c in ["ego_footprint", "n_circles", "time_cap",
+                                 "goal_reached"] if c in df.columns]
     df = df[column_order].sort_values(["scenario", "condition", "seed"])
     df.to_csv(outdir / "all_runs.csv", index=False)
 
