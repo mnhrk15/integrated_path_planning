@@ -94,6 +94,7 @@ class SimulationConfig:
     # Distribution-aware (chance-constrained) planning
     distribution_aware_planning: bool = False  # Consume the full prediction distribution in collision checking
     chance_epsilon: float = 0.0  # Allowed fraction of colliding samples (0.0 = robust/worst-case)
+    collision_margin_inflation: float = 1.0  # Multiplier on the combined radius in the planner's single-sample dynamic collision check (metrics are unaffected)
 
     # Planner time horizon parameters
     min_t: float = 4.0  # Minimum prediction time [s]
@@ -229,6 +230,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ped_radius must be positive, got {config.ped_radius}")
     if config.obstacle_radius <= 0:
         errors.append(f"obstacle_radius must be positive, got {config.obstacle_radius}")
+    if config.collision_margin_inflation < 1.0:
+        errors.append(f"collision_margin_inflation must be >= 1.0, got {config.collision_margin_inflation}")
     
     # Reference path
     if len(config.reference_waypoints_x) < 2:

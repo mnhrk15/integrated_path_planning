@@ -188,6 +188,81 @@ def test_collision_check_distribution_static_is_hard(planner):
     # Without the static obstacle the path is feasible.
     assert planner._check_collision_distribution(fp, None, dist, 0.0) is True
 
+@pytest.fixture
+def inflated_planner_pair(mock_spline):
+    """Planners sharing geometry (combined radius 1.3m) with/without margin inflation."""
+    kwargs = dict(
+        reference_path=mock_spline,
+        max_speed=10.0,
+        max_accel=2.0,
+        max_curvature=1.0,
+        dt=0.1,
+        d_road_w=1.0,
+        max_road_width=7.0,
+        robot_radius=1.0,
+        obstacle_radius=0.3,
+    )
+    nominal = FrenetPlanner(**kwargs)
+    inflated = FrenetPlanner(**kwargs, collision_margin_inflation=1.2)
+    return nominal, inflated
+
+def _straight_fp():
+    fp = FrenetPath()
+    fp.x = [10.0, 11.0]
+    fp.y = [0.0, 0.0]
+    fp.t = [0.0, 0.1]
+    return fp
+
+def test_margin_inflation_rejects_borderline_dynamic(inflated_planner_pair):
+    """Inflation 1.2 widens the dynamic check radius from 1.3 to 1.56m."""
+    nominal, inflated = inflated_planner_pair
+    fp = _straight_fp()
+    # Pedestrian 1.4m laterally away at t=0: outside 1.3m, inside 1.56m.
+    dynamic_obs = np.full((1, 2, 2), 100.0)
+    dynamic_obs[0, 0, :] = [10.0, 1.4]
+
+    assert nominal._check_collision(fp, None, dynamic_obs) is True
+    assert inflated._check_collision(fp, None, dynamic_obs) is False
+
+def test_margin_inflation_not_applied_to_distribution(inflated_planner_pair):
+    """The chance-constrained check keeps the nominal radius even when inflation is set."""
+    _, inflated = inflated_planner_pair
+    fp = _straight_fp()
+    near_miss = [[10.0, 1.4], [100.0, 100.0]]  # 1.4m > nominal 1.3m
+    dist = np.array([near_miss, near_miss])[:, None, :, :]  # [2, 1, 2, 2]
+
+    # Robust (eps=0) distribution check passes: no sample is within 1.3m.
+    assert inflated._check_collision_distribution(fp, None, dist, 0.0) is True
+    # The same geometry fails the inflated single-sample check.
+    assert inflated._check_collision(fp, None, np.array(near_miss)[None, :, :]) is False
+
+def test_margin_inflation_static_unaffected(inflated_planner_pair):
+    """Static obstacles always use the nominal radius."""
+    nominal, inflated = inflated_planner_pair
+    fp = _straight_fp()
+    static_obs = np.array([[10.0, 1.4]])  # 1.4m away, outside nominal 1.3m
+
+    assert nominal._check_collision(fp, static_obs) is True
+    assert inflated._check_collision(fp, static_obs) is True
+    # Sanity: a truly colliding static obstacle is still rejected.
+    assert inflated._check_collision(fp, np.array([[10.0, 0.5]])) is False
+
+def test_default_inflation_preserves_geometry(planner):
+    """With inflation 1.0 the geometry matches the pre-inflation implementation."""
+    fp = _straight_fp()
+    default_geom = planner._path_collision_geometry(fp)
+    explicit_geom = planner._path_collision_geometry(fp, 1.0)
+
+    for a, b in zip(default_geom, explicit_geom):
+        assert np.array_equal(a, b)
+
+    path_points, _, path_min, path_max, sq_rubicon, sq_rubicon_dyn = default_geom
+    radius = max(planner.robot_radius + planner.obstacle_radius, 1e-6)
+    assert sq_rubicon == radius ** 2
+    assert sq_rubicon_dyn == sq_rubicon
+    assert np.array_equal(path_min, np.min(path_points, axis=0) - radius)
+    assert np.array_equal(path_max, np.max(path_points, axis=0) + radius)
+
 def test_plan_end_to_end(planner):
     """Test the full plan() method."""
     ego_state = EgoVehicleState(x=0.0, y=0.0, yaw=0.0, v=5.0, a=0.0)

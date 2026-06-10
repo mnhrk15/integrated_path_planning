@@ -44,6 +44,7 @@ state_machine_emergency_curvature_multiplier: 2.0  # Curvature multiplier in EME
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2  # Collision radius for pedestrians [m]
 obstacle_radius: 0.2  # Collision radius for generic obstacles [m]
+collision_margin_inflation: 1.0  # Multiplier (>= 1.0) on the combined radius in the planner's single-sample dynamic collision check; evaluation metrics are unaffected
 
 # === Planner Cost Weights (optional) ===
 k_j: 0.8

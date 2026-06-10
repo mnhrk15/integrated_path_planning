@@ -140,9 +140,17 @@ class FrenetPlanner:
         # distribution is supplied to plan().
         self.chance_epsilon = float(kwargs.get("chance_epsilon", 0.0))
 
+        # Margin inflation for the single-sample dynamic collision check only
+        # (1.0 = no inflation). Not applied to the chance-constrained
+        # distribution check nor to static obstacles.
+        self.collision_margin_inflation = float(
+            kwargs.get("collision_margin_inflation", 1.0)
+        )
+
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
                    f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
+                   f"margin_inflation={self.collision_margin_inflation}, "
                    f"time_horizon=[{min_t:.1f}, {max_t:.1f}]s")
     
     def plan(
@@ -741,14 +749,14 @@ class FrenetPlanner:
         Returns:
             True if no collision, False otherwise
         """
-        geom = self._path_collision_geometry(fp)
+        geom = self._path_collision_geometry(fp, self.collision_margin_inflation)
         if geom is None:
             return True
-        path_points, path_t, path_min, path_max, sq_rubicon = geom
+        path_points, path_t, path_min, path_max, sq_rubicon, sq_rubicon_dyn = geom
 
         if self._hits_static(path_points, path_min, path_max, static_obstacles, sq_rubicon):
             return False
-        if self._hits_dynamic(path_points, path_t, path_min, path_max, dynamic_obstacles, sq_rubicon):
+        if self._hits_dynamic(path_points, path_t, path_min, path_max, dynamic_obstacles, sq_rubicon_dyn):
             return False
         return True
 
@@ -775,10 +783,12 @@ class FrenetPlanner:
         Returns:
             True if the path satisfies the chance constraint, False otherwise
         """
+        # Margin inflation is intentionally NOT applied here: the chance
+        # constraint consumes the raw sampled distribution.
         geom = self._path_collision_geometry(fp)
         if geom is None:
             return True
-        path_points, path_t, path_min, path_max, sq_rubicon = geom
+        path_points, path_t, path_min, path_max, sq_rubicon, _ = geom
 
         # Static obstacles are sample-independent and remain hard constraints.
         if self._hits_static(path_points, path_min, path_max, static_obstacles, sq_rubicon):
@@ -800,11 +810,14 @@ class FrenetPlanner:
                     return False
         return True
 
-    def _path_collision_geometry(self, fp: FrenetPath):
-        """Precompute path points, time stamps, AABB, and squared safety radius.
+    def _path_collision_geometry(self, fp: FrenetPath, dynamic_margin_inflation: float = 1.0):
+        """Precompute path points, time stamps, AABB, and squared safety radii.
+
+        ``dynamic_margin_inflation`` scales the combined radius used against
+        dynamic obstacles only; static obstacles always use the nominal radius.
 
         Returns ``None`` for an empty path, otherwise a tuple
-        ``(path_points, path_t, path_min, path_max, sq_rubicon)``.
+        ``(path_points, path_t, path_min, path_max, sq_rubicon, sq_rubicon_dyn)``.
         """
         if len(fp.x) == 0:
             return None
@@ -818,10 +831,13 @@ class FrenetPlanner:
         path_points = np.stack([path_x, path_y], axis=1)  # [n_path, 2]
 
         inflated_radius = max(self.robot_radius + self.obstacle_radius, 1e-6)
+        dyn_radius = inflated_radius * dynamic_margin_inflation
         sq_rubicon = inflated_radius ** 2
-        path_min = np.min(path_points, axis=0) - inflated_radius
-        path_max = np.max(path_points, axis=0) + inflated_radius
-        return path_points, path_t, path_min, path_max, sq_rubicon
+        sq_rubicon_dyn = dyn_radius ** 2
+        aabb_radius = max(inflated_radius, dyn_radius)
+        path_min = np.min(path_points, axis=0) - aabb_radius
+        path_max = np.max(path_points, axis=0) + aabb_radius
+        return path_points, path_t, path_min, path_max, sq_rubicon, sq_rubicon_dyn
 
     def _hits_static(self, path_points, path_min, path_max, static_obstacles, sq_rubicon) -> bool:
         """Return True if any path point collides with a static obstacle."""

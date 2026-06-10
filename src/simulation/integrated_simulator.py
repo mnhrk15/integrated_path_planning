@@ -330,7 +330,8 @@ class IntegratedSimulator:
             k_s_dot=config.k_s_dot,
             k_lat=config.k_lat,
             k_lon=config.k_lon,
-            chance_epsilon=getattr(config, 'chance_epsilon', 0.0)
+            chance_epsilon=getattr(config, 'chance_epsilon', 0.0),
+            collision_margin_inflation=getattr(config, 'collision_margin_inflation', 1.0)
         )
 
         # Distribution-aware planning: feed the full prediction distribution to the
