@@ -128,6 +128,15 @@ class SimulationConfig:
     # Social Force config
     social_force_config: Optional[str] = None
     social_force_params: Dict[str, Any] = field(default_factory=dict)
+
+    # Per-agent desired-speed randomization (distributional ground truth, A-1).
+    # When enabled, each pedestrian's desired speed (pysocialforce max_speeds)
+    # gets additive N(0, sfm_v0_std) noise, floored at sfm_v0_min. The default
+    # std is the inter-individual SD reported by Moussaid et al. 2009
+    # (Proc. R. Soc. B 276:2755: v0 ~ N(1.29, 0.19) m/s).
+    sfm_v0_randomization: bool = False
+    sfm_v0_std: float = 0.19
+    sfm_v0_min: float = 0.3
     
     # Model
     # Model
@@ -276,7 +285,12 @@ def validate_config(config: SimulationConfig) -> None:
         # Check if all pedestrians are in at least one group (optional warning, not error)
         if len(all_group_indices) < n_peds:
             logger.warning(f"Some pedestrians are not in any group: {set(range(n_peds)) - all_group_indices}")
-    
+
+    if config.sfm_v0_std < 0:
+        errors.append(f"sfm_v0_std must be non-negative, got {config.sfm_v0_std}")
+    if config.sfm_v0_min <= 0:
+        errors.append(f"sfm_v0_min must be positive, got {config.sfm_v0_min}")
+
     # Static obstacles
     for i, obs in enumerate(config.static_obstacles):
         if len(obs) != 4:

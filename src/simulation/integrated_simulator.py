@@ -44,10 +44,13 @@ class PedestrianSimulator:
         dt: float = 0.1,
         config_file: Optional[str] = None,
         ego_radius: float = 1.0,
-        social_force_params: Optional[Dict] = None
+        social_force_params: Optional[Dict] = None,
+        v0_randomization: bool = False,
+        v0_std: float = 0.19,
+        v0_min: float = 0.3
     ):
         """Initialize simulator.
-        
+
         Args:
             initial_states: Initial state array [N, 6] (x, y, vx, vy, gx, gy)
             groups: List of grouping lists (indices)
@@ -56,6 +59,13 @@ class PedestrianSimulator:
             config_file: Path to PySocialForce config file
             ego_radius: Radius of the ego vehicle [m]
             social_force_params: Dictionary of SFM parameters to override
+            v0_randomization: Add per-agent N(0, v0_std) noise to desired speeds
+                (pysocialforce max_speeds), making the ground truth
+                distributional across agents. Draws from the global NumPy RNG,
+                so runs are reproducible under the benchmark seed; when False
+                no random numbers are consumed (behavior preservation).
+            v0_std: Standard deviation of the desired-speed noise [m/s]
+            v0_min: Floor on the randomized desired speed [m/s]
         """
         self.dt = dt
         self.initial_states = initial_states
@@ -73,11 +83,24 @@ class PedestrianSimulator:
             )
             
         self._init_pysocialforce(
-            groups, 
-            obstacles, 
+            groups,
+            obstacles,
             config_file,
             social_force_params=social_force_params
         )
+
+        if v0_randomization:
+            # pysocialforce recomputes max_speeds from initial_speeds on every
+            # state assignment, so the persistent initial_speeds must carry the
+            # randomization: max_speeds = mult * max(init + noise/mult, min/mult)
+            #              = max(nominal_v0 + noise, v0_min)
+            peds = self.sim.peds
+            multiplier = float(peds.max_speed_multiplier)
+            noise = np.random.normal(0.0, v0_std, len(peds.initial_speeds))
+            peds.initial_speeds = np.maximum(
+                peds.initial_speeds + noise / multiplier, v0_min / multiplier
+            )
+            peds.max_speeds = multiplier * peds.initial_speeds
 
     @staticmethod
     def _set_nested_config_value(config: Dict, key: str, value) -> None:
@@ -285,7 +308,10 @@ class IntegratedSimulator:
                 dt=config.dt,
                 config_file=getattr(config, "social_force_config", None),
                 ego_radius=self.ego_radius,
-                social_force_params=getattr(config, "social_force_params", None)
+                social_force_params=getattr(config, "social_force_params", None),
+                v0_randomization=getattr(config, "sfm_v0_randomization", False),
+                v0_std=getattr(config, "sfm_v0_std", 0.19),
+                v0_min=getattr(config, "sfm_v0_min", 0.3)
             )
         else:
             self.pedestrian_sim = None

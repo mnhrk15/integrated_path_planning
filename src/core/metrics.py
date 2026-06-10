@@ -7,6 +7,15 @@ from .data_structures import SimulationResult
 SGAN_EVAL_DT = 0.4
 SGAN_EVAL_STEPS = 12
 
+# Bandwidth floor for the KDE-based NLL [m]. Keeps the mixture non-degenerate
+# when all samples coincide at a step (e.g. converged predictions).
+KDE_BANDWIDTH_FLOOR = 0.05
+
+# Per-point lower bound on log-likelihood [nats] (KDE-NLL convention from the
+# Trajectron++/planning-aware evaluation line). Without it the mean is
+# dominated by ground-truth points far outside the sample support.
+KDE_NLL_LOG_P_FLOOR = -20.0
+
 
 def _steps_for_interval(interval: float, dt: float) -> int:
     """Return the number of simulation steps in an evaluation interval."""
@@ -81,6 +90,78 @@ def _standard_ade_fde_details(
         max_samples,
         trajectory_count,
     )
+
+
+def _kde_nll_details(
+    history: List[SimulationResult],
+    dt: float,
+    prediction_dt: float,
+    prediction_steps: int,
+) -> Tuple[float, int]:
+    """Mean KDE negative log-likelihood of the ground truth under the samples.
+
+    For every prediction origin that carries a sample distribution (>= 2
+    samples), a Gaussian-mixture KDE is fit per pedestrian and evaluation
+    step (Scott's rule bandwidth per axis, floored at KDE_BANDWIDTH_FLOOR)
+    and the log-density of the ground-truth position is accumulated. Like
+    the standard ADE/FDE, evaluation happens at the predictor cadence and
+    only over origins with a complete future horizon. Origins with a single
+    forecast (e.g. the CV model) are skipped, so the metric is NaN there.
+    """
+    stride = _steps_for_interval(prediction_dt, dt)
+    pred_indices = stride * np.arange(1, prediction_steps + 1) - 1
+    future_offsets = stride * np.arange(1, prediction_steps + 1)
+    total_log_lik = 0.0
+    eval_count = 0
+
+    for i, result in enumerate(history):
+        dist = result.predicted_distribution
+        if dist is None or dist.size == 0 or dist.shape[0] < 2:
+            continue
+        n_samples, n_peds, dense_steps, _ = dist.shape
+        if dense_steps <= pred_indices[-1] or i + future_offsets[-1] >= len(history):
+            continue
+
+        gt_traj = np.stack(
+            [history[i + offset].ped_state.positions for offset in future_offsets],
+            axis=1,
+        )
+        if gt_traj.shape != (n_peds, prediction_steps, 2):
+            continue
+
+        samples = dist[:, :, pred_indices, :]  # [N, P, T, 2]
+        if not np.any(np.ptp(samples, axis=0) > 0):
+            # All samples identical: a deterministic predictor replicated into
+            # a pseudo-distribution (e.g. CV) — NLL is not defined there.
+            continue
+        scott = n_samples ** (-1.0 / 6.0)  # Scott's rule, d=2
+        bandwidth = np.maximum(
+            samples.std(axis=0, ddof=1) * scott, KDE_BANDWIDTH_FLOOR
+        )  # [P, T, 2]
+        scaled = (samples - gt_traj[None, ...]) / bandwidth[None, ...]
+        log_kernel = (
+            -0.5 * np.sum(scaled**2, axis=3)
+            - np.log(2.0 * np.pi * bandwidth[..., 0] * bandwidth[..., 1])[None, ...]
+        )  # [N, P, T]
+        peak = log_kernel.max(axis=0)  # [P, T]
+        log_p = peak + np.log(np.mean(np.exp(log_kernel - peak[None, ...]), axis=0))
+        log_p = np.maximum(log_p, KDE_NLL_LOG_P_FLOOR)
+        total_log_lik += float(log_p.sum())
+        eval_count += log_p.size
+
+    if eval_count == 0:
+        return float("nan"), 0
+    return -total_log_lik / eval_count, eval_count
+
+
+def calculate_kde_nll(
+    history: List[SimulationResult],
+    dt: float,
+    prediction_dt: float = SGAN_EVAL_DT,
+    prediction_steps: int = SGAN_EVAL_STEPS,
+) -> Tuple[float, int]:
+    """Calculate the KDE-based NLL of the ground truth under the predictions."""
+    return _kde_nll_details(history, dt, prediction_dt, prediction_steps)
 
 
 def calculate_standard_ade_fde(
@@ -183,6 +264,12 @@ def calculate_aggregate_metrics(
         prediction_steps,
     )
     planning_ade, planning_fde, planning_eval_count = calculate_planning_ade_fde(history)
+    nll, nll_eval_count = _kde_nll_details(
+        history,
+        dt,
+        prediction_dt,
+        prediction_steps,
+    )
 
     return {
         "min_dist": min(min_distances) if min_distances else 0.0,
@@ -200,4 +287,6 @@ def calculate_aggregate_metrics(
         "planning_ade": planning_ade,
         "planning_fde": planning_fde,
         "planning_eval_count": planning_eval_count,
+        "nll": nll,
+        "nll_eval_count": nll_eval_count,
     }

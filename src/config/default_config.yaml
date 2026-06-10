@@ -10,6 +10,11 @@ social_force_params:
   ego_repulsion.v0: 3.5
   agent_radius: 0.4
 
+# === Per-Agent Desired-Speed Randomization (distributional ground truth) ===
+sfm_v0_randomization: false  # Add per-agent N(0, sfm_v0_std) noise to desired speeds
+sfm_v0_std: 0.19  # Inter-individual SD [m/s] (Moussaid et al. 2009: v0 ~ N(1.29, 0.19))
+sfm_v0_min: 0.3  # Floor on the randomized desired speed [m/s]
+
 # === Observation Parameters ===
 obs_len: 8  # Number of observation time steps
 pred_len: 12  # Number of prediction time steps

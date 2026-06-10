@@ -170,3 +170,64 @@ def test_static_obstacle_collision_detection():
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
+
+
+def test_v0_randomization_off_preserves_max_speeds_and_rng(simple_pedestrian_states):
+    """Default (off) must neither change desired speeds nor consume the RNG."""
+    np.random.seed(42)
+    state_before = np.random.get_state()
+    np.random.seed(42)
+    simulator = PedestrianSimulator(
+        initial_states=simple_pedestrian_states.copy(),
+        groups=None,
+        obstacles=None,
+        dt=0.1
+    )
+    state_after = np.random.get_state()
+
+    expected = 1.3 * np.linalg.norm(simple_pedestrian_states[:, 2:4], axis=1)
+    assert np.allclose(simulator.sim.peds.max_speeds, expected)
+    assert state_before[0] == state_after[0]
+    assert np.array_equal(state_before[1], state_after[1])
+
+
+def test_v0_randomization_is_seeded_and_floored(simple_pedestrian_states):
+    """Per-agent noise must be reproducible under the seed and respect the floor."""
+    def build(seed, std=0.19, floor=0.3):
+        np.random.seed(seed)
+        return PedestrianSimulator(
+            initial_states=simple_pedestrian_states.copy(),
+            groups=None,
+            obstacles=None,
+            dt=0.1,
+            v0_randomization=True,
+            v0_std=std,
+            v0_min=floor,
+        ).sim.peds.max_speeds
+
+    nominal = 1.3 * np.linalg.norm(simple_pedestrian_states[:, 2:4], axis=1)
+    a = build(seed=0)
+    b = build(seed=0)
+    c = build(seed=1)
+    assert np.array_equal(a, b)
+    assert not np.array_equal(a, c)
+    assert not np.allclose(a, nominal)
+
+    # A huge negative-noise regime must be floored at v0_min
+    floored = build(seed=0, std=100.0, floor=0.3)
+    assert np.all(floored >= 0.3)
+
+
+def test_v0_randomization_survives_simulation_steps(simple_pedestrian_states):
+    """pysocialforce recomputes max_speeds per step; the noise must persist."""
+    np.random.seed(0)
+    simulator = PedestrianSimulator(
+        initial_states=simple_pedestrian_states.copy(),
+        groups=None,
+        obstacles=None,
+        dt=0.1,
+        v0_randomization=True,
+    )
+    randomized = simulator.sim.peds.max_speeds.copy()
+    simulator.step(n=3)
+    assert np.allclose(simulator.sim.peds.max_speeds, randomized)
