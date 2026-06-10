@@ -46,6 +46,12 @@ ped_radius: 0.2  # Collision radius for pedestrians [m]
 obstacle_radius: 0.2  # Collision radius for generic obstacles [m]
 collision_margin_inflation: 1.0  # Multiplier (>= 1.0) on the combined radius in the planner's single-sample dynamic collision check; evaluation metrics are unaffected
 
+# === Ego Footprint (safety-metric evaluation) ===
+ego_footprint: circle  # "circle" (legacy single circle of ego_radius) or "multi_circle" (cover of the vehicle rectangle)
+vehicle_length: 4.5  # Vehicle length [m] (matches the rectangle drawn by the animator)
+vehicle_width: 2.0  # Vehicle width [m]
+ego_footprint_n_circles: 3  # Number of circles covering the rectangle in multi_circle mode
+
 # === Planner Cost Weights (optional) ===
 k_j: 0.8
 k_t: 1.0

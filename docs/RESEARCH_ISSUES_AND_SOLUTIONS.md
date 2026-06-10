@@ -44,6 +44,13 @@ CV は n=1 で検定外、CV の ADE は single-shot で best-of-20 と非可換
 
 **解決策:** 車両を 2〜3 個の円でカバーする multi-circle footprint（Frenet プランナの定石）へ置換。ベクトル化済みの衝突判定に円中心オフセットを追加するだけで実装可能。**ジャーナル化前に必ず再検証すべき**。
 
+**検証結果（2026-06-10 実施、★3 Step 1–2。詳細: `output/footprint_recheck/REPORT.md`）:**
+
+- 実装: `ego_footprint: circle | multi_circle` を config に追加（`src/core/footprint.py`、デフォルト circle で既存挙動保存、全58テストパス）。multi_circle は 4.5×2.0 m 矩形を3円（オフセット 0, ±1.5 m、半径 1.25 m）で正確被覆。評価メトリクス側（`compute_safety_metrics_static`）に配線済み、プランナ側判定は未変更（Step 3）。trajectory.npz に ego_yaw を保存するよう拡張。
+- 後付け検証: 保存済み代表ラン19件の trajectory.npz に対し、(i) multi-circle 判定、(ii) 厳密な矩形–歩行者円距離、を再計算（yaw は有限差分復元、保存 min_distances との突合 max|Δ|=0）。
+- **結論: 懸念は実証された。S2 の SGAN ランで矩形 footprint への実侵入を検出**（2/19 ラン: `scenario_02` と `timing_s02_r3`、最深 −0.13 m、t≈9.3–10.1 s の9ステップ連続）。接触は減速しながらのすれ違い中の**左前角**（歩行者は車両座標 (+2.3, +1.07) ≒ 角 (2.25, 1.0) 近傍、中心間距離 2.0–2.6 m で単一円判定 1.2 m の射程外）。走行中（v=1.3–3.0 m/s）で yaw は滑らかなため復元アーチファクトではない。S2 の CV/LSTM ランと S1/S3 全ランはクリア（最小クリアランス: S2 CV +0.57 m、S2 LSTM +0.66 m）— SGAN の「タイトなすれ違い」（論文の S2 MinDist 最小 1.69 m）が footprint 違反に直結している。
+- 限界: 123ラン/480ランの統計キャンペーンはスカラーのみ保存のため後付け検証不可。**「衝突ゼロ」の主張は multi-circle でのベンチマーク再実行（Step 3）まで保留とすべき**。なお multi-circle 判定は矩形に対し保守的（横方向スラック 0.25 m）で、19件中3件をフラグするが厳密矩形では2件（`timing_s02_r1` は保守性による偽陽性）。
+
 ---
 
 ## B. シミュレーション環境・ドメインギャップの課題

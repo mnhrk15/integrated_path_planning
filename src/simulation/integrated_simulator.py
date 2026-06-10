@@ -17,6 +17,7 @@ from ..core.data_structures import (
     compute_safety_metrics_static,
 )
 from ..core.coordinate_converter import CoordinateConverter
+from ..core.footprint import footprint_from_config
 from ..config import SimulationConfig
 from ..planning import CubicSpline2D, FrenetPlanner
 # MAX_T is now configurable via config.max_t
@@ -272,6 +273,7 @@ class IntegratedSimulator:
         self.ego_radius = getattr(config, "ego_radius", 1.0)
         self.ped_radius = getattr(config, "ped_radius", 0.3)
         self.obstacle_radius = getattr(config, "obstacle_radius", self.ped_radius)
+        self.ego_footprint = footprint_from_config(config)  # None = legacy single circle
         
         # 2. Initialize pedestrian simulator
         if len(config.ped_initial_states) > 0:
@@ -503,7 +505,8 @@ class IntegratedSimulator:
                 ego_state=self.ego_state,
                 ped_state=ped_state,
                 ego_radius=self.ego_radius,
-                ped_radius=self.ped_radius
+                ped_radius=self.ped_radius,
+                footprint=self.ego_footprint
             )
         else:
             current_metrics = {'min_distance': float('inf'), 'collision': False, 'ttc': float('inf')}
@@ -621,6 +624,7 @@ class IntegratedSimulator:
             planned_path=planned_path,
             ego_radius=self.ego_radius,
             ped_radius=self.ped_radius,
+            footprint=self.ego_footprint,
             processing_times={'prediction': t_pred, 'planning': t_plan}
             # state=self.ego_state.state # Implicitly in ego_state
         )
@@ -747,6 +751,7 @@ class IntegratedSimulator:
         ego_x = [r.ego_state.x for r in self.history]
         ego_y = [r.ego_state.y for r in self.history]
         ego_v = [r.ego_state.v for r in self.history]
+        ego_yaw = [r.ego_state.yaw for r in self.history]
         ego_jerk = [r.ego_state.jerk for r in self.history]
         min_distances = [r.metrics.get('min_distance', float('inf')) for r in self.history]
         ttc_list = [r.metrics.get('ttc', float('inf')) for r in self.history]
@@ -797,6 +802,7 @@ class IntegratedSimulator:
             ego_x=np.array(ego_x),
             ego_y=np.array(ego_y),
             ego_v=np.array(ego_v),
+            ego_yaw=np.array(ego_yaw),
             ego_jerk=np.array(ego_jerk),
             ego_state=np.array(ego_state_enum), # Store state string
             min_distances=np.array(min_distances),

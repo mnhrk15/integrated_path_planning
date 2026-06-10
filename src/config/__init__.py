@@ -75,6 +75,15 @@ class SimulationConfig:
     ped_radius: float = 0.2
     obstacle_radius: float = 0.2
 
+    # Ego footprint for safety-metric evaluation
+    # "circle": legacy single circle of ego_radius at the vehicle centre
+    # "multi_circle": n equal circles covering the vehicle_length x vehicle_width
+    #                 rectangle along the heading axis
+    ego_footprint: str = "circle"
+    vehicle_length: float = 4.5
+    vehicle_width: float = 2.0
+    ego_footprint_n_circles: int = 3
+
     # Planner cost weights (optional override)
     k_j: float = 1.0
     k_t: float = 1.0
@@ -232,6 +241,14 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"obstacle_radius must be positive, got {config.obstacle_radius}")
     if config.collision_margin_inflation < 1.0:
         errors.append(f"collision_margin_inflation must be >= 1.0, got {config.collision_margin_inflation}")
+    if config.ego_footprint not in ("circle", "multi_circle"):
+        errors.append(f"ego_footprint must be 'circle' or 'multi_circle', got {config.ego_footprint!r}")
+    if config.vehicle_length <= 0:
+        errors.append(f"vehicle_length must be positive, got {config.vehicle_length}")
+    if config.vehicle_width <= 0:
+        errors.append(f"vehicle_width must be positive, got {config.vehicle_width}")
+    if config.ego_footprint_n_circles < 1:
+        errors.append(f"ego_footprint_n_circles must be >= 1, got {config.ego_footprint_n_circles}")
     
     # Reference path
     if len(config.reference_waypoints_x) < 2:
