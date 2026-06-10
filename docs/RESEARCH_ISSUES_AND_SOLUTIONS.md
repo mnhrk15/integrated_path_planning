@@ -23,6 +23,14 @@ Ground truth が決定論的な力学平衡で生成されるため、LSTM の S
 1. **single-sample（most-likely）ADE と NLL を併記** — シミュレータを変えずに病理を中和。診断用 `planning_ade/fde` は既にエクスポート済みで、表掲載の判断のみ。
 2. **SFM パラメータの個体間ランダム化**で ground truth を分布化 — 希望速度 N(1.34, 0.26) m/s（Helbing & Molnár 1995 / Weidmann 系の標準値）等の分布からのサンプリング。エージェント挙動のランダム化で ground truth を分布化する先例として Anderson et al., IROS 2019 (arXiv:1903.01860) があるが、同論文の手法は SFM パラメータ操作ではなく「実軌道の摂動＋速度の経験分布サンプリング」である点に注意。なお Sensors 2024, 24(15):5011 は集団に対する単一パラメータセットの較正（v0=1.37, τ=0.53 等）であり個体間異質性の実証ではなく、異方性 λ=0.11±0.07 という値も同論文には存在しない — パラメータ分布の幅を文献値で正当化するには別途出典調査が必要。実装は `PedestrianSimulator._apply_social_force_params` への per-agent サンプリング追加。
 
+**実施結果（2026-06-10、★2 前半 = 解決策1の single-sample ADE 併記）:**
+
+- 実装: `run_statistical_benchmark.py` の LaTeX 表生成に ADE（best-of-N）と P-ADE（プランナが消費する単一予測軌道のローリング誤差 = 既存 `planning_ade`）の2列を追加。`--table-only` でキャッシュ済み all_runs.csv から再シミュレーションなしに表を再生成可能。
+- **結果: best-of-20 ADE の深層手法優位は single-sample では消失し、全3シナリオで CV が最小**（P-ADE: S1 CV 1.90 vs LSTM 2.09 / SGAN 2.15、S2 CV 1.98 vs 2.01 / 2.07、S3 CV 2.10 vs 2.13 / 2.12）。「プランナが実際に使う1本の軌道では等速モデルが最も正確」であり、Schöller et al. (RA-L 2020) の指摘がこの環境でも成立。A-1 の病理診断をデータで確認するとともに、論文の中心主張（open-loop 精度 ≠ closed-loop 価値）を直接強化する。
+- LSTM–SGAN の相対順序は P-ADE でも保存（S1/S2 で LSTM、S3 で SGAN が低誤差、いずれも Welch p<2e-4）— 病理は「深層 vs CV」の比較を歪めるが、深層同士の比較は頑健。
+- 注意: P-ADE は標準 ADE と評価ホライゾン・解像度が異なる（ローリング評価、プランナ dt、5 s までの等速外挿込み）ため、**絶対値の列間比較は不可**。手法間の行比較のみに使う。CV の P-ADE はフォールバックと同一モデルである点も解釈時に留意。
+- 残り（★2 後半）: NLL 併記、および SFM パラメータの per-agent ランダム化（分布幅の出典調査が前提）は未実施。
+
 ### A-2. 衝突ゼロ＝天井効果でシナリオの識別力が不足
 
 全123ランで衝突ゼロ、S3 の MinTTC は全手法 0.85 s で幾何学的に飽和（LSTM–SGAN 差 0.002 s は p=4.7e-3 で統計的には有意だが実用上無意味）。「安全性の差を検出する実験」としては感度不足。interPlan（Hallgarten et al., IROS 2024）は、集計スコアの良さが out-of-distribution シナリオでの脆弱性を隠すことを実証している。
