@@ -66,6 +66,17 @@ def fmt_p(p: float) -> str:
 def sanity_check(df: pd.DataFrame) -> list:
     """Per-seed comparison against the original PoC outputs (behavior preservation)."""
     lines = []
+    # The PoC anchors were produced with the single-circle footprint at the
+    # scenario-default time cap; a campaign run under a different geometry or
+    # cap legitimately diverges, so the comparison is reference-only there.
+    anchor_comparable = not (
+        ("ego_footprint" in df.columns and (df.ego_footprint != "circle").any())
+        or ("time_cap" in df.columns and df.scenario.map(
+            lambda s: scenario_total_time(s)).ne(df.time_cap).any())
+    )
+    if not anchor_comparable:
+        lines.append("- 注: このキャンペーンは footprint / time cap が旧 PoC アンカーと"
+                     "異なる設定で実行されており、不一致は想定どおり（参考情報のみ）。")
     for scenario in sorted(df.scenario.unique()):
         poc_path = Path(POC_DIR_TMPL.format(scenario=scenario)) / "all_runs.csv"
         if not poc_path.exists():
@@ -82,7 +93,12 @@ def sanity_check(df: pd.DataFrame) -> list:
                 continue
             diffs = (new.loc[seeds, SANITY_COLS] - old.loc[seeds, SANITY_COLS]).abs()
             max_diff = float(diffs.to_numpy().max())
-            status = "PASS" if max_diff <= 1e-9 else "FAIL"
+            if max_diff <= 1e-9:
+                status = "PASS"
+            elif anchor_comparable:
+                status = "FAIL"
+            else:
+                status = "DIFFERS（設定が異なるため想定どおり）"
             lines.append(f"- {scenario} {new_label} ↔ 旧 {old_label} "
                          f"(n={len(seeds)}): max|Δ|={max_diff:.2e} → **{status}**")
     return lines
@@ -308,7 +324,10 @@ def main():
             g = sdf[sdf.condition == label]
             if g.empty:
                 continue
-            saturated = int((g.time_s >= total_time - 0.1 - 1e-9).sum())
+            if "goal_reached" in g.columns and g.goal_reached.notna().all():
+                saturated = int((~g.goal_reached.astype(bool)).sum())
+            else:
+                saturated = int((g.time_s >= total_time - 0.1 - 1e-9).sum())
             w(f"| {label} | {len(g)} | {fmt_ms(g, 'time_s', 2)} | "
               f"{fmt_ms(g, 'min_dist_m')} | {fmt_ms(g, 'min_ttc_s')} | "
               f"{int(g.collision_count.sum())} | {fmt_ms(g, 'ade')} | {saturated} |")
@@ -354,7 +373,8 @@ def main():
       "（Welch、robust vs single、同一 method）:")
     for _, r in ade_inv.iterrows():
         w(f"    - {r.scenario} {r.method}: ΔADE={r.delta_ade:+.4f} m, p={fmt_p(r.p)}")
-    w("- `Time飽和` は time_s ≥ total_time − dt のラン数（ゴール未到達のまま打切り）。"
+    w("- `Time飽和` はゴール未到達のまま time cap で打切られたラン数"
+      "（goal_reached 列があればそれを、なければ time_s ≥ total_time − dt を使用）。"
       "飽和が多い条件では Time が右側打切りされており、真の走行時間コストは表の値"
       "より大きい（Time ≤ robust 側に有利な打切りなので、実験Aの判定を弱めない）。")
     w("- `min_ttc_s` に inf が含まれる場合は mean±std が inf になる（既存集計と同じ"
