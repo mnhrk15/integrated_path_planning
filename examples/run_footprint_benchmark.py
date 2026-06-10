@@ -57,7 +57,12 @@ DEFAULT_SCENARIOS = [
     "scenarios/scenario_03.yaml",
 ]
 
-CONDITIONS = ["circle", "multi_circle"]
+# circle        : paper configuration (single ego_radius circle)
+# multi_circle  : 3-circle cover of the rectangle (lateral slack 0.25 m)
+# multi_circle5 : 5-circle cover (r=1.10 m, lateral slack 0.10 m) — tests how
+#                 much of the multi_circle time cost is cover-slack artifact
+CONDITIONS = ["circle", "multi_circle", "multi_circle5"]
+CONDITION_N_CIRCLES = {"multi_circle": 3, "multi_circle5": 5}
 
 # Methods exactly as in the paper campaign (123 runs total)
 METHOD_SEEDS = [("cv", [0]), ("lstm", None), ("sgan", None)]  # None = 0..N-1
@@ -133,7 +138,11 @@ def run_one(scenario: str, condition: str, method: str, seed: int,
     config = load_config(scenario)
     config.prediction_method = method
     config.visualization_enabled = False
-    config.ego_footprint = "circle" if condition == "circle" else "multi_circle"
+    if condition == "circle":
+        config.ego_footprint = "circle"
+    else:
+        config.ego_footprint = "multi_circle"
+        config.ego_footprint_n_circles = CONDITION_N_CIRCLES[condition]
     if total_time is not None:
         # Extending the cap only affects runs that would have been
         # right-censored: uncensored runs end at the goal as before.
@@ -306,34 +315,37 @@ def build_report(df: pd.DataFrame, outdir: Path, repo: Path):
     has_goal = "goal_reached" in df.columns
     goal_hdr = " goal reached (c→m) |" if has_goal else ""
     goal_sep = "---|" if has_goal else ""
+    alt_conditions = [c for c in CONDITIONS[1:] if (df["condition"] == c).any()]
     lines += [
         "",
-        "## Q2: circle vs multi_circle (paired by scenario/method, Welch p for n=20)",
+        "## Q2: circle vs each multi-circle condition "
+        "(paired by scenario/method, Welch p for n=20)",
         "",
-        "| scenario | method | Δtime [s] | p(time) | Δrect clearance [m] | p(clear) "
+        "| condition | scenario | method | Δtime [s] | p(time) | Δrect clearance [m] | p(clear) "
         f"| rect viol (c→m) | legacy MinDist (c→m) |{goal_hdr}",
-        f"|---|---|---|---|---|---|---|---|{goal_sep}",
+        f"|---|---|---|---|---|---|---|---|---|{goal_sep}",
     ]
-    for (scen, method), g in df.groupby(["scenario", "method"]):
-        c = g[g["condition"] == "circle"]
-        mc = g[g["condition"] == "multi_circle"]
-        if c.empty or mc.empty:
-            continue
-        d_time = mc["time_s"].mean() - c["time_s"].mean()
-        d_clear = mc["rect_clearance"].mean() - c["rect_clearance"].mean()
-        goal_cell = ""
-        if has_goal:
-            goal_cell = (f" {int(c['goal_reached'].sum())}/{len(c)}→"
-                         f"{int(mc['goal_reached'].sum())}/{len(mc)} |")
-        lines.append(
-            f"| {scen} | {method} | {d_time:+.2f} | "
-            f"{welch(mc['time_s'].values, c['time_s'].values):.2g} | "
-            f"{d_clear:+.3f} | "
-            f"{welch(mc['rect_clearance'].values, c['rect_clearance'].values):.2g} | "
-            f"{int((c['rect_violation_steps'] > 0).sum())}→"
-            f"{int((mc['rect_violation_steps'] > 0).sum())} | "
-            f"{c['legacy_min_dist'].mean():.2f}→{mc['legacy_min_dist'].mean():.2f} |"
-            f"{goal_cell}")
+    for cond in alt_conditions:
+        for (scen, method), g in df.groupby(["scenario", "method"]):
+            c = g[g["condition"] == "circle"]
+            mc = g[g["condition"] == cond]
+            if c.empty or mc.empty:
+                continue
+            d_time = mc["time_s"].mean() - c["time_s"].mean()
+            d_clear = mc["rect_clearance"].mean() - c["rect_clearance"].mean()
+            goal_cell = ""
+            if has_goal:
+                goal_cell = (f" {int(c['goal_reached'].sum())}/{len(c)}→"
+                             f"{int(mc['goal_reached'].sum())}/{len(mc)} |")
+            lines.append(
+                f"| {cond} | {scen} | {method} | {d_time:+.2f} | "
+                f"{welch(mc['time_s'].values, c['time_s'].values):.2g} | "
+                f"{d_clear:+.3f} | "
+                f"{welch(mc['rect_clearance'].values, c['rect_clearance'].values):.2g} | "
+                f"{int((c['rect_violation_steps'] > 0).sum())}→"
+                f"{int((mc['rect_violation_steps'] > 0).sum())} | "
+                f"{c['legacy_min_dist'].mean():.2f}→{mc['legacy_min_dist'].mean():.2f} |"
+                f"{goal_cell}")
     if has_goal:
         n_unreached = int((~df["goal_reached"]).sum())
         cap = df["time_cap"].max()
@@ -344,17 +356,19 @@ def build_report(df: pd.DataFrame, outdir: Path, repo: Path):
                   "the Δtime estimate."]
 
     n_q1 = int((circ["rect_violation_steps"] > 0).sum())
-    mc_all = df[df["condition"] == "multi_circle"]
-    n_q2 = int((mc_all["rect_violation_steps"] > 0).sum())
     lines += [
         "",
         "## Verdict",
         "",
         f"- Q1: {n_q1} / {len(circ)} paper-configuration runs violate the vehicle rectangle.",
-        f"- Q2: {n_q2} / {len(mc_all)} multi-circle-planned runs violate the vehicle rectangle.",
-        f"- Legacy-metric collisions (1.2 m centre threshold): "
-        f"{int(df['collision_count'].sum())} across all runs.",
     ]
+    for cond in alt_conditions:
+        mc_all = df[df["condition"] == cond]
+        n_q2 = int((mc_all["rect_violation_steps"] > 0).sum())
+        lines.append(f"- Q2 ({cond}): {n_q2} / {len(mc_all)} planned runs "
+                     "violate the vehicle rectangle.")
+    lines.append(f"- Legacy-metric collisions (1.2 m centre threshold): "
+                 f"{int(df['collision_count'].sum())} across all runs.")
 
     (outdir / "REPORT.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
