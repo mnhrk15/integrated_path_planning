@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
-"""PoC: distribution-aware (chance-constrained) planning on Scenario 2 (SGAN).
+"""Margin-control experiment: distribution information vs. mere conservatism.
 
-Compares single-sample planning (baseline) against chance-constrained planning
-over the full 20-sample SGAN distribution for several epsilon values, so we can
-test whether consuming the distribution converts SGAN's interaction-aware
-samples into a larger planner safety margin.
+Extends the original distribution-aware planning PoC (single-sample baseline
+vs. chance-constrained planning over the full 20-sample SGAN distribution)
+with two controls that separate "value of the predicted distribution" from
+"mere conservatism" (RESEARCH_ISSUES_AND_SOLUTIONS.md §C-1):
+
+  Experiment A: single-sample planning with an inflated collision margin
+      (collision_margin_inflation in {1.0, 1.1, 1.2, 1.35, 1.5}) compared
+      against the robust (eps=0) planner on the MinDist-vs-Time trade-off.
+  Experiment B: robust (eps=0) planning over the LSTM (no pooling)
+      20-sample distribution, to test whether the robust gain is specific
+      to the interaction-aware (pooling) distribution.
+
+Runs are cached per (scenario, condition, seed) under <outdir>/runs/, so an
+interrupted campaign resumes where it left off. all_runs.csv is rebuilt from
+the cache on every invocation.
 
 Usage:
-    python examples/run_da_poc.py [--seeds N] [--scenario PATH]
+    python examples/run_da_poc.py [--seeds N] [--scenarios A.yaml,B.yaml]
+                                  [--conditions label1,label2] [--outdir DIR]
 """
 import argparse
+import json
+import os
 import sys
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -24,24 +39,36 @@ from src.core.metrics import calculate_aggregate_metrics
 from src.simulation.integrated_simulator import IntegratedSimulator
 from examples.run_statistical_benchmark import set_seed, resolve_model_path
 
-METHOD = "sgan"
-
-CONDITIONS = [
-    # (label, distribution_aware, epsilon)
-    ("baseline_single", False, 0.0),
-    ("da_eps0.0", True, 0.0),
-    ("da_eps0.1", True, 0.1),
+DEFAULT_SCENARIOS = [
+    "scenarios/scenario_01.yaml",
+    "scenarios/scenario_02.yaml",
+    "scenarios/scenario_03.yaml",
 ]
 
+CONDITIONS = [
+    # (label, method, distribution_aware, epsilon, inflation)
+    ("sgan_single_inf1.00", "sgan", False, 0.0, 1.00),  # behavior-preservation anchor (= old baseline_single)
+    ("sgan_single_inf1.10", "sgan", False, 0.0, 1.10),
+    ("sgan_single_inf1.20", "sgan", False, 0.0, 1.20),
+    ("sgan_single_inf1.35", "sgan", False, 0.0, 1.35),
+    ("sgan_single_inf1.50", "sgan", False, 0.0, 1.50),
+    ("sgan_robust_eps0.0",  "sgan", True,  0.0, 1.00),  # = old da_eps0.0
+    ("lstm_single",         "lstm", False, 0.0, 1.00),  # Experiment B
+    ("lstm_robust_eps0.0",  "lstm", True,  0.0, 1.00),  # Experiment B
+]
 
-def run_one(scenario, distribution_aware, epsilon, seed):
+BASELINE_LABEL = "sgan_single_inf1.00"
+
+
+def run_one(scenario, method, distribution_aware, epsilon, inflation, seed):
     set_seed(seed)
     config = load_config(scenario)
-    config.prediction_method = METHOD
+    config.prediction_method = method
     config.visualization_enabled = False
     config.distribution_aware_planning = distribution_aware
     config.chance_epsilon = epsilon
-    resolve_model_path(config, METHOD)
+    config.collision_margin_inflation = inflation
+    resolve_model_path(config, method)
 
     sim = IntegratedSimulator(config)
     history = sim.run()
@@ -61,64 +88,139 @@ def run_one(scenario, distribution_aware, epsilon, seed):
     }
 
 
+def cache_path(outdir: Path, scenario: str, label: str, seed: int) -> Path:
+    return outdir / "runs" / Path(scenario).stem / label / f"seed_{seed:02d}.json"
+
+
+def write_atomic(path: Path, payload: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w") as f:
+        json.dump(payload, f, indent=1)
+    os.replace(tmp, path)
+
+
+def collect_rows(outdir: Path) -> pd.DataFrame:
+    rows = []
+    for p in sorted((outdir / "runs").glob("*/*/seed_*.json")):
+        with open(p) as f:
+            rows.append(json.load(f))
+    return pd.DataFrame(rows)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--seeds", type=int, default=20)
-    ap.add_argument("--scenario", default="scenarios/scenario_02.yaml")
+    ap.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIOS),
+                    help="Comma-separated scenario YAML paths")
+    ap.add_argument("--conditions", default="",
+                    help="Comma-separated condition labels (default: all)")
+    ap.add_argument("--outdir", default="output/exp_margin_control")
     args = ap.parse_args()
+
+    scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
+    wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
+    conditions = [c for c in CONDITIONS if not wanted or c[0] in wanted]
+    unknown = wanted - {c[0] for c in CONDITIONS}
+    if unknown:
+        ap.error(f"Unknown condition labels: {sorted(unknown)}")
     seeds = list(range(args.seeds))
-
-    rows = []
-    for name, da, eps in CONDITIONS:
-        for seed in seeds:
-            r = run_one(args.scenario, da, eps, seed)
-            r.update({"condition": name, "seed": seed})
-            rows.append(r)
-            print(f"{name:16s} seed={seed:2d}: "
-                  f"dist={r['min_dist_m']:.3f} ttc={r['min_ttc_s']:.3f} "
-                  f"t={r['time_s']:.1f} coll={r['collision_count']} ade={r['ade']:.3f}",
-                  flush=True)
-
-    df = pd.DataFrame(rows)
-    outdir = Path("output") / ("poc_da_" + Path(args.scenario).stem)
+    outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+
+    total = len(scenarios) * len(conditions) * len(seeds)
+    done = 0
+    failed = 0
+    for scenario in scenarios:
+        for label, method, da, eps, inflation in conditions:
+            for seed in seeds:
+                done += 1
+                cpath = cache_path(outdir, scenario, label, seed)
+                if cpath.exists():
+                    continue
+                try:
+                    r = run_one(scenario, method, da, eps, inflation, seed)
+                except Exception:
+                    failed += 1
+                    print(f"[{done}/{total}] FAILED {Path(scenario).stem} "
+                          f"{label} seed={seed}", file=sys.stderr, flush=True)
+                    traceback.print_exc(file=sys.stderr)
+                    continue
+                r.update({
+                    "scenario": Path(scenario).stem,
+                    "condition": label,
+                    "method": method,
+                    "distribution_aware": da,
+                    "epsilon": eps,
+                    "inflation": inflation,
+                    "seed": seed,
+                })
+                write_atomic(cpath, r)
+                print(f"[{done}/{total}] {Path(scenario).stem} {label:20s} seed={seed:2d}: "
+                      f"dist={r['min_dist_m']:.3f} ttc={r['min_ttc_s']:.3f} "
+                      f"t={r['time_s']:.1f} coll={r['collision_count']} ade={r['ade']:.3f}",
+                      flush=True)
+
+    df = collect_rows(outdir)
+    if df.empty:
+        print("No cached runs found; nothing to aggregate.", file=sys.stderr)
+        sys.exit(1)
+    column_order = ["scenario", "condition", "method", "distribution_aware",
+                    "epsilon", "inflation", "seed", "time_s", "speed_ms",
+                    "min_dist_m", "min_ttc_s", "collision_count", "ade", "fde"]
+    df = df[column_order].sort_values(["scenario", "condition", "seed"])
     df.to_csv(outdir / "all_runs.csv", index=False)
 
     def fmt(g, col, p=3):
         return f"{g[col].mean():.{p}f}±{g[col].std(ddof=1):.{p}f}"
 
     summary_rows = []
-    for name, _, _ in CONDITIONS:
-        g = df[df.condition == name]
-        summary_rows.append({
-            "condition": name,
-            "time_s": fmt(g, "time_s", 2),
-            "speed_ms": fmt(g, "speed_ms", 2),
-            "min_dist_m": fmt(g, "min_dist_m"),
-            "min_ttc_s": fmt(g, "min_ttc_s"),
-            "collisions": int(g.collision_count.sum()),
-            "ade": fmt(g, "ade"),
-        })
+    for scenario, sdf in df.groupby("scenario"):
+        for label, *_ in CONDITIONS:
+            g = sdf[sdf.condition == label]
+            if g.empty:
+                continue
+            summary_rows.append({
+                "scenario": scenario,
+                "condition": label,
+                "n": len(g),
+                "time_s": fmt(g, "time_s", 2),
+                "speed_ms": fmt(g, "speed_ms", 2),
+                "min_dist_m": fmt(g, "min_dist_m"),
+                "min_ttc_s": fmt(g, "min_ttc_s"),
+                "collisions": int(g.collision_count.sum()),
+                "ade": fmt(g, "ade"),
+            })
     summary = pd.DataFrame(summary_rows)
-    print("\n=== Summary (Scenario 2, SGAN, n={} per condition) ===".format(len(seeds)))
+    print(f"\n=== Summary (n={len(seeds)} seeds per condition) ===")
     print(summary.to_string(index=False))
     summary.to_csv(outdir / "summary.csv", index=False)
 
-    # Welch t-tests: each DA condition vs single-sample baseline
-    base = df[df.condition == "baseline_single"]
-    print("\n=== Welch t-test vs baseline_single ===")
+    # Welch t-tests: each condition vs the single-sample SGAN baseline, per scenario
     stat_rows = []
-    for name, _, _ in CONDITIONS:
-        if name == "baseline_single":
+    print(f"\n=== Welch t-test vs {BASELINE_LABEL} ===")
+    for scenario, sdf in df.groupby("scenario"):
+        base = sdf[sdf.condition == BASELINE_LABEL]
+        if base.empty:
             continue
-        g = df[df.condition == name]
-        for col in ["min_dist_m", "min_ttc_s", "time_s"]:
-            t, p = stats.ttest_ind(g[col], base[col], equal_var=False)
-            d_mean = g[col].mean() - base[col].mean()
-            print(f"{name:12s} {col:11s} delta={d_mean:+.3f}  p={p:.3e}")
-            stat_rows.append({"condition": name, "metric": col,
-                              "delta_vs_base": d_mean, "p": p})
+        for label, *_ in CONDITIONS:
+            if label == BASELINE_LABEL:
+                continue
+            g = sdf[sdf.condition == label]
+            if g.empty:
+                continue
+            for col in ["min_dist_m", "min_ttc_s", "time_s"]:
+                t, p = stats.ttest_ind(g[col], base[col], equal_var=False)
+                d_mean = g[col].mean() - base[col].mean()
+                print(f"{scenario} {label:20s} {col:11s} delta={d_mean:+.3f}  p={p:.3e}")
+                stat_rows.append({"scenario": scenario, "condition": label,
+                                  "metric": col, "delta_vs_base": d_mean, "p": p})
     pd.DataFrame(stat_rows).to_csv(outdir / "welch_vs_baseline.csv", index=False)
+
+    if failed:
+        print(f"\nWARNING: {failed} run(s) failed and were not cached "
+              f"(they will be retried on the next invocation).", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
