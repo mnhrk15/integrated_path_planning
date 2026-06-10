@@ -153,7 +153,7 @@ def experiment_a(df: pd.DataFrame, scenarios: list):
 
 
 def experiment_b(df: pd.DataFrame, scenarios: list):
-    """Per-seed robust gains for SGAN vs LSTM, compared via Welch."""
+    """Per-seed robust gains (MinDist and Time) for SGAN vs LSTM, via Welch."""
     rows = []
     for scenario in scenarios:
         sdf = df[df.scenario == scenario]
@@ -166,18 +166,46 @@ def experiment_b(df: pd.DataFrame, scenarios: list):
             seeds = single.index.intersection(robust.index)
             if len(seeds) == 0:
                 continue
-            gains[method] = (robust.loc[seeds, "min_dist_m"]
-                             - single.loc[seeds, "min_dist_m"])
+            gains[method] = {
+                "min_dist": (robust.loc[seeds, "min_dist_m"]
+                             - single.loc[seeds, "min_dist_m"]),
+                "time": (robust.loc[seeds, "time_s"]
+                         - single.loc[seeds, "time_s"]),
+            }
             # Within-method Welch: robust vs single
-            d, p = welch(robust.loc[seeds, "min_dist_m"],
-                         single.loc[seeds, "min_dist_m"])
+            d_md, p_md = welch(robust.loc[seeds, "min_dist_m"],
+                               single.loc[seeds, "min_dist_m"])
+            d_t, p_t = welch(robust.loc[seeds, "time_s"],
+                             single.loc[seeds, "time_s"])
             rows.append({"scenario": scenario, "test": f"{method}_robust_vs_single",
-                         "delta_min_dist": d, "p": p, "n": len(seeds)})
+                         "delta_min_dist": d_md, "p_min_dist": p_md,
+                         "delta_time": d_t, "p_time": p_t, "n": len(seeds)})
         if "sgan" in gains and "lstm" in gains:
-            d, p = welch(gains["sgan"], gains["lstm"])
+            d_md, p_md = welch(gains["sgan"]["min_dist"], gains["lstm"]["min_dist"])
+            d_t, p_t = welch(gains["sgan"]["time"], gains["lstm"]["time"])
             rows.append({"scenario": scenario, "test": "gain_sgan_vs_gain_lstm",
-                         "delta_min_dist": d, "p": p,
-                         "n": min(len(gains["sgan"]), len(gains["lstm"]))})
+                         "delta_min_dist": d_md, "p_min_dist": p_md,
+                         "delta_time": d_t, "p_time": p_t,
+                         "n": min(len(gains["sgan"]["min_dist"]),
+                                  len(gains["lstm"]["min_dist"]))})
+    return pd.DataFrame(rows)
+
+
+def ade_invariance(df: pd.DataFrame, scenarios: list):
+    """Welch test of ADE robust vs single within each method (should be ~unchanged)."""
+    rows = []
+    for scenario in scenarios:
+        sdf = df[df.scenario == scenario]
+        for method, single_label, robust_label in [
+                ("sgan", BASELINE_LABEL, ROBUST_LABEL),
+                ("lstm", LSTM_SINGLE, LSTM_ROBUST)]:
+            single = sdf[sdf.condition == single_label]
+            robust = sdf[sdf.condition == robust_label]
+            if single.empty or robust.empty:
+                continue
+            d, p = welch(robust["ade"], single["ade"])
+            rows.append({"scenario": scenario, "method": method,
+                         "delta_ade": d, "p": p})
     return pd.DataFrame(rows)
 
 
@@ -242,6 +270,7 @@ def main():
     sanity_lines = sanity_check(df)
     exp_a, verdict_mean, verdict_sig = experiment_a(df, scenarios)
     exp_b = experiment_b(df, scenarios)
+    ade_inv = ade_invariance(df, scenarios)
     plot_tradeoff(df, scenarios, outdir / "tradeoff_curve.png")
 
     welch_all = pd.concat([
@@ -305,22 +334,29 @@ def main():
 
     w("## 実験B: LSTM 分布での robust 計画")
     w("")
-    w("| scenario | 検定 | ΔMinDist [m] | p | n |")
-    w("|---|---|---|---|---|")
+    w("| scenario | 検定 | ΔMinDist [m] | p | ΔTime [s] | p | n |")
+    w("|---|---|---|---|---|---|---|")
     for _, r in exp_b.iterrows():
         w(f"| {r.scenario} | {r.test} | {r.delta_min_dist:+.3f} | "
-          f"{fmt_p(r.p)} | {int(r.n)} |")
+          f"{fmt_p(r.p_min_dist)} | {r.delta_time:+.3f} | "
+          f"{fmt_p(r.p_time)} | {int(r.n)} |")
     w("")
     w("`gain_sgan_vs_gain_lstm` は per-seed の robust 利得 "
-      "d(seed) = MinDist_robust(seed) − MinDist_single(seed) を方法間で Welch 比較"
-      "したもの（正 = SGAN の利得が大きい）。同一シードは歩行者 SFM の初期条件を"
-      "共有するが、ego の挙動差により厳密な対応ペアではない点に注意。")
+      "d(seed) = X_robust(seed) − X_single(seed)（X = MinDist / Time）を方法間で "
+      "Welch 比較したもの（正 = SGAN の利得・コストが大きい）。同一シードは歩行者 "
+      "SFM の初期条件を共有するが、ego の挙動差により厳密な対応ペアではない点に注意。")
     w("")
 
     w("## 付記")
     w("")
-    w("- robust 条件は予測自体を変えないため、同一シードで ADE は単一サンプル条件と"
-      "一致するはず（上表で確認）。")
+    w("- robust 条件でも予測器は同一だが、ego の挙動変化が歩行者の斥力反応 → 観測 → "
+      "予測に波及するため、per-seed の ADE は厳密には一致しない。統計的不変性の確認"
+      "（Welch、robust vs single、同一 method）:")
+    for _, r in ade_inv.iterrows():
+        w(f"    - {r.scenario} {r.method}: ΔADE={r.delta_ade:+.4f} m, p={fmt_p(r.p)}")
+    w("- `Time飽和` は time_s ≥ total_time − dt のラン数（ゴール未到達のまま打切り）。"
+      "飽和が多い条件では Time が右側打切りされており、真の走行時間コストは表の値"
+      "より大きい（Time ≤ robust 側に有利な打切りなので、実験Aの判定を弱めない）。")
     w("- `min_ttc_s` に inf が含まれる場合は mean±std が inf になる（既存集計と同じ"
       "扱い）。")
     w("")
