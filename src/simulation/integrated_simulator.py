@@ -3,6 +3,7 @@
 This is the main simulation module that orchestrates all components.
 """
 
+import copy
 import numpy as np
 import csv
 import time
@@ -561,7 +562,10 @@ class IntegratedSimulator:
                 f"and retrying (attempt {self._replan_attempts + 1}/{self._max_replan_attempts})..."
             )
             
-            # Update local state variable to reflect new state for logging/recording
+            # Update local state variable to reflect new state for logging/recording.
+            # Copy first: the current object may still be referenced by the
+            # previous step's SimulationResult and must not be edited in place.
+            self.ego_state = copy.copy(self.ego_state)
             self.ego_state.state = new_sm_output.state
             self._replan_attempts += 1
             
@@ -683,14 +687,23 @@ class IntegratedSimulator:
 
     def _apply_emergency_stop(self, old_a: float):
         """Apply emergency stop dynamics."""
+        # Replace the state object: the previous one is referenced by the last
+        # recorded SimulationResult, and in-place edits would rewrite history.
+        self.ego_state = copy.copy(self.ego_state)
+
         # Use emergency deceleration
         max_dec = self.config.ego_max_accel * 2.0 # Hard braking
-        
+
+        # The vehicle keeps moving while braking: integrate kinematics with the
+        # pre-deceleration speed so the braking distance is not silently zero.
+        self.ego_state.x += self.ego_state.v * np.cos(self.ego_state.yaw) * self.config.dt
+        self.ego_state.y += self.ego_state.v * np.sin(self.ego_state.yaw) * self.config.dt
+
         self.ego_state.v = max(0.0, self.ego_state.v - max_dec * self.config.dt)
         new_a = -max_dec if self.ego_state.v > 0 else 0.0
-        
+
         current_jerk = (new_a - old_a) / self.config.dt
-        
+
         self.ego_state.a = new_a
         self.ego_state.jerk = current_jerk
         self.ego_state.timestamp = self.time + self.config.dt

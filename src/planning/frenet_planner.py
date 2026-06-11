@@ -91,6 +91,10 @@ class FrenetPlanner:
         max_road_width: Maximum road width to check [m]
     """
     
+    # Reject candidates whose lateral offset approaches the curvature center of
+    # the reference path (Frenet->Cartesian singular at 1 - kappa_ref * d = 0)
+    SINGULARITY_EPS = 0.05
+
     def __init__(
         self,
         reference_path: CubicSpline2D,
@@ -597,7 +601,7 @@ class FrenetPlanner:
         # CoordinateConverter.frenet_to_cartesian is now vectorized
         s_condition = (all_s, all_s_d, all_s_dd)
         d_condition = (all_d, all_d_d, all_d_dd)
-        
+
         try:
              x, y, theta, kappa, v, a = self.converter.frenet_to_cartesian(
                 all_s, ix, iy, i_yaw, i_kappa, i_dkappa,
@@ -605,12 +609,29 @@ class FrenetPlanner:
             )
         except Exception as e:
             logger.error(f"Vectorized conversion failed: {e}")
-            # Fallback or empty return? 
+            # Fallback or empty return?
             # If conversion fails for one point, it might be due to NaNs.
             # We continue, let the NaN values propagate, and filter later if needed.
             # But here we just re-raise or return broken paths.
             # Usually vector calls shouldn't raise exceptions unless dimension mismatch.
             return fp_list
+
+        # Frenet->Cartesian is singular at 1 - kappa_ref * d <= 0 (the lateral
+        # offset reaches the curvature center): heading flips by pi and the
+        # converted velocity/acceleration are meaningless, yet finite, so they
+        # would pass the constraint checks. Invalidate any candidate containing
+        # such a point by NaN-ing its first sample (the unflatten step below
+        # then drops the whole path). Out-of-domain points (NaN curvature from
+        # the spline) are NOT singular: they keep the legacy behaviour of
+        # truncating the path to its valid prefix.
+        one_minus_kappa_d = 1.0 - i_kappa * all_d
+        singular = np.isfinite(one_minus_kappa_d) & (one_minus_kappa_d <= self.SINGULARITY_EPS)
+        if np.any(singular):
+            seg_start = 0
+            for seg_end in split_indices:
+                if np.any(singular[seg_start:seg_end]):
+                    x[seg_start] = np.nan
+                seg_start = seg_end
 
         # 4. Unflatten results and populate paths
         # x, y, etc. are numpy arrays. Split them back.
@@ -706,7 +727,23 @@ class FrenetPlanner:
         for fp in fp_list:
             if len(fp.x) == 0:
                 continue
-            
+
+            # Drop paths carrying non-finite kinematics: NaN compares False
+            # against every limit below and would silently pass all checks.
+            if not (np.all(np.isfinite(fp.v)) and np.all(np.isfinite(fp.a))
+                    and np.all(np.isfinite(fp.c))):
+                continue
+
+            # Drop geometrically discontinuous paths: when the ego heading is
+            # nearly orthogonal to the reference tangent, the Frenet initial
+            # conditions (tan(dtheta)) explode and the converted positions jump
+            # by kilometres while v/a/c stay finite. A physical path cannot move
+            # more than ~max_speed*dt per sample.
+            if len(fp.x) >= 2:
+                step_len = np.hypot(np.diff(fp.x), np.diff(fp.y))
+                if np.max(step_len) > max(c_max_speed, self.max_speed) * self.dt * 3.0:
+                    continue
+
             # Check speed limit (use generator expression for early termination)
             if any(v > c_max_speed for v in fp.v):
                 path_dict['max_speed_error'].append(fp)
