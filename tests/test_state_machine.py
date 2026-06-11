@@ -328,9 +328,9 @@ def test_envelope_caps_normal_target_too(config):
     assert out.target_speed_override is None
 
 def test_observe_metrics_refreshes_envelope_without_transition(config):
-    """The planning cycle observes the current step's metrics before the
-    first plan() (observe_metrics): the envelope must consume the fresh
-    clearance immediately, and the observation alone must not change state."""
+    """observe_metrics records metrics for the envelope without a state
+    transition (update() uses it internally; the planning cycle deliberately
+    runs the envelope one step stale — see _execute_planning_cycle)."""
     config.ego_target_speed = 6.0
     config.state_machine_envelope_decel = 1.2
     config.state_machine_envelope_standoff = 1.0

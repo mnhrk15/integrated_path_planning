@@ -98,12 +98,12 @@ class FailSafeStateMachine:
     def observe_metrics(self, safety_metrics: Dict[str, Any]) -> None:
         """Record the latest safety metrics without changing state.
 
-        Called at the start of each planning cycle so that the safe-speed
-        envelope and the stop directive consume the clearance of the CURRENT
-        step; without this, the first plan() of a step would run on the
-        clearance observed one step earlier (~0.75 m stale at S1 speeds).
-        update() refreshes the same fields again, which is a no-op when the
-        metrics object is the same.
+        update() calls this internally; the planning cycle deliberately does
+        NOT call it before _get_planner_config(), so the envelope and the
+        stop directive run on the clearance observed at the previous step's
+        update() (one step stale). Zero-lag coupling was tried and
+        empirically regresses — see the note in
+        IntegratedSimulator._execute_planning_cycle.
 
         Args:
             safety_metrics: Dictionary of safety metrics ('clearance',

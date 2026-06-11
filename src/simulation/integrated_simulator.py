@@ -534,11 +534,19 @@ class IntegratedSimulator:
         dynamic_obstacles_distribution: Optional[np.ndarray] = None
     ):
         """Execute planning cycle with state machine management and retries."""
-        # Compute current safety metrics FIRST (before planning) so the
-        # state machine's safe-speed envelope and stop directive consume the
-        # clearance of this step, not the one observed a step earlier
-        # (~0.75 m stale at S1 speeds). Use the shared function to avoid
-        # code duplication.
+        # Compute the current step's safety metrics up front (shared function
+        # to avoid code duplication). NOTE the state machine is intentionally
+        # NOT given these metrics before _get_planner_config(): the envelope
+        # and stop directive consume the clearance observed at the previous
+        # step's update(). Zero-lag coupling was tried (review finding) and
+        # empirically regresses: the fresh clearance is systematically
+        # smaller while approaching, which tightens the envelope beyond its
+        # calibration — 3/5 S1 SGAN seeds then stop in front of the crossing
+        # flow and never re-enter it (timeout), and S3 cv develops a
+        # 0.17 m/s plan/stop limit cycle while holding. The one-step lag is
+        # part of the tuned behaviour; the safety-critical layers (same-time
+        # collision check, adaptive emergency stop below) already use
+        # same-step data.
         if ped_state is not None:
             current_metrics = compute_safety_metrics_static(
                 ego_state=self.ego_state,
@@ -558,9 +566,6 @@ class IntegratedSimulator:
         self._last_clearance = current_metrics.get(
             'clearance_ahead', current_metrics.get('clearance', float('inf')))
 
-        # Let the state machine observe the fresh metrics (no transition yet)
-        # before deriving the planner config from them.
-        self.state_machine.observe_metrics(current_metrics)
         sm_output = self.state_machine._get_planner_config()
 
         target_speed = sm_output.target_speed_override
