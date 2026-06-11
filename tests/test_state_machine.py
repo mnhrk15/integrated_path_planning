@@ -254,6 +254,26 @@ def test_envelope_caps_caution_target_by_clearance(config):
     assert out.target_speed_override == pytest.approx(
         6.0 * config.state_machine_caution_speed_multiplier)
 
+def test_envelope_uses_forward_clearance(config):
+    """A pedestrian beside/behind (clearance small, clearance_ahead inf)
+    must not pin the envelope target at zero — braking does not help
+    against non-frontal conflicts and the vehicle must be able to creep
+    forward out of a crowd."""
+    config.ego_target_speed = 6.0
+    config.state_machine_envelope_decel = 1.2
+    config.state_machine_envelope_standoff = 1.0
+    sm = FailSafeStateMachine(config)
+
+    sm.update(plan_found=True, safety_metrics={
+        'clearance': 0.4, 'clearance_ahead': float('inf')})
+    out = sm._get_planner_config()
+    assert out.target_speed_override is None  # unconstrained ahead
+
+    sm.update(plan_found=True, safety_metrics={
+        'clearance': 0.4, 'clearance_ahead': 3.0})
+    out = sm._get_planner_config()
+    assert out.target_speed_override == pytest.approx((2 * 1.2 * 2.0) ** 0.5)
+
 def test_envelope_caps_normal_target_too(config):
     """The envelope is a state-independent cap: it must bind already in
     NORMAL (pre-slowdown), not only after the CAUTION transition — against a
@@ -298,13 +318,13 @@ def test_stop_distance_directive_in_emergency(config):
     the envelope enabled, to preserve legacy scenario behaviour)."""
     sm = FailSafeStateMachine(config)
     sm.current_state = VehicleState.EMERGENCY
-    sm._last_clearance = 1.5
+    sm._last_clearance_ahead = 1.5
     assert sm._get_planner_config().max_stop_distance is None  # envelope off
 
     config.state_machine_envelope_decel = 1.2
     sm = FailSafeStateMachine(config)
     sm.current_state = VehicleState.EMERGENCY
-    sm._last_clearance = 1.5
+    sm._last_clearance_ahead = 1.5
     assert sm._get_planner_config().max_stop_distance == pytest.approx(1.3)
 
 def test_envelope_disabled_by_default(config):

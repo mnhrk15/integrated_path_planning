@@ -85,7 +85,12 @@ class FailSafeStateMachine:
         # is taken from the most recent update() call.
         self.envelope_decel = getattr(config, 'state_machine_envelope_decel', 0.0)
         self.envelope_standoff = getattr(config, 'state_machine_envelope_standoff', 0.5)
+        # Omnidirectional clearance (trigger / recovery gates) and the
+        # forward-restricted one (envelope / stop directive: braking only
+        # helps against frontal conflicts, and a pedestrian beside or behind
+        # a stopped vehicle must not pin its speed target at zero).
         self._last_clearance = float('inf')
+        self._last_clearance_ahead = float('inf')
 
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any],
                ego_speed: float = 0.0) -> StateMachineOutput:
@@ -101,6 +106,8 @@ class FailSafeStateMachine:
             StateMachineOutput containing the new state and planner constraints
         """
         self._last_clearance = safety_metrics.get('clearance', float('inf'))
+        self._last_clearance_ahead = safety_metrics.get(
+            'clearance_ahead', self._last_clearance)
         trigger_threshold = (self.trigger_clearance_caution
                              + self.trigger_time_headway * max(ego_speed, 0.0))
         # Default transitions
@@ -230,9 +237,9 @@ class FailSafeStateMachine:
         while pedestrians pass), and rises smoothly as the clearance reopens.
         Returns None when the envelope is disabled or nothing was observed.
         """
-        if self.envelope_decel <= 0.0 or not math.isfinite(self._last_clearance):
+        if self.envelope_decel <= 0.0 or not math.isfinite(self._last_clearance_ahead):
             return None
-        stop_room = max(self._last_clearance - self.envelope_standoff, 0.0)
+        stop_room = max(self._last_clearance_ahead - self.envelope_standoff, 0.0)
         return math.sqrt(2.0 * self.envelope_decel * stop_room)
 
     def _stop_room_to_pedestrian(self) -> Optional[float]:
@@ -243,6 +250,6 @@ class FailSafeStateMachine:
         vehicle may legitimately come to rest closer than the planner would
         normally aim for). None when no pedestrian has been observed.
         """
-        if not math.isfinite(self._last_clearance):
+        if not math.isfinite(self._last_clearance_ahead):
             return None
-        return max(self._last_clearance - 0.2, 0.05)
+        return max(self._last_clearance_ahead - 0.2, 0.05)

@@ -570,9 +570,12 @@ class IntegratedSimulator:
             current_metrics = {'min_distance': float('inf'), 'collision': False,
                                'ttc': float('inf'), 'clearance': float('inf')}
 
-        # Remember the clearance for the adaptive emergency stop (the
+        # Remember the forward clearance for the adaptive emergency stop (the
         # emergency-stop path runs after planning, outside this method).
-        self._last_clearance = current_metrics.get('clearance', float('inf'))
+        # Braking only helps against frontal conflicts, so pedestrians beside
+        # or behind must not force the hardest rate.
+        self._last_clearance = current_metrics.get(
+            'clearance_ahead', current_metrics.get('clearance', float('inf')))
 
         # Update SM (ego speed feeds the speed-dependent preventive trigger)
         new_sm_output = self.state_machine.update(

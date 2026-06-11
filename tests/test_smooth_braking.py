@@ -134,6 +134,34 @@ class TestStopDistanceDirective:
         assert (path.s[-1] - path.s[0]) <= 0.3 + 1e-6
 
 
+class TestForwardClearanceMetric:
+    def _metrics(self, ped_positions, yaw=0.0):
+        from src.core.data_structures import (
+            compute_safety_metrics_static, PedestrianState)
+        ego = EgoVehicleState(x=0.0, y=0.0, yaw=yaw, v=2.0, a=0.0)
+        pos = np.asarray(ped_positions, dtype=float)
+        peds = PedestrianState(
+            positions=pos, velocities=np.zeros_like(pos),
+            goals=np.zeros_like(pos), timestamp=0.0)
+        return compute_safety_metrics_static(
+            ego, peds, ego_radius=1.0, ped_radius=0.2)
+
+    def test_clearance_ahead_ignores_pedestrians_behind(self):
+        m = self._metrics([[-1.5, 0.0], [3.0, 0.0]])
+        assert m['clearance'] == pytest.approx(1.5 - 1.2)
+        assert m['clearance_ahead'] == pytest.approx(3.0 - 1.2)
+
+    def test_clearance_ahead_inf_when_all_behind(self):
+        m = self._metrics([[-1.5, 0.0], [-3.0, 1.0]])
+        assert m['clearance_ahead'] == float('inf')
+        assert np.isfinite(m['clearance'])
+
+    def test_clearance_ahead_follows_heading(self):
+        # Heading +y: the pedestrian at +x is no longer ahead.
+        m = self._metrics([[3.0, 0.0], [0.0, 2.0]], yaw=np.pi / 2)
+        assert m['clearance_ahead'] == pytest.approx(2.0 - 1.2)
+
+
 class TestEmergencyDecelConfig:
     def make_sim(self, **config_kwargs):
         sim = IntegratedSimulator.__new__(IntegratedSimulator)

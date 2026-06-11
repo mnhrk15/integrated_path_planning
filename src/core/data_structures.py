@@ -326,6 +326,11 @@ def compute_safety_metrics_static(
             - collision: Whether collision occurred (bool)
             - ttc: Time to collision [s] (if applicable)
             - clearance: min_distance minus the combined collision radius [m]
+            - clearance_ahead: clearance restricted to pedestrians in the
+              forward half-plane of the vehicle (inf when none). Braking only
+              helps against frontal conflicts, so the safe-speed envelope and
+              the adaptive emergency stop key on this; pedestrians beside or
+              behind a stopped vehicle must not pin its speed target at zero.
     """
     if footprint is None:
         centers = np.array([[ego_state.x, ego_state.y]])
@@ -364,9 +369,20 @@ def compute_safety_metrics_static(
                     if time_to_collision >= 0:
                         ttc = min(ttc, time_to_collision)
 
+    # Forward-restricted clearance: pedestrians whose longitudinal coordinate
+    # in the vehicle frame is positive (strictly ahead of the vehicle centre).
+    clearance_ahead = float('inf')
+    if len(ped_state.positions) > 0:
+        heading = np.array([np.cos(ego_state.yaw), np.sin(ego_state.yaw)])
+        rel = ped_state.positions - np.array([ego_state.x, ego_state.y])
+        ahead = rel @ heading > 0.0
+        if np.any(ahead):
+            clearance_ahead = float(np.min(dist_matrix[:, ahead])) - combined_radius
+
     return {
         'min_distance': min_distance,
         'collision': collision,
         'ttc': ttc,
-        'clearance': min_distance - combined_radius
+        'clearance': min_distance - combined_radius,
+        'clearance_ahead': clearance_ahead
     }
