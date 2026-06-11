@@ -90,23 +90,23 @@ class TestSingularityGuard:
         from src.core.data_structures import FrenetState
         fstate = FrenetState(s=2.0, s_d=3.0, s_dd=0.0, d=0.0, d_d=0.0, d_dd=0.0)
         paths = planner._generate_frenet_paths(fstate, target_speed=3.0)
-        paths = planner._calc_global_paths(paths)
         # Identify candidates that hit the singular band INSIDE the spline
-        # domain (s within bounds) — these must be emptied. Use Frenet-side
-        # arrays which are never truncated.
+        # domain (s within bounds) — these must be emptied. Capture the
+        # Frenet-side arrays BEFORE conversion: lockstep truncation cuts (or
+        # empties) them together with the Cartesian arrays.
+        pre_frenet = [(np.asarray(fp.d).copy(), np.asarray(fp.s).copy())
+                      for fp in paths]
+        paths = planner._calc_global_paths(paths)
         s_max = planner.csp.s[-1]
         singular_present = []
-        for fp in paths:
-            d_arr = np.asarray(fp.d)
-            s_arr = np.asarray(fp.s)
+        for fp, (d_arr, s_arr) in zip(paths, pre_frenet):
             in_domain = s_arr <= s_max
             if np.any((d_arr[in_domain] / 5.0) >= 1.0 - 0.05):
                 singular_present.append(fp)
         assert len(singular_present) > 0, "test setup: no singular candidates generated"
         for fp in singular_present:
             assert len(fp.x) == 0, (
-                f"singular candidate (max d={max(fp.d):.2f}) survived with "
-                f"{len(fp.x)} converted points"
+                f"singular candidate survived with {len(fp.x)} converted points"
             )
 
     def test_out_of_domain_paths_are_truncated_not_dropped(self):

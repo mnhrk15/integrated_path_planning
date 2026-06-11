@@ -35,14 +35,20 @@ class FailSafeStateMachine:
         # footprint mode. The config keys keep their legacy single-circle
         # semantics (centre-to-pedestrian distance), hence the conversion:
         # min_distance > safe_distance  <=>  clearance > safe_distance - combined
-        combined_radius = (
-            getattr(config, 'ego_radius', 1.0) + getattr(config, 'ped_radius', 0.2)
-        )
+        # In multi_circle mode the effective ego radius is the footprint circle
+        # radius (validate_config enforces safe_distance > combined either way,
+        # so the clearance thresholds are strictly positive).
+        if getattr(config, 'ego_footprint', None) is not None:
+            from .footprint import effective_ego_radius
+            ego_radius = effective_ego_radius(config)
+        else:
+            ego_radius = getattr(config, 'ego_radius', 1.0)
+        combined_radius = ego_radius + getattr(config, 'ped_radius', 0.2)
         self.clearance_caution = (
-            getattr(config, 'state_machine_safe_distance_caution', 0.5) - combined_radius
+            getattr(config, 'state_machine_safe_distance_caution', 2.0) - combined_radius
         )
         self.clearance_emergency = (
-            getattr(config, 'state_machine_safe_distance_emergency', 1.0) - combined_radius
+            getattr(config, 'state_machine_safe_distance_emergency', 3.0) - combined_radius
         )
 
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any]) -> StateMachineOutput:

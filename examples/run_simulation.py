@@ -73,7 +73,13 @@ def main():
         choices=['cv', 'lstm', 'sgan'],
         help='Prediction method: cv, lstm, sgan'
     )
-    
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=None,
+        help='Random seed (recorded in metrics_report.txt for reproducibility)'
+    )
+
     args = parser.parse_args()
     
     # Configure logging
@@ -100,11 +106,26 @@ def main():
     if args.output is not None:
         config.output_path = args.output
 
-    # Override prediction method if specified
+    # Override prediction method if specified. The model path must follow the
+    # method (lstm -> models/sgan-models, sgan -> models/sgan-p-models):
+    # mismatched weights are architecturally incompatible and the predictor
+    # rejects them at load time.
     if args.method is not None:
+        from examples.run_statistical_benchmark import resolve_model_path
+        from src.config import validate_config
         config.prediction_method = args.method
-        logger.info(f"Overriding prediction method to: {args.method}")
-    
+        resolve_model_path(config, args.method)
+        validate_config(config)
+        logger.info(f"Overriding prediction method to: {args.method} "
+                    f"(model: {config.sgan_model_path})")
+
+    # Seed for reproducibility (recorded in metrics_report.txt via run_seed)
+    if args.seed is not None:
+        from examples.run_statistical_benchmark import set_seed
+        set_seed(args.seed)
+        config.run_seed = args.seed
+        logger.info(f"Random seed set to {args.seed}")
+
     # Create simulator
     logger.info("Creating integrated simulator")
     simulator = IntegratedSimulator(config)

@@ -152,6 +152,67 @@ def test_collision_check_dynamic(planner):
     dynamic_obs[0, 0, :] = [10.0, 5.0]
     assert planner._check_collision(fp, None, dynamic_obs) is True
 
+def test_speed_and_accel_checks_skip_index_zero(planner):
+    """Index 0 is the current state: tightened limits must not reject on it."""
+    def make_fp(v, a):
+        fp = FrenetPath()
+        n = len(v)
+        fp.x = [float(i) for i in range(n)]
+        fp.y = [0.0] * n
+        fp.t = [0.1 * i for i in range(n)]
+        fp.v = v
+        fp.a = a
+        fp.c = [0.0] * n
+        return fp
+
+    overrides = {'max_speed': 5.0, 'max_accel': 2.0}
+    no_obs = np.empty((0, 2))
+
+    # Over-limit only at index 0 (current state): kept as 'ok'.
+    fp = make_fp(v=[6.0, 4.0, 4.0], a=[-4.0, 1.0, 0.0])
+    result = planner._check_paths([fp], no_obs, None, overrides)
+    assert result['ok'] == [fp]
+
+    # Over-limit at index 1 (plan-controlled): rejected.
+    fp_speed = make_fp(v=[4.0, 6.0, 4.0], a=[0.0, 1.0, 0.0])
+    result = planner._check_paths([fp_speed], no_obs, None, overrides)
+    assert result['max_speed_error'] == [fp_speed]
+
+    fp_accel = make_fp(v=[4.0, 4.0, 4.0], a=[0.0, -4.0, 0.0])
+    result = planner._check_paths([fp_accel], no_obs, None, overrides)
+    assert result['max_accel_error'] == [fp_accel]
+
+def test_collision_check_dynamic_same_time_only(planner):
+    """Collision requires SAME-TIME co-location, not mere spatial overlap.
+
+    Discriminating cases for the core invariant (M-16): a flattened
+    implementation (ignoring time) or one that always reads obstacle index 0
+    must fail at least one of these assertions.
+    """
+    # Combined radius is robot 2.0 + obstacle 0.3 = 2.3 m, so consecutive
+    # samples are spaced 3 m apart to stay clear of each other.
+    fp = FrenetPath()
+    fp.x = [10.0, 13.0, 16.0]
+    fp.y = [0.0, 0.0, 0.0]
+    fp.t = [0.0, 0.1, 0.2]
+
+    far = [100.0, 100.0]
+
+    # (a) Obstacle occupies the final path point but at t=0 only: the path is
+    # at (10,0) then (6 m away), so this must NOT collide. A flattened check
+    # (or an always-index-0 check) reports a collision here.
+    obs_wrong_time = np.array([[[16.0, 0.0], far, far]])
+    assert planner._check_collision(fp, None, obs_wrong_time) is True
+
+    # (b) Same position, same time (t=0.2 <-> obstacle index 2): collision.
+    obs_same_time = np.array([[far, far, [16.0, 0.0]]])
+    assert planner._check_collision(fp, None, obs_same_time) is False
+
+    # (c) Collision only at a non-zero index (t=0.1 <-> index 1): an
+    # implementation that only ever checks index 0 misses this.
+    obs_mid_time = np.array([[far, [13.0, 0.0], far]])
+    assert planner._check_collision(fp, None, obs_mid_time) is False
+
 def test_collision_check_distribution_chance_constrained(planner):
     """Chance-constrained check tolerates up to floor(epsilon*N) colliding samples."""
     fp = FrenetPath()

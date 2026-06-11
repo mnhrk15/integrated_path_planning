@@ -18,7 +18,7 @@ social_force_params:
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
-num_samples: 1
+num_samples: 20
 
 # === Ego Vehicle Parameters ===
 ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # Start from origin

@@ -47,7 +47,7 @@ def scenario_total_time(scenario_stem: str) -> float:
             data = yaml.safe_load(f) or {}
         if "total_time" in data:
             return float(data["total_time"])
-    return 30.0  # default_config.yaml fallback
+    return 30.0  # SimulationConfig.total_time dataclass default
 
 
 def welch(a: pd.Series, b: pd.Series):
@@ -91,8 +91,16 @@ def sanity_check(df: pd.DataFrame) -> list:
             if len(seeds) == 0:
                 lines.append(f"- {scenario} {new_label}: 共通シードなし → SKIP")
                 continue
-            diffs = (new.loc[seeds, SANITY_COLS] - old.loc[seeds, SANITY_COLS]).abs()
-            max_diff = float(diffs.to_numpy().max())
+            new_vals = new.loc[seeds, SANITY_COLS].to_numpy(dtype=float)
+            old_vals = old.loc[seeds, SANITY_COLS].to_numpy(dtype=float)
+            diffs = np.abs(new_vals - old_vals)
+            # inf - inf (e.g. min_ttc with no TTC event in either run) is NaN
+            # but means a perfect match, not a failure; same for NaN vs NaN.
+            both_inf = (np.isinf(new_vals) & np.isinf(old_vals)
+                        & (np.sign(new_vals) == np.sign(old_vals)))
+            both_nan = np.isnan(new_vals) & np.isnan(old_vals)
+            diffs[both_inf | both_nan] = 0.0
+            max_diff = float(diffs.max())
             if max_diff <= 1e-9:
                 status = "PASS"
             elif anchor_comparable:

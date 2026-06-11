@@ -19,7 +19,7 @@ social_force_params:
 # === Observation Parameters ===
 obs_len: 8
 pred_len: 12
-num_samples: 1
+num_samples: 20
 
 # === Ego Vehicle Parameters ===
 # Start: West Leg (-30, 2.5), Heading East (0 rad)
@@ -37,14 +37,6 @@ max_road_width: 7.0
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2
 obstacle_radius: 0.2
-
-# === Planner Cost Weights (optional) ===
-k_j: 0.5
-k_t: 1.0
-k_d: 1.0
-k_s_dot: 0.5
-k_lat: 1.5
-k_lon: 1.0
 
 # === Reference Path (Right Turn) ===
 # From West (-30, 2.5) to South (2.5, -30)

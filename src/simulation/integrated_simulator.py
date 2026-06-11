@@ -381,6 +381,16 @@ class IntegratedSimulator:
         self._replan_attempts = 0  # Track re-planning attempts to prevent infinite loops
         self._max_replan_attempts = 3  # Maximum number of re-planning attempts per step
 
+        # Persistent prediction failures must surface instead of silently
+        # degrading to constant-velocity fallback on every step (C-2).
+        self._consecutive_prediction_failures = 0
+        self._max_consecutive_prediction_failures = 5
+
+        # Why the last run() ended: 'collision', 'goal' or 'timeout' (None
+        # before/while running and after a crash mid-run). Benchmarks use this
+        # instead of inferring the outcome from the end time.
+        self.termination_reason: Optional[str] = None
+
         # Precompute static obstacles (expanded to point set for collision checks)
         self.static_obstacle_points = self._expand_static_obstacles(
             config.static_obstacles, step=0.5
@@ -451,8 +461,17 @@ class IntegratedSimulator:
                     f"Predicted {predicted_traj.shape[0]} pedestrian trajectories "
                     f"for {predicted_traj.shape[1]} steps"
                 )
-                
+                self._consecutive_prediction_failures = 0
+
             except Exception as e:
+                self._consecutive_prediction_failures += 1
+                if (self._consecutive_prediction_failures
+                        >= self._max_consecutive_prediction_failures):
+                    raise RuntimeError(
+                        f"Prediction failed {self._consecutive_prediction_failures} times in a row "
+                        f"(last error: {e}); a persistent failure (e.g. wrong model for the "
+                        f"prediction method) must not silently degrade to the CV fallback"
+                    ) from e
                 logger.warning(f"Prediction failed: {e}, using constant velocity extrapolation")
                 if ped_state is not None:
                     # Create a simple constant velocity prediction for the planning horizon
@@ -550,30 +569,34 @@ class IntegratedSimulator:
         
         # Update SM
         new_sm_output = self.state_machine.update(found_path, current_metrics)
-        
-        # If state CHANGED to a more critical one (NORMAL -> CAUTION or CAUTION -> EMERGENCY)
-        # AND we didn't find a path, we should RE-PLAN immediately with the new relaxed constraints
-        # to avoid wasting a step doing nothing (or previous emergency stop).
-        # Limit re-planning attempts to prevent infinite loops.
-        
-        if not found_path and new_sm_output.state != sm_output.state and self._replan_attempts < self._max_replan_attempts:
+
+        # Escalate-and-retry loop: while planning fails and the state machine
+        # escalates (NORMAL -> CAUTION -> EMERGENCY), re-plan immediately under
+        # the relaxed constraints instead of wasting a step. The loop ends once
+        # the state stops changing (EMERGENCY reached) or after
+        # _max_replan_attempts retries. Retry planning time is part of t_plan
+        # so the per-step planning cost is not under-reported on the heaviest
+        # steps (M-15).
+        while (planned_path is None
+               and new_sm_output.state != sm_output.state
+               and self._replan_attempts < self._max_replan_attempts):
             logger.warning(
                 f"Planning failed in {sm_output.state}. Transitioning to {new_sm_output.state} "
                 f"and retrying (attempt {self._replan_attempts + 1}/{self._max_replan_attempts})..."
             )
-            
+
             # Update local state variable to reflect new state for logging/recording.
             # Copy first: the current object may still be referenced by the
             # previous step's SimulationResult and must not be edited in place.
             self.ego_state = copy.copy(self.ego_state)
             self.ego_state.state = new_sm_output.state
             self._replan_attempts += 1
-            
-            # Re-plan
+
             target_speed = new_sm_output.target_speed_override
             if target_speed is None:
                 target_speed = self.config.ego_target_speed
-                
+
+            t_start = time.perf_counter()
             planned_path = self.planner.plan(
                 self.ego_state,
                 static_obstacles,
@@ -582,20 +605,26 @@ class IntegratedSimulator:
                 constraint_overrides=new_sm_output.constraint_overrides,
                 dynamic_obstacles_distribution=dynamic_obstacles_distribution
             )
+            t_plan += time.perf_counter() - t_start
 
             if planned_path is not None:
                 logger.info(f"Re-planning successful in {new_sm_output.state}")
-            else:
-                logger.error(
-                    f"Re-planning failed even in {new_sm_output.state} "
-                    f"(attempt {self._replan_attempts}/{self._max_replan_attempts})"
-                )
-        elif not found_path and self._replan_attempts >= self._max_replan_attempts:
+                break
+
             logger.error(
-                f"Maximum re-planning attempts ({self._max_replan_attempts}) reached. "
+                f"Re-planning failed even in {new_sm_output.state} "
+                f"(attempt {self._replan_attempts}/{self._max_replan_attempts})"
+            )
+            sm_output = new_sm_output
+            new_sm_output = self.state_machine.update(False, current_metrics)
+
+        if planned_path is None:
+            logger.error(
+                f"Re-planning exhausted in {new_sm_output.state} "
+                f"({self._replan_attempts} retr{'y' if self._replan_attempts == 1 else 'ies'}). "
                 f"Proceeding with emergency stop."
             )
-            
+
         return planned_path, t_plan
 
     def _update_ego_state(self, planned_path):
@@ -708,6 +737,13 @@ class IntegratedSimulator:
         self.ego_state.jerk = current_jerk
         self.ego_state.timestamp = self.time + self.config.dt
 
+        # The ego now moves straight, so the previously adopted path's
+        # curvature no longer describes it (guarded: some tests build this
+        # simulator without a planner).
+        planner = getattr(self, 'planner', None)
+        if planner is not None:
+            planner.reset_ego_curvature()
+
     @staticmethod
     def _expand_static_obstacles(static_obstacles, step: float = 0.5) -> np.ndarray:
         """Expand rectangular static obstacles into boundary points for collision checks."""
@@ -737,6 +773,15 @@ class IntegratedSimulator:
         points_arr = np.unique(np.array(points), axis=0)
         return points_arr
     
+    @property
+    def goal_reached(self) -> bool:
+        """True when the last run() ended by reaching the goal.
+
+        A collision also ends a run early, so the end time alone cannot
+        identify goal completion — benchmarks must use this instead.
+        """
+        return self.termination_reason == 'goal'
+
     def run(self, n_steps: Optional[int] = None) -> List[SimulationResult]:
         """Run simulation for multiple steps.
         
@@ -748,36 +793,45 @@ class IntegratedSimulator:
         """
         if n_steps is None:
             n_steps = int(self.config.total_time / self.config.dt)
-        
+
         logger.info(f"Running simulation for {n_steps} steps "
                    f"(T={n_steps * self.config.dt:.1f}s)")
-        
+
+        # None while running (and after a crash mid-run); 'timeout' is only
+        # assigned once the loop genuinely exhausts the step budget.
+        self.termination_reason = None
         for i in range(n_steps):
             result = self.step()
-            
+
             if i % 10 == 0:
                 logger.info(f"Step {i}/{n_steps}, t={self.time:.1f}s, "
                           f"ego=({self.ego_state.x:.1f}, {self.ego_state.y:.1f}), "
                           f"v={self.ego_state.v:.1f}m/s, "
                           f"min_dist={result.metrics.get('min_distance', float('inf')):.2f}m")
-            
+
             # Check for collision
             if result.metrics.get('collision', False):
                 logger.error(f"Collision detected at t={self.time:.1f}s!")
+                self.termination_reason = 'collision'
                 break
-            
+
             # Check for goal reached
             current_s, _, _, _, _, _ = self.coord_converter.find_nearest_point_on_path(
                 self.ego_state.x, self.ego_state.y
             )
             max_s = self.reference_path.s[-1]
             dist_to_goal = max_s - current_s
-            
+
             if dist_to_goal < 2.0:
                 logger.success(f"Goal reached at t={self.time:.1f}s! (Dist to goal: {dist_to_goal:.1f}m)")
+                self.termination_reason = 'goal'
                 break
-        
-        logger.info(f"Simulation complete: {len(self.history)} steps")
+
+        if self.termination_reason is None:
+            self.termination_reason = 'timeout'
+
+        logger.info(f"Simulation complete: {len(self.history)} steps "
+                    f"(termination: {self.termination_reason})")
         return self.history
     
     def save_results(self, output_path: Optional[str] = None):
@@ -899,6 +953,8 @@ class IntegratedSimulator:
             "sgan_model": getattr(self.config, 'sgan_model_path', 'none'),
             "ego_target_speed": getattr(self.config, 'ego_target_speed', 0.0),
             "scenario_file": str(getattr(self.config, 'config_path', 'unknown')), # config_path might not be standard, checking
+            "seed": getattr(self.config, 'run_seed', 'not_set'),
+            "termination_reason": self.termination_reason,
             "total_time": self.time,
             "steps": len(self.history)
         }

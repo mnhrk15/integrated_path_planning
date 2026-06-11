@@ -95,7 +95,8 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
         "ego_footprint": config.ego_footprint,
         "n_circles": int(config.ego_footprint_n_circles),
         "time_cap": float(config.total_time),
-        "goal_reached": bool(end_time < config.total_time - 1.5 * config.dt),
+        "termination": sim.termination_reason,
+        "goal_reached": sim.goal_reached,
         "time_s": end_time,
         "speed_ms": float(np.mean([r.ego_state.v for r in history])),
         "min_dist_m": float(m["min_dist"]),
@@ -204,9 +205,12 @@ def main():
                     "min_dist_m", "min_ttc_s", "collision_count", "ade", "fde"]
     # Footprint/cap fields only exist in caches written by newer code
     column_order += [c for c in ["ego_footprint", "n_circles", "time_cap",
-                                 "goal_reached"] if c in df.columns]
+                                 "termination", "goal_reached"] if c in df.columns]
     df = df[column_order].sort_values(["scenario", "condition", "seed"])
     df.to_csv(outdir / "all_runs.csv", index=False)
+
+    # inf = "no TTC event in the run"; keep it out of means and t-tests.
+    df["min_ttc_s"] = df["min_ttc_s"].replace([np.inf, -np.inf], np.nan)
 
     def fmt(g, col, p=3):
         return f"{g[col].mean():.{p}f}±{g[col].std(ddof=1):.{p}f}"
@@ -217,12 +221,16 @@ def main():
             g = sdf[sdf.condition == label]
             if g.empty:
                 continue
+            # Collision runs end early, so their time/speed would read as
+            # "fast"; report those means over collision-free runs only.
+            g_nc = g[g.collision_count == 0]
             summary_rows.append({
                 "scenario": scenario,
                 "condition": label,
                 "n": len(g),
-                "time_s": fmt(g, "time_s", 2),
-                "speed_ms": fmt(g, "speed_ms", 2),
+                "n_collision_runs": int((g.collision_count > 0).sum()),
+                "time_s": fmt(g_nc, "time_s", 2) if not g_nc.empty else "n/a",
+                "speed_ms": fmt(g_nc, "speed_ms", 2) if not g_nc.empty else "n/a",
                 "min_dist_m": fmt(g, "min_dist_m"),
                 "min_ttc_s": fmt(g, "min_ttc_s"),
                 "collisions": int(g.collision_count.sum()),
@@ -247,8 +255,16 @@ def main():
             if g.empty:
                 continue
             for col in ["min_dist_m", "min_ttc_s", "time_s"]:
-                t, p = stats.ttest_ind(g[col], base[col], equal_var=False)
-                d_mean = g[col].mean() - base[col].mean()
+                if col == "time_s":
+                    # Collision runs end early; compare completion times only.
+                    a = g[g.collision_count == 0][col]
+                    b = base[base.collision_count == 0][col]
+                else:
+                    a, b = g[col], base[col]
+                if len(a) < 2 or len(b) < 2:
+                    continue
+                t, p = stats.ttest_ind(a, b, equal_var=False, nan_policy="omit")
+                d_mean = a.mean() - b.mean()
                 print(f"{scenario} {label:20s} {col:11s} delta={d_mean:+.3f}  p={p:.3e}")
                 stat_rows.append({"scenario": scenario, "condition": label,
                                   "metric": col, "delta_vs_base": d_mean, "p": p})

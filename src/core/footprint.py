@@ -76,3 +76,18 @@ def footprint_from_config(config) -> "EgoFootprint | None":
     return EgoFootprint.multi_circle(
         config.vehicle_length, config.vehicle_width, config.ego_footprint_n_circles
     )
+
+
+def effective_ego_radius(config) -> float:
+    """Collision radius the safety layers must reason with.
+
+    Single source for the "footprint circle radius in multi_circle mode,
+    ego_radius otherwise" rule shared by validate_config and the fail-safe
+    state machine. Falls back to ego_radius when the footprint parameters are
+    invalid (validate_config reports those errors separately).
+    """
+    try:
+        footprint = footprint_from_config(config)
+    except (ValueError, AttributeError):
+        return config.ego_radius
+    return footprint.radius if footprint is not None else config.ego_radius

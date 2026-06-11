@@ -66,7 +66,12 @@ class DashboardGenerator:
         # 4. Safety (Bottom-Left)
         ax_safe = fig.add_subplot(gs[2, 0])
         ax_safe.plot(times, min_dists, color='orange')
-        ax_safe.axhline(1.0, color='red', linestyle='--', label='Critical Threshold')
+        # Combined collision radius actually used by the safety metrics
+        # (footprint circle radius in multi_circle mode, ego_radius otherwise)
+        first = self.history[0]
+        ego_r = first.footprint.radius if first.footprint is not None else first.ego_radius
+        ax_safe.axhline(ego_r + first.ped_radius, color='red', linestyle='--',
+                        label='Critical Threshold')
         ax_safe.set_title("Minimum Distance")
         ax_safe.set_xlabel("Time [s]")
         ax_safe.set_ylabel("Distance [m]")

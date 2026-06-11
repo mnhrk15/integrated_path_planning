@@ -164,7 +164,8 @@ def run_one(scenario: str, condition: str, method: str, seed: int,
         "method": method,
         "seed": seed,
         "time_cap": float(config.total_time),
-        "goal_reached": bool(end_time < config.total_time - 1.5 * config.dt),
+        "termination": sim.termination_reason,
+        "goal_reached": sim.goal_reached,
         "time_s": end_time,
         "speed_ms": float(np.mean([r.ego_state.v for r in history])),
         "min_dist_m": float(m["min_dist"]),
@@ -238,7 +239,12 @@ def behavior_check(df: pd.DataFrame, repo: Path) -> list:
                 if cap_extended and ref["time_s"] >= default_cap - 0.15:
                     n_censored += 1
                     continue
-                max_diff = max(max_diff, max(abs(row[k] - ref[k]) for k in keys))
+                # inf vs inf (e.g. min_ttc with no TTC event in either run)
+                # means a perfect match; the raw subtraction would yield NaN
+                # and turn an identical run into a spurious FAIL.
+                diffs = (0.0 if row[k] == ref[k] else abs(row[k] - ref[k])
+                         for k in keys)
+                max_diff = max(max_diff, max(diffs))
                 n += 1
             status = "PASS" if max_diff == 0.0 else "FAIL"
             note = f", {n_censored} censored-anchor seeds excluded" if n_censored else ""
@@ -336,7 +342,12 @@ def build_report(df: pd.DataFrame, outdir: Path, repo: Path):
             mc = g[g["condition"] == cond]
             if c.empty or mc.empty:
                 continue
-            d_time = mc["time_s"].mean() - c["time_s"].mean()
+            # Collision runs end early and would read as "fast"; compare
+            # completion times over collision-free runs only.
+            c_t = c[c["collision_count"] == 0]["time_s"]
+            mc_t = mc[mc["collision_count"] == 0]["time_s"]
+            d_time = (mc_t.mean() - c_t.mean()
+                      if not (c_t.empty or mc_t.empty) else float("nan"))
             d_clear = mc["rect_clearance"].mean() - c["rect_clearance"].mean()
             goal_cell = ""
             if has_goal:
@@ -344,7 +355,7 @@ def build_report(df: pd.DataFrame, outdir: Path, repo: Path):
                              f"{int(mc['goal_reached'].sum())}/{len(mc)} |")
             lines.append(
                 f"| {cond} | {scen} | {method} | {d_time:+.2f} | "
-                f"{welch(mc['time_s'].values, c['time_s'].values):.2g} | "
+                f"{welch(mc_t.values, c_t.values):.2g} | "
                 f"{d_clear:+.3f} | "
                 f"{welch(mc['rect_clearance'].values, c['rect_clearance'].values):.2g} | "
                 f"{int((c['rect_violation_steps'] > 0).sum())}→"

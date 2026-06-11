@@ -41,8 +41,9 @@ def test_recovery_from_caution(config):
     sm = FailSafeStateMachine(config)
     sm.current_state = VehicleState.CAUTION
 
-    # Planner succeeds and safe enough (clearance above caution threshold)
-    output = sm.update(plan_found=True, safety_metrics={'clearance': 0.8})
+    # Planner succeeds and safe enough (clearance above the caution threshold,
+    # which is safe_distance_caution 2.0 - combined radius 1.2 = 0.8)
+    output = sm.update(plan_found=True, safety_metrics={'clearance': 1.5})
 
     assert sm.current_state == VehicleState.NORMAL
     assert output.state == VehicleState.NORMAL
@@ -60,6 +61,50 @@ def test_emergency_behavior(config):
     output = sm.update(plan_found=True, safety_metrics={'clearance': 3.8})
 
     assert sm.current_state == VehicleState.CAUTION # Recovers to CAUTION first
+
+def test_recovery_sequence_caution_needs_two_successes(config):
+    """After a fresh failure, CAUTION needs two successes to reach NORMAL.
+
+    The first success only clears consecutive_failures; the recovery branch
+    requires consecutive_failures == 0 at entry, so NORMAL is reached on the
+    second consecutive success (with sufficient clearance).
+    """
+    sm = FailSafeStateMachine(config)
+
+    sm.update(plan_found=False, safety_metrics={'clearance': 5.0})
+    assert sm.current_state == VehicleState.CAUTION
+
+    # First success: failure counter resets, but no recovery yet.
+    sm.update(plan_found=True, safety_metrics={'clearance': 5.0})
+    assert sm.current_state == VehicleState.CAUTION
+
+    # Second success with ample clearance: recover to NORMAL.
+    sm.update(plan_found=True, safety_metrics={'clearance': 5.0})
+    assert sm.current_state == VehicleState.NORMAL
+
+def test_recovery_sequence_emergency_to_normal(config):
+    """EMERGENCY recovers stepwise: EMERGENCY -> CAUTION -> NORMAL."""
+    sm = FailSafeStateMachine(config)
+
+    sm.update(plan_found=False, safety_metrics={'clearance': 5.0})
+    sm.update(plan_found=False, safety_metrics={'clearance': 5.0})
+    assert sm.current_state == VehicleState.EMERGENCY
+
+    # Success but pedestrian still inside the emergency radius: stay.
+    below_emergency = sm.clearance_emergency - 0.1
+    sm.update(plan_found=True, safety_metrics={'clearance': below_emergency})
+    assert sm.current_state == VehicleState.EMERGENCY
+
+    # Success with clearance above the emergency threshold: drop to CAUTION.
+    sm.update(plan_found=True, safety_metrics={'clearance': sm.clearance_emergency + 0.5})
+    assert sm.current_state == VehicleState.CAUTION
+
+    # The failure counter from the escalation is still set, so CAUTION needs
+    # one success to clear it and a second to recover to NORMAL.
+    sm.update(plan_found=True, safety_metrics={'clearance': sm.clearance_caution + 0.5})
+    assert sm.current_state == VehicleState.CAUTION
+    sm.update(plan_found=True, safety_metrics={'clearance': sm.clearance_caution + 0.5})
+    assert sm.current_state == VehicleState.NORMAL
 
 def test_clearance_thresholds_match_legacy_circle_semantics(config):
     # Legacy check compared centre distance against safe_distance; the

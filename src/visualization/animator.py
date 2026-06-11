@@ -247,7 +247,12 @@ class SimulationAnimator:
         self.ax_distance.set_ylabel('Distance [m]', fontsize=10)
         self.ax_distance.set_title('Min Distance to Pedestrians', fontsize=11, fontweight='bold')
         self.ax_distance.grid(True, alpha=0.3)
-        self.ax_distance.axhline(y=1.0, color='r', linestyle='--', 
+        # Combined collision radius actually used by the safety metrics
+        # (footprint circle radius in multi_circle mode, ego_radius otherwise)
+        first = self.results[0]
+        ego_r = (first.footprint.radius if first.footprint is not None
+                 else first.ego_radius)
+        self.ax_distance.axhline(y=ego_r + first.ped_radius, color='r', linestyle='--',
                                 linewidth=1, alpha=0.7, label='Safety threshold')
         self.ax_distance.legend(fontsize=9)
     

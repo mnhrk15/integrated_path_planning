@@ -9,6 +9,8 @@ in a Frenet Frame" (2010)
 """
 
 import copy
+from itertools import islice
+
 import numpy as np
 from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict
@@ -95,6 +97,10 @@ class FrenetPlanner:
     # the reference path (Frenet->Cartesian singular at 1 - kappa_ref * d = 0)
     SINGULARITY_EPS = 0.05
 
+    # Below this longitudinal speed [m/s] the spatial derivative d' = d_dot/s_dot
+    # is ill-defined; fall back to d' = d'' = 0 (heading on the reference tangent).
+    EPS_S_DOT = 1e-3
+
     def __init__(
         self,
         reference_path: CubicSpline2D,
@@ -157,6 +163,14 @@ class FrenetPlanner:
         # the single robot_radius circle at the path point.
         self.footprint = kwargs.get("footprint", None)
 
+        # Ego curvature for the Frenet initial conditions: curvature at index 1
+        # of the previously adopted path (the simulator advances to index 1).
+        # Kept unchanged on a failed plan — the ego has not moved, so the
+        # same-step escalation retry must see the same curvature. The simulator
+        # calls reset_ego_curvature() when it applies the straight-line
+        # emergency stop instead.
+        self._last_kappa = 0.0
+
         logger.info(f"Frenet Planner initialized with dt={dt}s, "
                    f"max_speed={max_speed}m/s, max_accel={max_accel}m/s², "
                    f"robot_radius={robot_radius}m, obstacle_radius={obstacle_radius}m, "
@@ -218,8 +232,19 @@ class FrenetPlanner:
             logger.debug(f"Found valid path with cost {best_path.cost:.2f}")
         else:
             logger.warning("No valid path found")
-        
+
+        if best_path is not None and len(best_path.c) > 1:
+            self._last_kappa = float(best_path.c[1])
+
         return best_path
+
+    def reset_ego_curvature(self):
+        """Reset the cached ego curvature (the ego is moving straight).
+
+        Called by the simulator after a straight-line emergency stop, where the
+        previously adopted path's curvature no longer describes the ego motion.
+        """
+        self._last_kappa = 0.0
     
     def _cartesian_to_frenet_state(
         self, 
@@ -246,17 +271,19 @@ class FrenetPlanner:
             s_condition, d_condition = self.converter.cartesian_to_frenet(
                 rs, rx, ry, rtheta, rkappa, rdkappa,
                 ego_state.x, ego_state.y, ego_state.v, ego_state.a,
-                ego_state.yaw, 0.0  # Assume curvature is 0 for simplicity
+                ego_state.yaw, self._last_kappa
             )
-            
-            return FrenetState(
-                s=s_condition[0],
-                s_d=s_condition[1],
-                s_dd=s_condition[2],
-                d=d_condition[0],
-                d_d=d_condition[1],
-                d_dd=d_condition[2]
-            )
+
+            # cartesian_to_frenet returns Apollo-convention lateral derivatives
+            # taken w.r.t. arc length (d' = dd/ds), but the lateral quintic is
+            # built on the time grid, so convert to time derivatives here:
+            # d_dot = d'*s_dot (= v*sin(delta_theta)), d_ddot = d''*s_dot^2 + d'*s_ddot.
+            s, s_d, s_dd = s_condition
+            d, d_p, d_pp = d_condition
+            d_d = d_p * s_d
+            d_dd = d_pp * s_d ** 2 + d_p * s_dd
+
+            return FrenetState(s=s, s_d=s_d, s_dd=s_dd, d=d, d_d=d_d, d_dd=d_dd)
         except Exception as e:
             logger.error(f"Error converting to Frenet frame: {e}")
             return None
@@ -277,8 +304,13 @@ class FrenetPlanner:
         """
         frenet_paths = []
         
-        # Sample different time horizons (use instance variables instead of module constants)
-        for Ti in np.arange(self.min_t, self.max_t, self.dt):
+        # Sample different time horizons, inclusive of max_t. Floor (not
+        # round) so the grid never overshoots max_t when (max_t - min_t) is
+        # not an integer multiple of dt: predictions only cover max_t, and a
+        # longer horizon would be collision-checked against clamped, stale
+        # obstacle samples.
+        n_ti = int((self.max_t - self.min_t) / self.dt + 1e-9)
+        for Ti in self.min_t + np.arange(n_ti + 1) * self.dt:
             time_cache = self._build_time_cache(Ti)
             tv_values = np.arange(
                 target_speed - self.d_t_s * self.n_s_sample,
@@ -289,7 +321,10 @@ class FrenetPlanner:
             if tv_values.size == 0:
                 continue
 
-            di_values = np.arange(-self.max_road_width, self.max_road_width, self.d_road_w)
+            # Symmetric lateral grid centred on the reference line: always
+            # contains d = 0 exactly and never exceeds the road half-width.
+            n_side = int(self.max_road_width / self.d_road_w + 1e-9)
+            di_values = np.arange(-n_side, n_side + 1) * self.d_road_w
             if di_values.size == 0:
                 continue
 
@@ -406,7 +441,10 @@ class FrenetPlanner:
         time: float
     ) -> "TimeCache":
         """Precompute time powers and coefficient inverses for vectorized evaluation."""
-        t = np.arange(0.0, time, self.dt)
+        # Inclusive grid: the terminal point t = time carries the boundary
+        # conditions (d(Ti) = di, s_d(Ti) = tv) and the terminal costs.
+        n_steps = int(round(time / self.dt))
+        t = np.arange(n_steps + 1) * self.dt
         t2 = t * t
         t3 = t2 * t
         t4 = t2 * t2
@@ -598,9 +636,23 @@ class FrenetPlanner:
         i_dkappa = self.csp.calc_curvature_rate(all_s)
 
         # 3. Batch conversion
-        # CoordinateConverter.frenet_to_cartesian is now vectorized
+        # CoordinateConverter.frenet_to_cartesian is now vectorized.
+        # The lateral arrays hold time derivatives (d_dot, d_ddot) while
+        # frenet_to_cartesian expects spatial ones: d' = d_dot/s_dot,
+        # d'' = (d_ddot - d'*s_ddot)/s_dot^2. Near standstill the ratio is
+        # ill-defined, so fall back to d' = d'' = 0 (heading aligned with the
+        # reference tangent); the continuity guard in _check_paths covers the rest.
+        moving = np.abs(all_s_d) > self.EPS_S_DOT
+        safe_s_d = np.where(moving, all_s_d, 1.0)
+        d_prime = np.where(moving, all_d_d / safe_s_d, 0.0)
+        d_pprime = np.where(
+            moving,
+            (all_d_dd - d_prime * all_s_dd) / (safe_s_d * safe_s_d),
+            0.0
+        )
+
         s_condition = (all_s, all_s_d, all_s_dd)
-        d_condition = (all_d, all_d_d, all_d_dd)
+        d_condition = (all_d, d_prime, d_pprime)
 
         try:
              x, y, theta, kappa, v, a = self.converter.frenet_to_cartesian(
@@ -652,26 +704,28 @@ class FrenetPlanner:
             nan_mask = np.isnan(x_segment)
             
             if np.any(nan_mask):
-                # Find first NaN index
-                first_nan_idx = np.argmax(nan_mask)
-                
-                # If first point is NaN, whole path is invalid/empty for global coords
-                if first_nan_idx == 0:
-                    fp.x = []
-                    fp.y = []
-                    fp.yaw = []
-                    fp.c = []
-                    fp.v = []
-                    fp.a = []
-                else:
-                    # Truncate valid portion
-                    # Convert to list for assignment
-                    fp.x = x_segment[:first_nan_idx].tolist()
-                    fp.y = y[cursor:end_index][:first_nan_idx].tolist()
-                    fp.yaw = theta[cursor:end_index][:first_nan_idx].tolist()
-                    fp.c = kappa[cursor:end_index][:first_nan_idx].tolist()
-                    fp.v = v[cursor:end_index][:first_nan_idx].tolist()
-                    fp.a = a[cursor:end_index][:first_nan_idx].tolist()
+                first_nan_idx = int(np.argmax(nan_mask))
+
+                # Truncate the valid prefix in lockstep across the Cartesian
+                # AND Frenet arrays, so every kept sample is covered by the
+                # constraint and collision checks (no unchecked tail) and
+                # len(x) == len(t) holds for every emitted path. A path needs
+                # at least indices 0 and 1 to be executable (the simulator
+                # advances to index 1); shorter ones are emptied entirely so
+                # the failure reaches the state machine instead of a
+                # degenerate "successful" plan. Note: fp.cost was computed on
+                # the un-truncated profile, so terminal-cost terms refer to
+                # the original horizon end.
+                keep = first_nan_idx if first_nan_idx >= 2 else 0
+                fp.x = x_segment[:keep].tolist()
+                fp.y = y[cursor:end_index][:keep].tolist()
+                fp.yaw = theta[cursor:end_index][:keep].tolist()
+                fp.c = kappa[cursor:end_index][:keep].tolist()
+                fp.v = v[cursor:end_index][:keep].tolist()
+                fp.a = a[cursor:end_index][:keep].tolist()
+                for name in ("t", "s", "s_d", "s_dd", "s_ddd",
+                             "d", "d_d", "d_dd", "d_ddd"):
+                    setattr(fp, name, getattr(fp, name)[:keep])
             else:
                 # No NaNs, copy full reference
                 fp.x = x_segment.tolist()
@@ -728,6 +782,12 @@ class FrenetPlanner:
             if len(fp.x) == 0:
                 continue
 
+            # Defensive guard: every constraint below assumes the Cartesian and
+            # Frenet arrays describe the same samples. _calc_global_paths keeps
+            # them in lockstep; reject externally constructed paths that don't.
+            if len(fp.x) != len(fp.t):
+                continue
+
             # Drop paths carrying non-finite kinematics: NaN compares False
             # against every limit below and would silently pass all checks.
             if not (np.all(np.isfinite(fp.v)) and np.all(np.isfinite(fp.a))
@@ -744,11 +804,15 @@ class FrenetPlanner:
                 if np.max(step_len) > max(c_max_speed, self.max_speed) * self.dt * 3.0:
                     continue
 
-            # Check speed limit (use generator expression for early termination)
-            if any(v > c_max_speed for v in fp.v):
+            # Check speed/acceleration limits from index 1 on: index 0 is the
+            # current state, which the planner cannot change; rejecting on it
+            # would discard all candidates whenever a tightened limit (e.g.
+            # CAUTION max_speed, or CAUTION max_accel right after an emergency
+            # brake at 2x max_accel) lies below the present value and force a
+            # needless EMERGENCY escalation.
+            if any(v > c_max_speed for v in islice(fp.v, 1, None)):
                 path_dict['max_speed_error'].append(fp)
-            # Check acceleration limit (use generator expression for early termination)
-            elif any(abs(a) > c_max_accel for a in fp.a):
+            elif any(abs(a) > c_max_accel for a in islice(fp.a, 1, None)):
                 path_dict['max_accel_error'].append(fp)
             # Check curvature limit (use generator expression for early termination)
             elif any(abs(c) > c_max_curvature for c in fp.c):

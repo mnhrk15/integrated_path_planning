@@ -34,10 +34,13 @@ def resolve_model_path(config, method: str):
     model_name = original_path.name
     new_dir = "models/sgan-models" if method == "lstm" else "models/sgan-p-models"
     new_path = Path(new_dir) / model_name
-    if new_path.exists():
-        config.sgan_model_path = str(new_path)
-    else:
-        logger.warning(f"Model {new_path} not found, using {original_path}")
+    if not new_path.exists():
+        # Falling back to the original path would silently run e.g. 'lstm' on
+        # pooled weights; the predictor would then reject it on every step.
+        raise FileNotFoundError(
+            f"Model for method '{method}' not found: {new_path} "
+            f"(run scripts/download_sgan_models.py)")
+    config.sgan_model_path = str(new_path)
 
 
 def run_single(scenario_path: str, method: str, seed: int,
@@ -49,9 +52,12 @@ def run_single(scenario_path: str, method: str, seed: int,
     config.visualization_enabled = False
     if v0_randomization:
         config.sfm_v0_randomization = True
-    resolve_model_path(config, method)
 
     try:
+        # Inside the try: a missing model directory must count as a failed
+        # run (loud, non-fatal) instead of aborting the whole campaign and
+        # discarding every completed row.
+        resolve_model_path(config, method)
         simulator = IntegratedSimulator(config)
         history = simulator.run()
         metrics = calculate_aggregate_metrics(
@@ -62,13 +68,18 @@ def run_single(scenario_path: str, method: str, seed: int,
         )
         total_time = history[-1].time
         avg_speed = float(np.mean([r.ego_state.v for r in history]))
+        # inf means "no TTC event in the whole run"; keep it out of the mean
+        # (NaN is skipped by pandas aggregation) instead of poisoning it.
+        min_ttc = metrics["min_ttc"]
+        min_ttc = round(min_ttc, 4) if np.isfinite(min_ttc) else np.nan
         return {
             "method": method.upper(),
             "seed": seed,
+            "termination": simulator.termination_reason,
             "time_s": round(total_time, 2),
             "speed_ms": round(avg_speed, 3),
             "min_dist_m": round(metrics["min_dist"], 4),
-            "min_ttc_s": round(metrics["min_ttc"], 4),
+            "min_ttc_s": min_ttc,
             "collision_count": metrics["collision_count"],
             "ade": round(metrics["ade"], 4),
             "fde": round(metrics["fde"], 4),
@@ -100,10 +111,25 @@ def generate_latex_table(summary: pd.DataFrame) -> str:
         if has_nll else ""
     )
     nll_header = " & NLL (nats)" if has_nll else ""
+    # Derive the run counts from the summary so the caption never claims more
+    # runs than actually succeeded (failed runs are dropped upstream). When
+    # the stochastic methods completed unequal counts, spell them out per
+    # method instead of overstating with a single number.
+    n_by_method = {row["method"]: int(row["n_runs"]) for _, row in summary.iterrows()}
+    stoch_counts = {m: n for m, n in n_by_method.items() if m in ("LSTM", "SGAN")}
+    if len(set(stoch_counts.values())) > 1:
+        n_text = "/".join(f"{n} ({m})" for m, n in sorted(stoch_counts.items()))
+        runs_text = f"over {n_text} runs"
+    else:
+        runs_text = f"over {next(iter(stoch_counts.values()), 0)} runs"
+    if n_by_method.get("CV", 1) > 1:
+        runs_caption = f"mean $\\pm$ std {runs_text}"
+    else:
+        runs_caption = f"mean $\\pm$ std {runs_text} for LSTM/SGAN; CV is deterministic"
     lines = [
         r"\begin{table}[t]",
         r"  \centering",
-        r"  \caption{Benchmark results (mean $\pm$ std over 20 runs for LSTM/SGAN; CV is deterministic). Bold values indicate the best mean in each column. ADE: best-of-$N$ displacement error; P-ADE: error of the single predicted trajectory consumed by the planner." + nll_caption + r"}",
+        r"  \caption{Benchmark results (" + runs_caption + r"). Bold values indicate the best mean in each column. ADE: best-of-$N$ displacement error; P-ADE: error of the single predicted trajectory consumed by the planner." + nll_caption + r"}",
         r"  \label{tab:benchmark}",
         r"  \footnotesize",
         r"  \setlength{\tabcolsep}{3pt}",
@@ -202,6 +228,7 @@ def main():
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    failed_runs = []
     if args.table_only:
         csv_path = output_dir / "all_runs.csv"
         if not csv_path.exists():
@@ -218,6 +245,8 @@ def main():
                              v0_randomization=args.v0_randomization)
             if row:
                 all_rows.append(row)
+            else:
+                failed_runs.append(("cv", i))
 
         # LSTM & SGAN: stochastic — n_runs each
         for method in ["lstm", "sgan"]:
@@ -228,6 +257,16 @@ def main():
                                  v0_randomization=args.v0_randomization)
                 if row:
                     all_rows.append(row)
+                else:
+                    failed_runs.append((method, i))
+
+        if failed_runs:
+            # Hard seeds failing silently would bias the safety statistics
+            # toward the optimistic side; make the loss loud (the run still
+            # writes its outputs, but exits non-zero at the end).
+            logger.error(
+                f"{len(failed_runs)} run(s) failed and are excluded from the "
+                f"aggregate: {failed_runs}")
 
         # Save raw data
         df = pd.DataFrame(all_rows)
@@ -288,6 +327,9 @@ def main():
     latex_path.write_text(latex)
     logger.info(f"LaTeX table saved to {latex_path}")
     print(f"\nLaTeX table:\n{latex}")
+
+    if failed_runs:
+        sys.exit(f"{len(failed_runs)} run(s) failed: {failed_runs}")
 
 
 if __name__ == "__main__":

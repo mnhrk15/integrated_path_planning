@@ -112,8 +112,10 @@ class SimulationConfig:
     n_s_sample: int = 1  # Sampling number of target speed
     
     # State machine parameters
-    state_machine_safe_distance_caution: float = 0.5  # Safe distance for CAUTION->NORMAL transition [m]
-    state_machine_safe_distance_emergency: float = 1.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+    # Safe distances are centre-to-pedestrian; they must exceed the combined
+    # collision radius (validated) so the recovery clearance gate is meaningful.
+    state_machine_safe_distance_caution: float = 2.0  # Safe distance for CAUTION->NORMAL transition [m]
+    state_machine_safe_distance_emergency: float = 3.0  # Safe distance for EMERGENCY->CAUTION transition [m]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
     state_machine_caution_curvature_multiplier: float = 1.2  # Curvature multiplier in CAUTION state
     state_machine_caution_speed_multiplier: float = 0.8  # Speed multiplier in CAUTION state
@@ -230,6 +232,19 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"state_machine_safe_distance_caution must be non-negative, got {config.state_machine_safe_distance_caution}")
     if config.state_machine_safe_distance_emergency < 0:
         errors.append(f"state_machine_safe_distance_emergency must be non-negative, got {config.state_machine_safe_distance_emergency}")
+    # The recovery thresholds are centre-to-pedestrian distances; values at or
+    # below the combined collision radius make the clearance gate vacuous
+    # (recovery would trigger even while overlapping the pedestrian).
+    from ..core.footprint import effective_ego_radius
+    combined_collision_radius = effective_ego_radius(config) + config.ped_radius
+    if config.state_machine_safe_distance_caution <= combined_collision_radius:
+        errors.append(
+            f"state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution}) must be > "
+            f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
+    if config.state_machine_safe_distance_emergency <= combined_collision_radius:
+        errors.append(
+            f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) must be > "
+            f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
     if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
         errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
     if config.state_machine_caution_accel_multiplier <= 0:
@@ -250,6 +265,14 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"obstacle_radius must be positive, got {config.obstacle_radius}")
     if config.collision_margin_inflation < 1.0:
         errors.append(f"collision_margin_inflation must be >= 1.0, got {config.collision_margin_inflation}")
+    # chance_epsilon >= 1.0 would accept paths colliding under every sample
+    # (max_violations = floor(eps * n) = n); catch percent-style typos early.
+    if not (0.0 <= config.chance_epsilon < 1.0):
+        errors.append(f"chance_epsilon must be in [0.0, 1.0), got {config.chance_epsilon}")
+    if config.distribution_aware_planning and config.num_samples < 2:
+        errors.append(
+            f"distribution_aware_planning requires num_samples >= 2 (got {config.num_samples}); "
+            "with a single sample the planner silently degrades to single-sample planning")
     if config.ego_footprint not in ("circle", "multi_circle"):
         errors.append(f"ego_footprint must be 'circle' or 'multi_circle', got {config.ego_footprint!r}")
     if config.vehicle_length <= 0:

@@ -105,6 +105,21 @@ class TrajectoryPredictor:
             device=self.device,
         )
 
+        # The method must match the checkpoint architecture: 'lstm' is SGAN
+        # w/o pooling (sgan-models), 'sgan' is the pooled variant
+        # (sgan-p-models). Swapping weights at runtime is impossible (the
+        # decoder input dimension differs), so fail fast before loading the
+        # state dict. The generator has already canonicalized pooling_type
+        # ('none' -> None), so compare against that single source.
+        if self.method == 'lstm' and self.generator.pooling_type is not None:
+            raise ValueError(
+                f"method='lstm' requires a no-pooling checkpoint (models/sgan-models), "
+                f"but {model_path} has pooling_type={self.generator.pooling_type!r}")
+        if self.method == 'sgan' and self.generator.pooling_type != 'pool_net':
+            raise ValueError(
+                f"method='sgan' requires a pool_net checkpoint (models/sgan-p-models), "
+                f"but {model_path} has pooling_type={self.generator.pooling_type!r}")
+
         # Load state dict (required)
         if "g_state" in checkpoint:
             self.generator.load_state_dict(checkpoint["g_state"])
@@ -154,18 +169,10 @@ class TrajectoryPredictor:
             obs_traj_rel = obs_traj_rel.to(self.device)
             seq_start_end = seq_start_end.to(self.device)
             
-            # Generate prediction
-            if self.method == 'lstm':
-                # Temporarily disable pooling
-                original_pooling = self.generator.pooling_type
-                try:
-                    self.generator.pooling_type = None
-                    pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
-                finally:
-                    self.generator.pooling_type = original_pooling
-            else:
-                # Normal SGAN
-                pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
+            # Generate prediction. load_model has already verified that the
+            # checkpoint architecture matches self.method, so no runtime
+            # pooling toggle is needed (or possible).
+            pred_traj_rel = self.generator(obs_traj, obs_traj_rel, seq_start_end)
 
             # Convert to absolute coordinates: [pred_len, n_peds, 2]
             pred_traj = relative_to_abs(pred_traj_rel, obs_traj[-1]).cpu().numpy()
