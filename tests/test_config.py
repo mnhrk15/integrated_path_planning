@@ -79,7 +79,9 @@ def test_trigger_clearance_hysteresis_enforced():
         state_machine_trigger_clearance_caution=1.5,
         state_machine_recover_clearance_caution=2.0,
         state_machine_recover_clearance_emergency=2.0))
-    # Trigger at/above the recovery gate would oscillate NORMAL<->CAUTION.
+    # Trigger at/above the recovery gate: the gate would have no effect at
+    # the commanded speed (the speed-aware runtime gate then dominates), so
+    # validate rejects the configuration as self-inconsistent.
     with pytest.raises(ConfigValidationError, match="hysteresis"):
         validate_config(_minimal_config(
             state_machine_trigger_clearance_caution=2.0,
@@ -123,7 +125,8 @@ def test_trigger_time_headway_validation():
         state_machine_trigger_time_headway=0.2,
         state_machine_recover_clearance_caution=2.0,
         state_machine_recover_clearance_emergency=2.0))
-    # 0.5 + 0.3 * 6.66 = 2.5 >= gate 2.0 -> NORMAL<->CAUTION would oscillate.
+    # 0.5 + 0.3 * 6.66 = 2.5 >= gate 2.0 -> the gate is ineffective at the
+    # commanded speed; rejected as self-inconsistent.
     with pytest.raises(ConfigValidationError, match="hysteresis"):
         validate_config(_minimal_config(
             state_machine_trigger_clearance_caution=0.5,

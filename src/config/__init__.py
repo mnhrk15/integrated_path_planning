@@ -313,7 +313,9 @@ def validate_config(config: SimulationConfig) -> None:
         # Hysteresis sanity check: the trigger evaluated at the CAUTION
         # target speed (caution_speed_multiplier * ego_target_speed) must sit
         # strictly below the CAUTION->NORMAL recovery gate, otherwise the
-        # configuration can never recover at its own commanded speed. The
+        # configured gate has no effect at the commanded speed (recovery is
+        # then governed entirely by the trigger threshold, which demands a
+        # larger clearance than the gate the user asked for). The
         # runtime recovery gate is additionally speed-aware
         # (clearance > max(gate, trigger + headway * v)), which prevents an
         # immediate re-trigger at ANY speed; this static check only rejects
