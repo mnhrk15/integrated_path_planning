@@ -534,30 +534,11 @@ class IntegratedSimulator:
         dynamic_obstacles_distribution: Optional[np.ndarray] = None
     ):
         """Execute planning cycle with state machine management and retries."""
-        # Get planner config from state machine
-        sm_output = self.state_machine._get_planner_config()
-        
-        target_speed = sm_output.target_speed_override
-        if target_speed is None:
-            target_speed = self.config.ego_target_speed
-            
-        t_start = time.perf_counter()
-        planned_path = self.planner.plan(
-            self.ego_state,
-            static_obstacles,
-            dynamic_obstacles,
-            target_speed=target_speed,
-            constraint_overrides=sm_output.constraint_overrides,
-            dynamic_obstacles_distribution=dynamic_obstacles_distribution,
-            max_stop_distance=sm_output.max_stop_distance
-        )
-        t_plan = time.perf_counter() - t_start
-        
-        # Update State Machine based on result
-        found_path = (planned_path is not None)
-        
-        # Compute current safety metrics for state machine update (before moving)
-        # Use the shared function to avoid code duplication
+        # Compute current safety metrics FIRST (before planning) so the
+        # state machine's safe-speed envelope and stop directive consume the
+        # clearance of this step, not the one observed a step earlier
+        # (~0.75 m stale at S1 speeds). Use the shared function to avoid
+        # code duplication.
         if ped_state is not None:
             current_metrics = compute_safety_metrics_static(
                 ego_state=self.ego_state,
@@ -576,6 +557,30 @@ class IntegratedSimulator:
         # or behind must not force the hardest rate.
         self._last_clearance = current_metrics.get(
             'clearance_ahead', current_metrics.get('clearance', float('inf')))
+
+        # Let the state machine observe the fresh metrics (no transition yet)
+        # before deriving the planner config from them.
+        self.state_machine.observe_metrics(current_metrics)
+        sm_output = self.state_machine._get_planner_config()
+
+        target_speed = sm_output.target_speed_override
+        if target_speed is None:
+            target_speed = self.config.ego_target_speed
+
+        t_start = time.perf_counter()
+        planned_path = self.planner.plan(
+            self.ego_state,
+            static_obstacles,
+            dynamic_obstacles,
+            target_speed=target_speed,
+            constraint_overrides=sm_output.constraint_overrides,
+            dynamic_obstacles_distribution=dynamic_obstacles_distribution,
+            max_stop_distance=sm_output.max_stop_distance
+        )
+        t_plan = time.perf_counter() - t_start
+
+        # Update State Machine based on result
+        found_path = (planned_path is not None)
 
         # Update SM (ego speed feeds the speed-dependent preventive trigger)
         new_sm_output = self.state_machine.update(
@@ -743,7 +748,7 @@ class IntegratedSimulator:
         self.ego_state = copy.copy(self.ego_state)
 
         # Adaptive emergency deceleration: brake only as hard as needed to
-        # stop envelope_standoff short of the nearest pedestrian, bounded to
+        # stop just short of the nearest pedestrian ahead, bounded to
         # [ego_max_accel, ego_emergency_decel]. The lower bound keeps the
         # stop at least as firm as the planner's ordinary braking; the upper
         # bound is the legacy slam rate (None = 2x ego_max_accel). The
@@ -762,7 +767,12 @@ class IntegratedSimulator:
             stop_room = max(clearance - 0.2, 0.05)
             required = self.ego_state.v ** 2 / (2.0 * stop_room)
         else:
-            required = 0.0
+            # Planning failed yet no pedestrian shows up ahead: the threat is
+            # something the forward clearance cannot see — a pedestrian
+            # converging from the side (the typical all-candidates-rejected
+            # trigger) or a static obstacle. With no distance to size the
+            # braking to, fall back to the legacy maximum rate.
+            required = emergency_cap
         max_dec = float(np.clip(required, self.config.ego_max_accel, emergency_cap))
 
         # The vehicle keeps moving while braking: integrate kinematics with the

@@ -231,6 +231,16 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ego_max_accel must be positive, got {config.ego_max_accel}")
     if config.ego_emergency_decel is not None and config.ego_emergency_decel <= 0:
         errors.append(f"ego_emergency_decel must be positive, got {config.ego_emergency_decel}")
+    if (config.ego_emergency_decel is not None
+            and config.ego_emergency_decel < config.ego_max_accel):
+        # The adaptive emergency stop clips the required rate to
+        # [ego_max_accel, ego_emergency_decel]; an inverted range silently
+        # degenerates (np.clip with lo > hi always returns hi) and the
+        # "emergency" stop would be SOFTER than ordinary planner braking.
+        errors.append(
+            f"ego_emergency_decel ({config.ego_emergency_decel}) must be >= "
+            f"ego_max_accel ({config.ego_max_accel}): the emergency stop rate "
+            f"is clipped to [ego_max_accel, ego_emergency_decel]")
     if config.ego_max_curvature <= 0:
         errors.append(f"ego_max_curvature must be positive, got {config.ego_max_curvature}")
     if config.ego_max_lat_accel <= 0:
@@ -300,13 +310,16 @@ def validate_config(config: SimulationConfig) -> None:
     if headway < 0:
         errors.append(f"state_machine_trigger_time_headway must be non-negative, got {headway}")
     if trigger >= 0 and headway >= 0 and (trigger > 0 or headway > 0):
-        # Hysteresis: the preventive trigger must sit strictly below the
-        # CAUTION->NORMAL recovery gate or NORMAL<->CAUTION oscillates. With
-        # the speed-dependent headway term the trigger that matters is the
-        # one at the speed the vehicle recovers at, i.e. the CAUTION target
-        # speed (caution_speed_multiplier * ego_target_speed): right after a
-        # CAUTION->NORMAL transition the clearance is just above the recovery
-        # gate, so the trigger evaluated at that speed must be below the gate.
+        # Hysteresis sanity check: the trigger evaluated at the CAUTION
+        # target speed (caution_speed_multiplier * ego_target_speed) must sit
+        # strictly below the CAUTION->NORMAL recovery gate, otherwise the
+        # configuration can never recover at its own commanded speed. The
+        # runtime recovery gate is additionally speed-aware
+        # (clearance > max(gate, trigger + headway * v)), which prevents an
+        # immediate re-trigger at ANY speed; this static check only rejects
+        # configurations that are inconsistent at their nominal speed.
+        # (Do not tighten this to ego_target_speed: the tuned S1/S3 scenarios
+        # rely on the envelope keeping the post-recovery speed low.)
         effective_rec_caution = (
             rec_caution if rec_caution is not None
             else config.state_machine_safe_distance_caution - combined_collision_radius)

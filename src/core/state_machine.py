@@ -69,9 +69,12 @@ class FailSafeStateMachine:
         # RSS-style speed dependence: threshold = trigger_clearance +
         # time_headway * ego_speed, so fast approaches escalate earlier while
         # the low-speed regime stays quiet. Both 0.0 disables the trigger
-        # (legacy behavior). validate_config enforces that the threshold at
-        # the CAUTION recovery speed stays below clearance_caution so
-        # NORMAL<->CAUTION cannot oscillate.
+        # (legacy behavior). Hysteresis: the CAUTION->NORMAL recovery requires
+        # clearance > max(clearance_caution, trigger threshold at the current
+        # speed), so a recovery can never be re-triggered on the very next
+        # step at the same speed and clearance. (validate_config additionally
+        # sanity-checks the threshold at the CAUTION target speed against the
+        # recovery gate.)
         self.trigger_clearance_caution = getattr(
             config, 'state_machine_trigger_clearance_caution', 0.0
         )
@@ -92,6 +95,24 @@ class FailSafeStateMachine:
         self._last_clearance = float('inf')
         self._last_clearance_ahead = float('inf')
 
+    def observe_metrics(self, safety_metrics: Dict[str, Any]) -> None:
+        """Record the latest safety metrics without changing state.
+
+        Called at the start of each planning cycle so that the safe-speed
+        envelope and the stop directive consume the clearance of the CURRENT
+        step; without this, the first plan() of a step would run on the
+        clearance observed one step earlier (~0.75 m stale at S1 speeds).
+        update() refreshes the same fields again, which is a no-op when the
+        metrics object is the same.
+
+        Args:
+            safety_metrics: Dictionary of safety metrics ('clearance',
+                'clearance_ahead', ...)
+        """
+        self._last_clearance = safety_metrics.get('clearance', float('inf'))
+        self._last_clearance_ahead = safety_metrics.get(
+            'clearance_ahead', self._last_clearance)
+
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any],
                ego_speed: float = 0.0) -> StateMachineOutput:
         """Update state based on current iteration results.
@@ -105,9 +126,7 @@ class FailSafeStateMachine:
         Returns:
             StateMachineOutput containing the new state and planner constraints
         """
-        self._last_clearance = safety_metrics.get('clearance', float('inf'))
-        self._last_clearance_ahead = safety_metrics.get(
-            'clearance_ahead', self._last_clearance)
+        self.observe_metrics(safety_metrics)
         trigger_threshold = (self.trigger_clearance_caution
                              + self.trigger_time_headway * max(ego_speed, 0.0))
         # Default transitions
@@ -130,9 +149,13 @@ class FailSafeStateMachine:
         elif self.current_state == VehicleState.CAUTION:
             if plan_found and self.consecutive_failures == 0:
                 # If we recovered and planned successfully, try to go back to NORMAL
-                # Check safety clearance from config
+                # Check safety clearance from config. The gate is speed-aware:
+                # recovery also requires the clearance to exceed the preventive
+                # trigger threshold AT THE CURRENT SPEED, otherwise the very
+                # next NORMAL step would re-trigger CAUTION (chattering in the
+                # band gate < clearance < trigger + headway * v).
                 clearance = safety_metrics.get('clearance', float('inf'))
-                if clearance > self.clearance_caution:
+                if clearance > max(self.clearance_caution, trigger_threshold):
                     self.current_state = VehicleState.NORMAL
             elif not plan_found:
                 # If CAUTION extraction failed, escalate

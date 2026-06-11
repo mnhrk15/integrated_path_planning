@@ -101,6 +101,17 @@ def test_ego_emergency_decel_validation():
         validate_config(_minimal_config(ego_emergency_decel=-2.0))
 
 
+def test_ego_emergency_decel_must_cover_max_accel():
+    # The adaptive stop clips to [ego_max_accel, ego_emergency_decel]; an
+    # inverted range (np.clip lo > hi always returns hi) must be rejected.
+    cfg = _minimal_config(ego_emergency_decel=1.0)
+    assert cfg.ego_emergency_decel < cfg.ego_max_accel
+    with pytest.raises(ConfigValidationError, match="must be >= "):
+        validate_config(cfg)
+    # Equality is the degenerate-but-consistent boundary: allowed.
+    validate_config(_minimal_config(ego_emergency_decel=2.0, ego_max_accel=2.0))
+
+
 def test_trigger_time_headway_validation():
     with pytest.raises(ConfigValidationError, match="time_headway"):
         validate_config(_minimal_config(state_machine_trigger_time_headway=-0.1))

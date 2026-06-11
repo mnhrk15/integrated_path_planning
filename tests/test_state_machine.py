@@ -192,6 +192,39 @@ def test_speed_dependent_trigger_scales_with_ego_speed(config):
     assert sm.current_state == VehicleState.CAUTION
     assert sm.consecutive_failures == 0
 
+def test_recovery_gate_is_speed_aware(config):
+    """CAUTION->NORMAL recovery must clear the preventive trigger at the
+    CURRENT speed too: in the band gate < clearance < trigger + headway*v
+    the machine stays in CAUTION (recovering there would re-trigger on the
+    very next step); the same clearance recovers once the speed — hence the
+    trigger threshold — drops, or the clearance exceeds the threshold."""
+    config.state_machine_trigger_clearance_caution = 1.0
+    config.state_machine_trigger_time_headway = 0.25
+    config.state_machine_recover_clearance_caution = 2.0
+    config.state_machine_recover_clearance_emergency = 2.0
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+
+    # v=6: threshold = 1.0 + 0.25*6 = 2.5 > gate 2.0; clearance 2.2 sits in
+    # the former chatter band -> must stay in CAUTION.
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.2}, ego_speed=6.0)
+    assert sm.current_state == VehicleState.CAUTION
+
+    # Same speed but clearance above the threshold: recover.
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.6}, ego_speed=6.0)
+    assert sm.current_state == VehicleState.NORMAL
+    # No immediate re-trigger at the recovery speed/clearance.
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.6}, ego_speed=6.0)
+    assert sm.current_state == VehicleState.NORMAL
+
+    # Back in CAUTION: the band clearance recovers once the speed drops
+    # (threshold 1.0 + 0.25*2 = 1.5 < gate 2.0 < clearance 2.2).
+    sm.current_state = VehicleState.CAUTION
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.2}, ego_speed=2.0)
+    assert sm.current_state == VehicleState.NORMAL
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.2}, ego_speed=2.0)
+    assert sm.current_state == VehicleState.NORMAL
+
 def test_headway_only_trigger_quiet_at_standstill(config):
     """With clearance offset 0 the trigger is purely speed-proportional:
     silent at standstill, active when moving."""
@@ -293,6 +326,25 @@ def test_envelope_caps_normal_target_too(config):
     sm.update(plan_found=True, safety_metrics={'clearance': 50.0})
     out = sm._get_planner_config()
     assert out.target_speed_override is None
+
+def test_observe_metrics_refreshes_envelope_without_transition(config):
+    """The planning cycle observes the current step's metrics before the
+    first plan() (observe_metrics): the envelope must consume the fresh
+    clearance immediately, and the observation alone must not change state."""
+    config.ego_target_speed = 6.0
+    config.state_machine_envelope_decel = 1.2
+    config.state_machine_envelope_standoff = 1.0
+    sm = FailSafeStateMachine(config)
+
+    # Previous step saw ample clearance: no cap.
+    sm.update(plan_found=True, safety_metrics={'clearance': 50.0})
+    assert sm._get_planner_config().target_speed_override is None
+
+    # A much smaller clearance arrives at the start of the next cycle.
+    sm.observe_metrics({'clearance': 3.0})
+    out = sm._get_planner_config()
+    assert sm.current_state == VehicleState.NORMAL  # observation != transition
+    assert out.target_speed_override == pytest.approx((2 * 1.2 * 2.0) ** 0.5)
 
 def test_stop_distance_directive_inside_standoff(config):
     """Inside the standoff (v_env = 0) CAUTION must also bound WHERE the
