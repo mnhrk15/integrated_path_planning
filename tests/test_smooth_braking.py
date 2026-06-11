@@ -101,13 +101,44 @@ class TestEmergencyDecelConfig:
         return sim
 
     def test_config_key_overrides_legacy_rate(self):
+        # Clearance unknown (inf) -> required rate 0 -> clipped to the lower
+        # bound ego_max_accel; with a tiny clearance the rate saturates at
+        # the configured cap.
         sim = self.make_sim(ego_emergency_decel=3.0)
+        sim._last_clearance = 0.1
         sim._apply_emergency_stop(old_a=0.0)
         assert sim.ego_state.v == pytest.approx(5.0 - 3.0 * 0.1)
         assert sim.ego_state.a == pytest.approx(-3.0)
 
     def test_none_falls_back_to_twice_max_accel(self):
         sim = self.make_sim(ego_emergency_decel=None)
+        sim._last_clearance = 0.1
         sim._apply_emergency_stop(old_a=0.0)
         assert sim.ego_state.v == pytest.approx(5.0 - 4.0 * 0.1)
+        assert sim.ego_state.a == pytest.approx(-4.0)
+
+    def test_adaptive_rate_uses_available_clearance(self):
+        """v=5, clearance 5.55, standoff 0.5 -> required = 25/(2*5.05) = 2.475:
+        between the bounds, so the stop is exactly as firm as needed."""
+        sim = self.make_sim(ego_emergency_decel=4.0)
+        sim._last_clearance = 5.55
+        sim._apply_emergency_stop(old_a=0.0)
+        assert sim.ego_state.a == pytest.approx(-25.0 / (2 * 5.05))
+
+    def test_adaptive_rate_floors_at_max_accel_when_room_is_ample(self):
+        """Plenty of room (or no pedestrians at all): never brake softer
+        than the planner's ordinary limit."""
+        sim = self.make_sim(ego_emergency_decel=4.0)
+        sim._last_clearance = 100.0
+        sim._apply_emergency_stop(old_a=0.0)
+        assert sim.ego_state.a == pytest.approx(-2.0)
+
+        sim = self.make_sim(ego_emergency_decel=4.0)  # clearance unset -> inf
+        sim._apply_emergency_stop(old_a=0.0)
+        assert sim.ego_state.a == pytest.approx(-2.0)
+
+    def test_adaptive_rate_saturates_at_cap_when_room_is_gone(self):
+        sim = self.make_sim(ego_emergency_decel=4.0)
+        sim._last_clearance = 0.2
+        sim._apply_emergency_stop(old_a=0.0)
         assert sim.ego_state.a == pytest.approx(-4.0)

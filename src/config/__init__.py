@@ -131,6 +131,17 @@ class SimulationConfig:
     # headway term makes fast approaches escalate earlier without making the
     # low-speed regime noisy; 0.0 keeps the legacy fixed-clearance trigger.
     state_machine_trigger_time_headway: float = 0.0  # tau [s]
+    # Safe-speed envelope in CAUTION: the planner target speed is capped at
+    # v_env = sqrt(2 * envelope_decel * (clearance - envelope_standoff)), the
+    # speed from which a constant envelope_decel braking stops envelope_standoff
+    # short of the nearest pedestrian. "The closer, the slower" is thereby
+    # enforced at planning time, so braking starts while a comfortable stop is
+    # still possible instead of slamming when the same-time collision check
+    # finally bites; near standstill (clearance <= standoff) the target is 0,
+    # which also removes the restart-and-slam jitter while pedestrians pass.
+    # envelope_decel 0.0 disables the envelope (legacy fixed CAUTION target).
+    state_machine_envelope_decel: float = 0.0  # comfortable braking rate [m/s²]
+    state_machine_envelope_standoff: float = 0.5  # stop margin to clearance [m]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
     state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
@@ -308,6 +319,16 @@ def validate_config(config: SimulationConfig) -> None:
                 f"({trigger_at_recovery:.2f} = {trigger} + {headway} * {recovery_speed:.2f}) "
                 f"must be < the effective CAUTION recovery clearance "
                 f"({effective_rec_caution:.2f}) for hysteresis")
+    if config.state_machine_envelope_decel < 0:
+        errors.append(f"state_machine_envelope_decel must be non-negative, got {config.state_machine_envelope_decel}")
+    if config.state_machine_envelope_standoff < 0:
+        errors.append(f"state_machine_envelope_standoff must be non-negative, got {config.state_machine_envelope_standoff}")
+    if config.state_machine_envelope_decel > config.ego_max_accel:
+        # The envelope promises a stop at envelope_decel; a rate above the
+        # planner's acceleration limit cannot be realised by any candidate.
+        logger.warning(
+            f"state_machine_envelope_decel ({config.state_machine_envelope_decel}) exceeds "
+            f"ego_max_accel ({config.ego_max_accel}); the promised stop is not plannable")
     if config.state_machine_caution_accel_multiplier <= 0:
         errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
     if config.state_machine_caution_curvature_multiplier <= 0:
@@ -505,6 +526,8 @@ def save_config(config: SimulationConfig, config_path: str):
         'state_machine_recover_clearance_emergency': config.state_machine_recover_clearance_emergency,
         'state_machine_trigger_clearance_caution': config.state_machine_trigger_clearance_caution,
         'state_machine_trigger_time_headway': config.state_machine_trigger_time_headway,
+        'state_machine_envelope_decel': config.state_machine_envelope_decel,
+        'state_machine_envelope_standoff': config.state_machine_envelope_standoff,
         'state_machine_safe_distance_caution': config.state_machine_safe_distance_caution,
         'state_machine_safe_distance_emergency': config.state_machine_safe_distance_emergency,
         'state_machine_caution_accel_multiplier': config.state_machine_caution_accel_multiplier,

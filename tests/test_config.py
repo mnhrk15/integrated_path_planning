@@ -127,6 +127,15 @@ def test_trigger_time_headway_validation():
             state_machine_recover_clearance_emergency=2.0))
 
 
+def test_envelope_keys_validation():
+    validate_config(_minimal_config(state_machine_envelope_decel=1.2,
+                                    state_machine_envelope_standoff=0.5))
+    with pytest.raises(ConfigValidationError, match="envelope_decel"):
+        validate_config(_minimal_config(state_machine_envelope_decel=-0.1))
+    with pytest.raises(ConfigValidationError, match="envelope_standoff"):
+        validate_config(_minimal_config(state_machine_envelope_standoff=-0.1))
+
+
 def test_state_machine_safe_distances_must_exceed_combined_radius():
     # Defaults (caution 2.0 / emergency 3.0) exceed ego 1.0 + ped 0.2.
     validate_config(_minimal_config())

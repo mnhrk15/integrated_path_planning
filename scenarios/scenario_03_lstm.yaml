@@ -48,6 +48,14 @@ state_machine_trigger_time_headway: 0.8
 state_machine_recover_clearance_caution: 3.5
 state_machine_recover_clearance_emergency: 3.5
 state_machine_caution_speed_multiplier: 0.6
+# Safe-speed envelope (CAUTION): target speed capped at
+# sqrt(2 * 1.2 * (clearance - 0.5)) — the speed a comfortable 1.2 m/s²
+# braking can stop from, 0.5 m short of the nearest pedestrian. Braking
+# starts while a gentle stop is still possible instead of slamming when
+# the same-time collision check finally bites; at standstill it also
+# suppresses the restart-and-slam jitter while pedestrians pass.
+state_machine_envelope_decel: 1.2
+state_machine_envelope_standoff: 0.5
 
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2

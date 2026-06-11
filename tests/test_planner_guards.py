@@ -24,6 +24,10 @@ def make_emergency_sim(v=5.0, yaw=0.0):
     sim.config = SimpleNamespace(ego_max_accel=2.0, dt=0.1)
     sim.time = 1.0
     sim.ego_state = EgoVehicleState(x=10.0, y=-3.0, yaw=yaw, v=v, a=0.0)
+    # Pedestrian right at the standoff: the adaptive emergency stop then
+    # saturates at the legacy 2x-max-accel rate these kinematics tests assume
+    # (rate adaptation itself is covered in test_smooth_braking.py).
+    sim._last_clearance = 0.1
     return sim
 
 

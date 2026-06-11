@@ -225,6 +225,56 @@ def test_recover_clearance_keys_override_legacy(config):
     assert sm.clearance_caution == pytest.approx(1.3)
     assert sm.clearance_emergency == pytest.approx(1.7)
 
+def test_envelope_caps_caution_target_by_clearance(config):
+    """Safe-speed envelope: in CAUTION the target speed is capped at
+    sqrt(2 * a_env * (clearance - standoff)) — the closer, the slower."""
+    config.ego_target_speed = 6.0
+    config.state_machine_envelope_decel = 1.2
+    config.state_machine_envelope_standoff = 0.5
+    # Keep the machine in CAUTION throughout (recovery gates out of reach).
+    config.state_machine_recover_clearance_caution = 100.0
+    config.state_machine_recover_clearance_emergency = 100.0
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+
+    # Clearance 2.0: v_env = sqrt(2*1.2*1.5) = 1.897 < 0.8*6.0 = 4.8.
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.0})
+    out = sm._get_planner_config()
+    assert out.state == VehicleState.CAUTION
+    assert out.target_speed_override == pytest.approx((2 * 1.2 * 1.5) ** 0.5)
+
+    # At/below the standoff the target reaches 0 (no restart attempts).
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.4})
+    out = sm._get_planner_config()
+    assert out.target_speed_override == pytest.approx(0.0)
+
+    # With ample clearance the ordinary CAUTION target applies unchanged.
+    sm.update(plan_found=True, safety_metrics={'clearance': 50.0})
+    out = sm._get_planner_config()
+    assert out.target_speed_override == pytest.approx(
+        6.0 * config.state_machine_caution_speed_multiplier)
+
+def test_envelope_disabled_by_default(config):
+    """envelope_decel 0 (default): legacy fixed CAUTION target even when the
+    pedestrian is very close."""
+    config.ego_target_speed = 6.0
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.1})
+    out = sm._get_planner_config()
+    assert out.target_speed_override == pytest.approx(
+        6.0 * config.state_machine_caution_speed_multiplier)
+
+def test_envelope_handles_missing_clearance(config):
+    """No clearance observed yet (inf): the envelope must not constrain."""
+    config.ego_target_speed = 6.0
+    config.state_machine_envelope_decel = 1.2
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+    out = sm._get_planner_config()  # before any update()
+    assert out.target_speed_override == pytest.approx(
+        6.0 * config.state_machine_caution_speed_multiplier)
+
 def test_caution_slows_target_speed(config):
     """CAUTION must lower the planner target speed, not only the speed cap."""
     config.ego_target_speed = 6.0

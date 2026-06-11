@@ -381,6 +381,7 @@ class IntegratedSimulator:
         self.ego_state.state = self.state_machine.current_state
         self._replan_attempts = 0  # Track re-planning attempts to prevent infinite loops
         self._max_replan_attempts = 3  # Maximum number of re-planning attempts per step
+        self._last_clearance = float('inf')  # Set each step; feeds the adaptive emergency stop
 
         # Persistent prediction failures must surface instead of silently
         # degrading to constant-velocity fallback on every step (C-2).
@@ -567,7 +568,11 @@ class IntegratedSimulator:
         else:
             current_metrics = {'min_distance': float('inf'), 'collision': False,
                                'ttc': float('inf'), 'clearance': float('inf')}
-        
+
+        # Remember the clearance for the adaptive emergency stop (the
+        # emergency-stop path runs after planning, outside this method).
+        self._last_clearance = current_metrics.get('clearance', float('inf'))
+
         # Update SM (ego speed feeds the speed-dependent preventive trigger)
         new_sm_output = self.state_machine.update(
             found_path, current_metrics, ego_speed=self.ego_state.v
@@ -732,10 +737,26 @@ class IntegratedSimulator:
         # recorded SimulationResult, and in-place edits would rewrite history.
         self.ego_state = copy.copy(self.ego_state)
 
-        # Use emergency deceleration (config key; None = legacy 2x max accel)
-        max_dec = getattr(self.config, 'ego_emergency_decel', None)
-        if max_dec is None:
-            max_dec = self.config.ego_max_accel * 2.0
+        # Adaptive emergency deceleration: brake only as hard as needed to
+        # stop envelope_standoff short of the nearest pedestrian, bounded to
+        # [ego_max_accel, ego_emergency_decel]. The lower bound keeps the
+        # stop at least as firm as the planner's ordinary braking; the upper
+        # bound is the legacy slam rate (None = 2x ego_max_accel). The
+        # clearance shrinks every step while a pedestrian keeps closing, so
+        # the required rate is re-derived each step and saturates at the cap
+        # — the fail-safe stopping guarantee is unchanged, only the severity
+        # adapts to the room actually available.
+        emergency_cap = getattr(self.config, 'ego_emergency_decel', None)
+        if emergency_cap is None:
+            emergency_cap = self.config.ego_max_accel * 2.0
+        clearance = getattr(self, '_last_clearance', float('inf'))
+        standoff = getattr(self.config, 'state_machine_envelope_standoff', 0.5)
+        if np.isfinite(clearance):
+            stop_room = max(clearance - standoff, 0.05)
+            required = self.ego_state.v ** 2 / (2.0 * stop_room)
+        else:
+            required = 0.0
+        max_dec = float(np.clip(required, self.config.ego_max_accel, emergency_cap))
 
         # The vehicle keeps moving while braking: integrate kinematics with the
         # pre-deceleration speed so the braking distance is not silently zero.

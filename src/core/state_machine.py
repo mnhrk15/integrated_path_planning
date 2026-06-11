@@ -3,6 +3,7 @@
 This module defines the states and transitions for the vehicle's fail-safe behavior.
 """
 
+import math
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
@@ -70,6 +71,14 @@ class FailSafeStateMachine:
         self.trigger_time_headway = getattr(
             config, 'state_machine_trigger_time_headway', 0.0
         )
+        # Safe-speed envelope in CAUTION: cap the planner target at the speed
+        # from which a constant envelope_decel braking stops envelope_standoff
+        # short of the nearest pedestrian ("the closer, the slower"). 0.0
+        # disables the envelope (legacy fixed CAUTION target). The clearance
+        # is taken from the most recent update() call.
+        self.envelope_decel = getattr(config, 'state_machine_envelope_decel', 0.0)
+        self.envelope_standoff = getattr(config, 'state_machine_envelope_standoff', 0.5)
+        self._last_clearance = float('inf')
 
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any],
                ego_speed: float = 0.0) -> StateMachineOutput:
@@ -84,6 +93,7 @@ class FailSafeStateMachine:
         Returns:
             StateMachineOutput containing the new state and planner constraints
         """
+        self._last_clearance = safety_metrics.get('clearance', float('inf'))
         trigger_threshold = (self.trigger_clearance_caution
                              + self.trigger_time_headway * max(ego_speed, 0.0))
         # Default transitions
@@ -147,9 +157,21 @@ class FailSafeStateMachine:
             # cannot be traded against risk.
             accel_mult = getattr(self.config, 'state_machine_caution_accel_multiplier', 1.5)
             speed_mult = getattr(self.config, 'state_machine_caution_speed_multiplier', 0.8)
+            target_speed = self.config.ego_target_speed * speed_mult
+            if self.envelope_decel > 0.0:
+                # Safe-speed envelope: never faster than what a comfortable
+                # constant braking can stop from, envelope_standoff short of
+                # the nearest pedestrian. Approaching a conflict the target
+                # ramps down continuously (braking starts while a gentle stop
+                # is still possible); at clearance <= standoff it reaches 0,
+                # which also suppresses restart attempts while pedestrians
+                # pass, and rises smoothly again as the clearance reopens.
+                stop_room = max(self._last_clearance - self.envelope_standoff, 0.0)
+                v_env = math.sqrt(2.0 * self.envelope_decel * stop_room)
+                target_speed = min(target_speed, v_env)
             return StateMachineOutput(
                 state=VehicleState.CAUTION,
-                target_speed_override=self.config.ego_target_speed * speed_mult,
+                target_speed_override=target_speed,
                 constraint_overrides={
                     "max_accel": self.config.ego_max_accel * accel_mult,
                     "max_speed": self.config.ego_max_speed * speed_mult
