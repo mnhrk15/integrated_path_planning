@@ -90,6 +90,50 @@ class TestBrakeCandidates:
         assert max(path.x) < 16.0 - 1.0
 
 
+class TestStopDistanceDirective:
+    def test_filter_keeps_only_short_stops(self):
+        """With max_stop_distance the lazy long-horizon stops are rejected
+        and a short brake-ladder stop is selected instead — the planner can
+        no longer procrastinate a commanded stop."""
+        planner = make_straight_planner(max_accel=8.0)
+        ego = EgoVehicleState(x=10.0, y=0.0, yaw=0.0, v=3.0, a=0.0)
+
+        lazy = planner.plan(ego, np.empty((0, 2)), np.empty((0, 0, 2)),
+                            target_speed=0.0)
+        committed = planner.plan(ego, np.empty((0, 2)), np.empty((0, 0, 2)),
+                                 target_speed=0.0, max_stop_distance=2.5)
+
+        assert lazy is not None and committed is not None
+        lazy_travel = lazy.s[-1] - lazy.s[0]
+        committed_travel = committed.s[-1] - committed.s[0]
+        # The unconstrained stop stretches over the whole horizon (~ v*T/2),
+        # the committed one must fit the room.
+        assert lazy_travel > 4.0
+        assert committed_travel <= 2.5 + 1e-6
+        assert abs(committed.v[-1]) < 0.15
+        assert planner.last_check_stats['stop_distance_error'] > 0
+
+    def test_infeasible_room_fails_plan(self):
+        """No candidate can stop within 5 cm from 5 m/s: the directive must
+        surface as a planning failure (fail-safe escalation), not silently
+        pick a path that overruns the room."""
+        planner = make_straight_planner(max_accel=8.0)
+        ego = EgoVehicleState(x=10.0, y=0.0, yaw=0.0, v=5.0, a=0.0)
+        path = planner.plan(ego, np.empty((0, 2)), np.empty((0, 0, 2)),
+                            target_speed=0.0, max_stop_distance=0.05)
+        assert path is None
+
+    def test_hold_in_place_when_already_stopped(self):
+        """Nearly stopped with a tiny room: the hold-in-place candidate
+        passes, so waiting at standstill does not become a planning failure."""
+        planner = make_straight_planner(max_accel=8.0)
+        ego = EgoVehicleState(x=10.0, y=0.0, yaw=0.0, v=0.05, a=0.0)
+        path = planner.plan(ego, np.empty((0, 2)), np.empty((0, 0, 2)),
+                            target_speed=0.0, max_stop_distance=0.3)
+        assert path is not None
+        assert (path.s[-1] - path.s[0]) <= 0.3 + 1e-6
+
+
 class TestEmergencyDecelConfig:
     def make_sim(self, **config_kwargs):
         sim = IntegratedSimulator.__new__(IntegratedSimulator)
@@ -118,12 +162,12 @@ class TestEmergencyDecelConfig:
         assert sim.ego_state.a == pytest.approx(-4.0)
 
     def test_adaptive_rate_uses_available_clearance(self):
-        """v=5, clearance 5.55, standoff 0.5 -> required = 25/(2*5.05) = 2.475:
+        """v=5, clearance 5.2, margin 0.2 -> required = 25/(2*5.0) = 2.5:
         between the bounds, so the stop is exactly as firm as needed."""
         sim = self.make_sim(ego_emergency_decel=4.0)
-        sim._last_clearance = 5.55
+        sim._last_clearance = 5.2
         sim._apply_emergency_stop(old_a=0.0)
-        assert sim.ego_state.a == pytest.approx(-25.0 / (2 * 5.05))
+        assert sim.ego_state.a == pytest.approx(-2.5)
 
     def test_adaptive_rate_floors_at_max_accel_when_room_is_ample(self):
         """Plenty of room (or no pedestrians at all): never brake softer

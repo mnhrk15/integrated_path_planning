@@ -548,7 +548,8 @@ class IntegratedSimulator:
             dynamic_obstacles,
             target_speed=target_speed,
             constraint_overrides=sm_output.constraint_overrides,
-            dynamic_obstacles_distribution=dynamic_obstacles_distribution
+            dynamic_obstacles_distribution=dynamic_obstacles_distribution,
+            max_stop_distance=sm_output.max_stop_distance
         )
         t_plan = time.perf_counter() - t_start
         
@@ -611,7 +612,8 @@ class IntegratedSimulator:
                 dynamic_obstacles,
                 target_speed=target_speed,
                 constraint_overrides=new_sm_output.constraint_overrides,
-                dynamic_obstacles_distribution=dynamic_obstacles_distribution
+                dynamic_obstacles_distribution=dynamic_obstacles_distribution,
+                max_stop_distance=new_sm_output.max_stop_distance
             )
             t_plan += time.perf_counter() - t_start
 
@@ -750,9 +752,11 @@ class IntegratedSimulator:
         if emergency_cap is None:
             emergency_cap = self.config.ego_max_accel * 2.0
         clearance = getattr(self, '_last_clearance', float('inf'))
-        standoff = getattr(self.config, 'state_machine_envelope_standoff', 0.5)
         if np.isfinite(clearance):
-            stop_room = max(clearance - standoff, 0.05)
+            # 0.2 m last-resort margin — intentionally smaller than the
+            # planner envelope standoff: the emergency stop may legitimately
+            # come to rest closer to the pedestrian than the planner would.
+            stop_room = max(clearance - 0.2, 0.05)
             required = self.ego_state.v ** 2 / (2.0 * stop_room)
         else:
             required = 0.0

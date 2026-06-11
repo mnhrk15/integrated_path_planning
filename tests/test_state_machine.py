@@ -254,6 +254,59 @@ def test_envelope_caps_caution_target_by_clearance(config):
     assert out.target_speed_override == pytest.approx(
         6.0 * config.state_machine_caution_speed_multiplier)
 
+def test_envelope_caps_normal_target_too(config):
+    """The envelope is a state-independent cap: it must bind already in
+    NORMAL (pre-slowdown), not only after the CAUTION transition — against a
+    converging pedestrian, braking that starts at the transition is too late."""
+    config.ego_target_speed = 6.0
+    config.state_machine_envelope_decel = 1.2
+    config.state_machine_envelope_standoff = 1.0
+    sm = FailSafeStateMachine(config)
+
+    # Clearance ample (no trigger configured): stays NORMAL but capped.
+    sm.update(plan_found=True, safety_metrics={'clearance': 3.0})
+    out = sm._get_planner_config()
+    assert out.state == VehicleState.NORMAL
+    assert out.target_speed_override == pytest.approx((2 * 1.2 * 2.0) ** 0.5)
+
+    # Far away the cap exceeds the nominal target: no override.
+    sm.update(plan_found=True, safety_metrics={'clearance': 50.0})
+    out = sm._get_planner_config()
+    assert out.target_speed_override is None
+
+def test_stop_distance_directive_inside_standoff(config):
+    """Inside the standoff (v_env = 0) CAUTION must also bound WHERE the
+    stop happens; outside, no directive is issued."""
+    config.state_machine_envelope_decel = 1.2
+    config.state_machine_envelope_standoff = 1.0
+    config.state_machine_recover_clearance_caution = 100.0
+    config.state_machine_recover_clearance_emergency = 100.0
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.8})
+    out = sm._get_planner_config()
+    assert out.target_speed_override == pytest.approx(0.0)
+    assert out.max_stop_distance == pytest.approx(0.8 - 0.2)
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 3.0})
+    out = sm._get_planner_config()
+    assert out.max_stop_distance is None
+
+def test_stop_distance_directive_in_emergency(config):
+    """EMERGENCY commits the planned stop to the available room (only with
+    the envelope enabled, to preserve legacy scenario behaviour)."""
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.EMERGENCY
+    sm._last_clearance = 1.5
+    assert sm._get_planner_config().max_stop_distance is None  # envelope off
+
+    config.state_machine_envelope_decel = 1.2
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.EMERGENCY
+    sm._last_clearance = 1.5
+    assert sm._get_planner_config().max_stop_distance == pytest.approx(1.3)
+
 def test_envelope_disabled_by_default(config):
     """envelope_decel 0 (default): legacy fixed CAUTION target even when the
     pedestrian is very close."""

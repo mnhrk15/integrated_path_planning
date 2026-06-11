@@ -47,14 +47,16 @@ state_machine_trigger_time_headway: 0.65
 state_machine_recover_clearance_caution: 3.5
 state_machine_recover_clearance_emergency: 3.5
 state_machine_caution_speed_multiplier: 0.6
-# Safe-speed envelope (CAUTION): target speed capped at
-# sqrt(2 * 1.2 * (clearance - 0.5)) — the speed a comfortable 1.2 m/s²
-# braking can stop from, 0.5 m short of the nearest pedestrian. Braking
+# Safe-speed envelope (all states): target speed capped at
+# sqrt(2 * 2.0 * (clearance - 0.3)) — "the closer, the slower". Braking
 # starts while a gentle stop is still possible instead of slamming when
 # the same-time collision check finally bites; at standstill it also
-# suppresses the restart-and-slam jitter while pedestrians pass.
-state_machine_envelope_decel: 1.2
-state_machine_envelope_standoff: 0.5
+# suppresses the restart-and-slam jitter while pedestrians pass. Tuned
+# weaker than S3 (decel 2.0, standoff 0.3): the rush-hour crossing keeps
+# the omnidirectional clearance small for most of the run, and a stricter
+# envelope makes the ego crawl below 1 m/s and time out (verified).
+state_machine_envelope_decel: 2.0
+state_machine_envelope_standoff: 0.3
 
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2

@@ -75,9 +75,13 @@ LOW_SPEED_DYAW_CAP = 0.1
 # 1.5*v/T deceleration, so the state-dependent acceleration check naturally
 # gates how hard a stop each fail-safe state may adopt (NORMAL only the
 # gentle ones, EMERGENCY also the short ones).
-BRAKE_T_MIN = 1.0  # Shortest brake horizon [s]
+BRAKE_T_MIN = 0.5  # Shortest brake horizon [s]
 BRAKE_T_STEP = 0.5  # Ladder spacing [s]
 BRAKE_MIN_SPEED = 0.1  # Below this speed [m/s] brake candidates add nothing
+
+# Terminal speed below which a candidate counts as "stopped" for the
+# stop-within-distance directive (see plan(max_stop_distance=...)).
+STOP_SPEED_EPS = 0.15
 
 # Lateral acceleration limit v^2*kappa [m/s^2] for candidate paths. Urban
 # "acceptable" bound (comfort studies place comfortable at ~1.8-2.0 and
@@ -227,7 +231,8 @@ class FrenetPlanner:
         dynamic_obstacles: Optional[np.ndarray] = None,
         target_speed: float = TARGET_SPEED,
         constraint_overrides: Optional[Dict[str, float]] = None,
-        dynamic_obstacles_distribution: Optional[np.ndarray] = None
+        dynamic_obstacles_distribution: Optional[np.ndarray] = None,
+        max_stop_distance: Optional[float] = None
     ) -> Optional[FrenetPath]:
         """Plan optimal trajectory from current state.
 
@@ -241,6 +246,12 @@ class FrenetPlanner:
                 [n_samples, n_obs, time_steps, 2]. When provided, collision checking
                 is chance-constrained over the samples (see ``chance_epsilon``) instead
                 of using the single representative ``dynamic_obstacles``.
+            max_stop_distance: When set, only candidates that come to rest
+                within this travel distance [m] are eligible (stop-within-
+                distance directive from the fail-safe layer). Without it a
+                commanded stop procrastinates: the jerk-optimal selection
+                re-stretches the stop over the whole horizon on every replan
+                and the actual braking never starts.
 
         Returns:
             Best trajectory, or None if no valid trajectory found
@@ -271,6 +282,9 @@ class FrenetPlanner:
             dynamic_obstacles_distribution
         )
 
+        if max_stop_distance is not None:
+            self._apply_stop_distance_filter(fp_dict, max_stop_distance)
+
         # Rejection breakdown of the last planning call. Diagnostic only (e.g.
         # to verify predictions actually constrain the chosen path); never
         # feeds back into planning.
@@ -288,6 +302,26 @@ class FrenetPlanner:
             self._last_kappa = float(best_path.c[1])
 
         return best_path
+
+    @staticmethod
+    def _apply_stop_distance_filter(fp_dict: dict, max_stop_distance: float) -> None:
+        """Keep only candidates that come to rest within the given travel.
+
+        Moves non-compliant paths from 'ok' to 'stop_distance_error' (so the
+        rejection shows up in last_check_stats). Travel is measured along the
+        Frenet arc (s[-1] - s[0]); "at rest" means the terminal Cartesian
+        speed is below STOP_SPEED_EPS.
+        """
+        kept, rejected = [], []
+        for fp in fp_dict['ok']:
+            stops = (len(fp.v) > 0 and abs(fp.v[-1]) <= STOP_SPEED_EPS)
+            travel = float(fp.s[-1] - fp.s[0]) if len(fp.s) > 0 else 0.0
+            if stops and travel <= max_stop_distance + 1e-6:
+                kept.append(fp)
+            else:
+                rejected.append(fp)
+        fp_dict['ok'] = kept
+        fp_dict['stop_distance_error'] = rejected
 
     def reset_ego_curvature(self):
         """Reset the cached ego curvature (the ego is moving straight).

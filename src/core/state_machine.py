@@ -18,6 +18,13 @@ class StateMachineOutput:
     state: VehicleState
     target_speed_override: Optional[float] = None
     constraint_overrides: Optional[Dict[str, float]] = None
+    # When set, the planner must come to a stop within this travel distance
+    # [m]: candidates that stop later (or not at all) are rejected. Issued
+    # when the safe-speed envelope demands a full stop, to defeat the
+    # receding-horizon procrastination of jerk-optimal stop profiles (each
+    # replan otherwise re-stretches the stop over the whole horizon and the
+    # actual braking never starts until the fail-safe slams).
+    max_stop_distance: Optional[float] = None
 
 class FailSafeStateMachine:
     """Manages vehicle state transitions based on planning results and safety metrics."""
@@ -144,9 +151,20 @@ class FailSafeStateMachine:
     def _get_planner_config(self) -> StateMachineOutput:
         """Generate planner configuration for the current state."""
         if self.current_state == VehicleState.NORMAL:
+            # The safe-speed envelope is a state-independent cap ("never
+            # faster than what a comfortable stop can handle"): applying it
+            # already in NORMAL starts the pre-slowdown several metres before
+            # the preventive trigger fires. Against a converging pedestrian
+            # the clearance can collapse at ~3 m/s, so braking that only
+            # starts at the CAUTION transition is physically too late for a
+            # gentle stop — the cap must bind while the gap is still wide.
+            target_override = None
+            v_env = self._envelope_speed()
+            if v_env is not None and v_env < self.config.ego_target_speed:
+                target_override = v_env
             return StateMachineOutput(
                 state=VehicleState.NORMAL,
-                target_speed_override=None, # Use default config
+                target_speed_override=target_override,
                 constraint_overrides=None
             )
             
@@ -158,24 +176,24 @@ class FailSafeStateMachine:
             accel_mult = getattr(self.config, 'state_machine_caution_accel_multiplier', 1.5)
             speed_mult = getattr(self.config, 'state_machine_caution_speed_multiplier', 0.8)
             target_speed = self.config.ego_target_speed * speed_mult
-            if self.envelope_decel > 0.0:
-                # Safe-speed envelope: never faster than what a comfortable
-                # constant braking can stop from, envelope_standoff short of
-                # the nearest pedestrian. Approaching a conflict the target
-                # ramps down continuously (braking starts while a gentle stop
-                # is still possible); at clearance <= standoff it reaches 0,
-                # which also suppresses restart attempts while pedestrians
-                # pass, and rises smoothly again as the clearance reopens.
-                stop_room = max(self._last_clearance - self.envelope_standoff, 0.0)
-                v_env = math.sqrt(2.0 * self.envelope_decel * stop_room)
+            max_stop_distance = None
+            v_env = self._envelope_speed()
+            if v_env is not None:
                 target_speed = min(target_speed, v_env)
+                if v_env <= 0.0:
+                    # Inside the standoff the envelope demands a full stop:
+                    # also bound WHERE the stop happens, or the jerk-optimal
+                    # selection keeps re-stretching the stop over the whole
+                    # horizon and never actually brakes.
+                    max_stop_distance = self._stop_room_to_pedestrian()
             return StateMachineOutput(
                 state=VehicleState.CAUTION,
                 target_speed_override=target_speed,
                 constraint_overrides={
                     "max_accel": self.config.ego_max_accel * accel_mult,
                     "max_speed": self.config.ego_max_speed * speed_mult
-                }
+                },
+                max_stop_distance=max_stop_distance
             )
 
         elif self.current_state == VehicleState.EMERGENCY:
@@ -191,7 +209,40 @@ class FailSafeStateMachine:
                 constraint_overrides={
                     "max_accel": self.config.ego_max_accel * accel_mult,
                     "max_lat_accel": getattr(self.config, 'ego_max_lat_accel', 3.0) * lat_mult
-                }
+                },
+                # Commit the planned stop to the available room too (same
+                # anti-procrastination as CAUTION; only with the envelope
+                # enabled so legacy scenarios keep their exact behaviour).
+                max_stop_distance=(self._stop_room_to_pedestrian()
+                                   if self.envelope_decel > 0.0 else None)
             )
             
         return StateMachineOutput(VehicleState.NORMAL)
+
+    def _envelope_speed(self) -> Optional[float]:
+        """Safe-speed envelope value for the last observed clearance.
+
+        v_env = sqrt(2 * envelope_decel * (clearance - standoff)): the speed
+        from which a constant envelope_decel braking stops envelope_standoff
+        short of the nearest pedestrian ("the closer, the slower"). The
+        target ramps down continuously while approaching a conflict, reaches
+        0 at clearance <= standoff (which also suppresses restart attempts
+        while pedestrians pass), and rises smoothly as the clearance reopens.
+        Returns None when the envelope is disabled or nothing was observed.
+        """
+        if self.envelope_decel <= 0.0 or not math.isfinite(self._last_clearance):
+            return None
+        stop_room = max(self._last_clearance - self.envelope_standoff, 0.0)
+        return math.sqrt(2.0 * self.envelope_decel * stop_room)
+
+    def _stop_room_to_pedestrian(self) -> Optional[float]:
+        """Travel distance within which a commanded stop must complete.
+
+        0.2 m last-resort margin to the nearest pedestrian (smaller than the
+        envelope standoff on purpose: when already inside the standoff the
+        vehicle may legitimately come to rest closer than the planner would
+        normally aim for). None when no pedestrian has been observed.
+        """
+        if not math.isfinite(self._last_clearance):
+            return None
+        return max(self._last_clearance - 0.2, 0.05)
