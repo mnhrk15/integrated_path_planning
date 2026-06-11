@@ -65,6 +65,20 @@ LOW_SPEED_LAT_SLIP_RATIO = 1.5
 LOW_SPEED_LAT_SLIP_FLOOR = 0.02
 LOW_SPEED_DYAW_CAP = 0.1
 
+# Dedicated brake-candidate ladder. The Ti x tv grid cannot stop in less
+# than min_t seconds (its shortest stop profile spans the full min_t
+# horizon), so when a same-time conflict materialises closer than that the
+# planner used to fail outright and hand braking to the fail-safe emergency
+# stop — a hard slam at the emergency rate. A handful of shorter smooth stop
+# profiles (one per horizon, lateral offset held) fills the missing 2-9 m
+# stopping range. A quartic stop from speed v over horizon T peaks at
+# 1.5*v/T deceleration, so the state-dependent acceleration check naturally
+# gates how hard a stop each fail-safe state may adopt (NORMAL only the
+# gentle ones, EMERGENCY also the short ones).
+BRAKE_T_MIN = 1.0  # Shortest brake horizon [s]
+BRAKE_T_STEP = 0.5  # Ladder spacing [s]
+BRAKE_MIN_SPEED = 0.1  # Below this speed [m/s] brake candidates add nothing
+
 # Lateral acceleration limit v^2*kappa [m/s^2] for candidate paths. Urban
 # "acceptable" bound (comfort studies place comfortable at ~1.8-2.0 and
 # unpleasant at >=4); the kinematic curvature limit alone does not prevent
@@ -350,7 +364,9 @@ class FrenetPlanner:
         for Ti in self.min_t + np.arange(n_ti + 1) * self.dt:
             time_cache = self._build_time_cache(Ti)
             # Terminal-speed grid: from a full stop up to the target speed
-            # (the upper side intentionally has no over-target candidates).
+            # (the upper side intentionally has no over-target candidates;
+            # n_s_sample is effectively unused since the grid spans the full
+            # range on its own).
             # Spanning down to 0 lets the planner yield SMOOTHLY: when the
             # fast candidates conflict with a prediction inside the horizon,
             # it can adopt a gentle deceleration/stop profile instead of
@@ -395,8 +411,62 @@ class FrenetPlanner:
                     )
                     fp.cost = self._calculate_cost(fp, target_speed)
                     frenet_paths.append(fp)
-        
+
+        frenet_paths.extend(self._generate_brake_candidates(frenet_state, target_speed))
+
         return frenet_paths
+
+    def _generate_brake_candidates(
+        self,
+        frenet_state: FrenetState,
+        target_speed: float
+    ) -> List[FrenetPath]:
+        """Short-horizon smooth stop profiles outside the Ti x tv grid.
+
+        One candidate per ladder horizon (BRAKE_T_MIN .. min_t, step
+        BRAKE_T_STEP), each a quartic stop with the lateral offset held at
+        the current value (brake in lane). After the stop the samples are
+        held at rest out to max_t so the same-time collision check covers
+        the full prediction horizon — a pedestrian reaching the stop point
+        after the stop still invalidates the candidate. Their cost carries
+        the full speed-deviation penalty, so they are only ever selected
+        when every faster candidate is rejected.
+        """
+        if frenet_state.s_d <= BRAKE_MIN_SPEED:
+            return []
+
+        candidates = []
+        n_total = int(round(self.max_t / self.dt)) + 1
+        t_full = np.arange(n_total) * self.dt
+        for ti_b in np.arange(BRAKE_T_MIN, self.min_t - 1e-9, BRAKE_T_STEP):
+            time_cache = self._build_time_cache(ti_b)
+            lon = self._build_longitudinal_profiles(
+                frenet_state, np.array([0.0]), ti_b, time_cache
+            )[0]
+            lat = self._build_lateral_profiles(
+                frenet_state, np.array([frenet_state.d]), ti_b, time_cache
+            )[0]
+            n_pad = n_total - len(lon.t)
+            if n_pad < 0:
+                continue
+
+            def hold(arr, pad_value):
+                return np.concatenate([arr, np.full(n_pad, pad_value)])
+
+            fp = FrenetPath(
+                t=t_full,
+                s=hold(lon.s, lon.s[-1]),
+                s_d=hold(lon.s_d, 0.0),
+                s_dd=hold(lon.s_dd, 0.0),
+                s_ddd=hold(lon.s_ddd, 0.0),
+                d=hold(lat.d, lat.d[-1]),
+                d_d=hold(lat.d_d, 0.0),
+                d_dd=hold(lat.d_dd, 0.0),
+                d_ddd=hold(lat.d_ddd, 0.0),
+            )
+            fp.cost = self._calculate_cost(fp, target_speed)
+            candidates.append(fp)
+        return candidates
     
     def _generate_longitudinal_trajectory(
         self,

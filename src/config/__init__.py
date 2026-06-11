@@ -68,6 +68,9 @@ class SimulationConfig:
     ego_target_speed: float = 8.33  # 30 km/h
     ego_max_speed: float = 13.89  # 50 km/h
     ego_max_accel: float = 2.0
+    # Deceleration of the last-resort emergency stop (planner found no path
+    # even in EMERGENCY) [m/s²]. None keeps the legacy ego_max_accel * 2.0.
+    ego_emergency_decel: Optional[float] = None
     ego_max_curvature: float = 0.2  # Passenger-car minimum turning radius ~5 m
     ego_max_lat_accel: float = 3.0  # Urban acceptable lateral acceleration v^2*kappa [m/s^2]
     ego_radius: float = 1.0
@@ -123,6 +126,11 @@ class SimulationConfig:
     state_machine_recover_clearance_caution: Optional[float] = None  # CAUTION->NORMAL clearance gate [m]
     state_machine_recover_clearance_emergency: Optional[float] = None  # EMERGENCY->CAUTION clearance gate [m]
     state_machine_trigger_clearance_caution: float = 0.0  # NORMAL->CAUTION preventive trigger clearance [m]
+    # RSS-style speed-dependent preventive trigger: NORMAL drops to CAUTION
+    # when clearance < trigger_clearance + time_headway * ego_speed. The
+    # headway term makes fast approaches escalate earlier without making the
+    # low-speed regime noisy; 0.0 keeps the legacy fixed-clearance trigger.
+    state_machine_trigger_time_headway: float = 0.0  # tau [s]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
     state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
@@ -210,6 +218,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ego_max_speed ({config.ego_max_speed}) must be >= ego_target_speed ({config.ego_target_speed})")
     if config.ego_max_accel <= 0:
         errors.append(f"ego_max_accel must be positive, got {config.ego_max_accel}")
+    if config.ego_emergency_decel is not None and config.ego_emergency_decel <= 0:
+        errors.append(f"ego_emergency_decel must be positive, got {config.ego_emergency_decel}")
     if config.ego_max_curvature <= 0:
         errors.append(f"ego_max_curvature must be positive, got {config.ego_max_curvature}")
     if config.ego_max_lat_accel <= 0:
@@ -273,18 +283,31 @@ def validate_config(config: SimulationConfig) -> None:
             f"state_machine_recover_clearance_emergency ({rec_emergency}) should be >= "
             f"state_machine_recover_clearance_caution ({rec_caution})")
     trigger = config.state_machine_trigger_clearance_caution
+    headway = config.state_machine_trigger_time_headway
     if trigger < 0:
         errors.append(f"state_machine_trigger_clearance_caution must be non-negative, got {trigger}")
-    elif trigger > 0:
+    if headway < 0:
+        errors.append(f"state_machine_trigger_time_headway must be non-negative, got {headway}")
+    if trigger >= 0 and headway >= 0 and (trigger > 0 or headway > 0):
         # Hysteresis: the preventive trigger must sit strictly below the
-        # CAUTION->NORMAL recovery gate or NORMAL<->CAUTION oscillates.
+        # CAUTION->NORMAL recovery gate or NORMAL<->CAUTION oscillates. With
+        # the speed-dependent headway term the trigger that matters is the
+        # one at the speed the vehicle recovers at, i.e. the CAUTION target
+        # speed (caution_speed_multiplier * ego_target_speed): right after a
+        # CAUTION->NORMAL transition the clearance is just above the recovery
+        # gate, so the trigger evaluated at that speed must be below the gate.
         effective_rec_caution = (
             rec_caution if rec_caution is not None
             else config.state_machine_safe_distance_caution - combined_collision_radius)
-        if trigger >= effective_rec_caution:
+        recovery_speed = (config.state_machine_caution_speed_multiplier
+                          * config.ego_target_speed)
+        trigger_at_recovery = trigger + headway * recovery_speed
+        if trigger_at_recovery >= effective_rec_caution:
             errors.append(
-                f"state_machine_trigger_clearance_caution ({trigger}) must be < the effective "
-                f"CAUTION recovery clearance ({effective_rec_caution:.2f}) for hysteresis")
+                f"preventive trigger at the CAUTION recovery speed "
+                f"({trigger_at_recovery:.2f} = {trigger} + {headway} * {recovery_speed:.2f}) "
+                f"must be < the effective CAUTION recovery clearance "
+                f"({effective_rec_caution:.2f}) for hysteresis")
     if config.state_machine_caution_accel_multiplier <= 0:
         errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
     if config.state_machine_caution_curvature_multiplier <= 0:
@@ -467,6 +490,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'ego_target_speed': config.ego_target_speed,
         'ego_max_speed': config.ego_max_speed,
         'ego_max_accel': config.ego_max_accel,
+        'ego_emergency_decel': config.ego_emergency_decel,
         'ego_max_curvature': config.ego_max_curvature,
         'ego_max_lat_accel': config.ego_max_lat_accel,
         'reference_waypoints_x': config.reference_waypoints_x,
@@ -480,6 +504,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'state_machine_recover_clearance_caution': config.state_machine_recover_clearance_caution,
         'state_machine_recover_clearance_emergency': config.state_machine_recover_clearance_emergency,
         'state_machine_trigger_clearance_caution': config.state_machine_trigger_clearance_caution,
+        'state_machine_trigger_time_headway': config.state_machine_trigger_time_headway,
         'state_machine_safe_distance_caution': config.state_machine_safe_distance_caution,
         'state_machine_safe_distance_emergency': config.state_machine_safe_distance_emergency,
         'state_machine_caution_accel_multiplier': config.state_machine_caution_accel_multiplier,

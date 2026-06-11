@@ -24,6 +24,7 @@ ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # Start from origin
 ego_target_speed: 6.0  # Target 6 m/s (~20 km/h)
 ego_max_speed: 10.0
 ego_max_accel: 2.0
+ego_emergency_decel: 4.0  # Last-resort stop deceleration, unified across scenarios
 ego_max_curvature: 0.2  # Passenger-car minimum turning radius ~5 m
 ego_radius: 1.0
 
@@ -32,12 +33,16 @@ d_road_w: 0.3
 max_road_width: 2.7  # Road half-width 4.0 m minus multi-circle footprint radius 1.25 m
 
 # === Fail-Safe State Machine (clearance-based, footprint-independent) ===
-# Preventive slowdown: drop to CAUTION when the nearest pedestrian's clearance
-# (surface-to-surface) falls below 3.0 m even if planning succeeds, and slow
-# to 0.6x target — anticipatory slowing within a pedestrian-occupied zone.
-state_machine_trigger_clearance_caution: 3.0
-state_machine_recover_clearance_caution: 3.5
-state_machine_recover_clearance_emergency: 3.5
+# Preventive slowdown (RSS-style, speed-dependent): drop to CAUTION when the
+# nearest pedestrian's clearance (surface-to-surface) falls below
+# 1.0 + 0.8*v m even if planning succeeds, and slow to 0.6x target. Fast
+# approaches escalate earlier (5.8 m at 6 m/s) while the low-speed regime
+# stays quiet; at the 3.6 m/s recovery speed the trigger is 3.88 m, below
+# the 4.2 m recovery gate (hysteresis).
+state_machine_trigger_clearance_caution: 1.0
+state_machine_trigger_time_headway: 0.8
+state_machine_recover_clearance_caution: 4.2
+state_machine_recover_clearance_emergency: 4.2
 state_machine_caution_speed_multiplier: 0.6
 
 # === Obstacle / Pedestrian Parameters ===

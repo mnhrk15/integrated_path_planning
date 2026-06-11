@@ -568,8 +568,10 @@ class IntegratedSimulator:
             current_metrics = {'min_distance': float('inf'), 'collision': False,
                                'ttc': float('inf'), 'clearance': float('inf')}
         
-        # Update SM
-        new_sm_output = self.state_machine.update(found_path, current_metrics)
+        # Update SM (ego speed feeds the speed-dependent preventive trigger)
+        new_sm_output = self.state_machine.update(
+            found_path, current_metrics, ego_speed=self.ego_state.v
+        )
 
         # Escalate-and-retry loop: while planning fails and the state machine
         # escalates (NORMAL -> CAUTION -> EMERGENCY), re-plan immediately under
@@ -617,7 +619,9 @@ class IntegratedSimulator:
                 f"(attempt {self._replan_attempts}/{self._max_replan_attempts})"
             )
             sm_output = new_sm_output
-            new_sm_output = self.state_machine.update(False, current_metrics)
+            new_sm_output = self.state_machine.update(
+                False, current_metrics, ego_speed=self.ego_state.v
+            )
 
         if planned_path is None:
             logger.error(
@@ -728,8 +732,10 @@ class IntegratedSimulator:
         # recorded SimulationResult, and in-place edits would rewrite history.
         self.ego_state = copy.copy(self.ego_state)
 
-        # Use emergency deceleration
-        max_dec = self.config.ego_max_accel * 2.0 # Hard braking
+        # Use emergency deceleration (config key; None = legacy 2x max accel)
+        max_dec = getattr(self.config, 'ego_emergency_decel', None)
+        if max_dec is None:
+            max_dec = self.config.ego_max_accel * 2.0
 
         # The vehicle keeps moving while braking: integrate kinematics with the
         # pre-deceleration speed so the braking distance is not silently zero.

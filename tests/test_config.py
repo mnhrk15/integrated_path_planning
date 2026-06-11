@@ -91,6 +91,42 @@ def test_trigger_clearance_hysteresis_enforced():
     validate_config(_minimal_config(state_machine_trigger_clearance_caution=0.5))
 
 
+def test_ego_emergency_decel_validation():
+    # None (legacy ego_max_accel * 2.0 fallback) and positive values pass.
+    validate_config(_minimal_config())
+    validate_config(_minimal_config(ego_emergency_decel=4.0))
+    with pytest.raises(ConfigValidationError, match="ego_emergency_decel"):
+        validate_config(_minimal_config(ego_emergency_decel=0.0))
+    with pytest.raises(ConfigValidationError, match="ego_emergency_decel"):
+        validate_config(_minimal_config(ego_emergency_decel=-2.0))
+
+
+def test_trigger_time_headway_validation():
+    with pytest.raises(ConfigValidationError, match="time_headway"):
+        validate_config(_minimal_config(state_machine_trigger_time_headway=-0.1))
+    # Hysteresis is checked at the CAUTION recovery speed
+    # (caution_speed_multiplier 0.8 * ego_target_speed 8.33 = 6.66 m/s):
+    # 0.5 + 0.2 * 6.66 = 1.83 < gate 2.0 -> OK.
+    validate_config(_minimal_config(
+        state_machine_trigger_clearance_caution=0.5,
+        state_machine_trigger_time_headway=0.2,
+        state_machine_recover_clearance_caution=2.0,
+        state_machine_recover_clearance_emergency=2.0))
+    # 0.5 + 0.3 * 6.66 = 2.5 >= gate 2.0 -> NORMAL<->CAUTION would oscillate.
+    with pytest.raises(ConfigValidationError, match="hysteresis"):
+        validate_config(_minimal_config(
+            state_machine_trigger_clearance_caution=0.5,
+            state_machine_trigger_time_headway=0.3,
+            state_machine_recover_clearance_caution=2.0,
+            state_machine_recover_clearance_emergency=2.0))
+    # A headway alone (offset 0) activates the trigger and the check.
+    with pytest.raises(ConfigValidationError, match="hysteresis"):
+        validate_config(_minimal_config(
+            state_machine_trigger_time_headway=0.5,
+            state_machine_recover_clearance_caution=2.0,
+            state_machine_recover_clearance_emergency=2.0))
+
+
 def test_state_machine_safe_distances_must_exceed_combined_radius():
     # Defaults (caution 2.0 / emergency 3.0) exceed ego 1.0 + ped 0.2.
     validate_config(_minimal_config())

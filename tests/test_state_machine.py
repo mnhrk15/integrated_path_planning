@@ -174,6 +174,49 @@ def test_preventive_escalation_and_recovery(config):
     sm.update(plan_found=True, safety_metrics={'clearance': 2.5})
     assert sm.current_state == VehicleState.NORMAL
 
+def test_speed_dependent_trigger_scales_with_ego_speed(config):
+    """RSS-style trigger = clearance_offset + time_headway * v: a fast
+    approach escalates at a clearance where a slow one stays NORMAL."""
+    config.state_machine_trigger_clearance_caution = 1.0
+    config.state_machine_trigger_time_headway = 0.8
+    config.state_machine_recover_clearance_caution = 6.0
+    config.state_machine_recover_clearance_emergency = 6.0
+    sm = FailSafeStateMachine(config)
+
+    # Slow: threshold = 1.0 + 0.8*1.0 = 1.8 < clearance 3.0 -> stay NORMAL.
+    sm.update(plan_found=True, safety_metrics={'clearance': 3.0}, ego_speed=1.0)
+    assert sm.current_state == VehicleState.NORMAL
+
+    # Fast: threshold = 1.0 + 0.8*6.0 = 5.8 > 3.0 -> preventive CAUTION.
+    sm.update(plan_found=True, safety_metrics={'clearance': 3.0}, ego_speed=6.0)
+    assert sm.current_state == VehicleState.CAUTION
+    assert sm.consecutive_failures == 0
+
+def test_headway_only_trigger_quiet_at_standstill(config):
+    """With clearance offset 0 the trigger is purely speed-proportional:
+    silent at standstill, active when moving."""
+    config.state_machine_trigger_time_headway = 0.8
+    sm = FailSafeStateMachine(config)
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.5}, ego_speed=0.0)
+    assert sm.current_state == VehicleState.NORMAL
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.5}, ego_speed=2.0)
+    assert sm.current_state == VehicleState.CAUTION
+
+def test_trigger_without_headway_ignores_ego_speed(config):
+    """time_headway 0 (legacy): the threshold must not depend on ego_speed."""
+    config.state_machine_trigger_clearance_caution = 1.5
+    config.state_machine_recover_clearance_caution = 2.0
+    config.state_machine_recover_clearance_emergency = 2.0
+    sm = FailSafeStateMachine(config)
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 1.6}, ego_speed=10.0)
+    assert sm.current_state == VehicleState.NORMAL
+
+    sm.update(plan_found=True, safety_metrics={'clearance': 1.4}, ego_speed=0.0)
+    assert sm.current_state == VehicleState.CAUTION
+
 def test_recover_clearance_keys_override_legacy(config):
     """Direct clearance keys replace the centre-distance derivation."""
     config.state_machine_recover_clearance_caution = 1.3

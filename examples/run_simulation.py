@@ -162,7 +162,9 @@ def main():
                 show_metrics=True,
                 figsize=(14, 8), # Default wide layout
                 fps=args.fps,
-                map_config=getattr(config, 'map_config', None)
+                map_config=getattr(config, 'map_config', None),
+                vehicle_length=config.vehicle_length,
+                vehicle_width=config.vehicle_width
             )
             logger.success(f"✓ Standard animation saved to {animation_path}")
         except Exception as e:
@@ -180,7 +182,9 @@ def main():
                 show_metrics=False, # No metrics
                 figsize=(10, 10),   # Square layout
                 fps=args.fps,
-                map_config=getattr(config, 'map_config', None)
+                map_config=getattr(config, 'map_config', None),
+                vehicle_length=config.vehicle_length,
+                vehicle_width=config.vehicle_width
             )
             logger.success(f"✓ Simple animation saved to {simple_animation_path}")
         except Exception as e:

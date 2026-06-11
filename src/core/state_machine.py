@@ -58,30 +58,42 @@ class FailSafeStateMachine:
         )
         # Preventive escalation: clearance below which NORMAL drops to CAUTION
         # even though planning succeeds (defensive slowdown near pedestrians).
-        # 0.0 disables the trigger (legacy behavior). validate_config enforces
-        # trigger < clearance_caution so NORMAL<->CAUTION cannot oscillate.
+        # RSS-style speed dependence: threshold = trigger_clearance +
+        # time_headway * ego_speed, so fast approaches escalate earlier while
+        # the low-speed regime stays quiet. Both 0.0 disables the trigger
+        # (legacy behavior). validate_config enforces that the threshold at
+        # the CAUTION recovery speed stays below clearance_caution so
+        # NORMAL<->CAUTION cannot oscillate.
         self.trigger_clearance_caution = getattr(
             config, 'state_machine_trigger_clearance_caution', 0.0
         )
+        self.trigger_time_headway = getattr(
+            config, 'state_machine_trigger_time_headway', 0.0
+        )
 
-    def update(self, plan_found: bool, safety_metrics: Dict[str, Any]) -> StateMachineOutput:
+    def update(self, plan_found: bool, safety_metrics: Dict[str, Any],
+               ego_speed: float = 0.0) -> StateMachineOutput:
         """Update state based on current iteration results.
-        
+
         Args:
             plan_found: Whether the planner found a valid path
             safety_metrics: Dictionary of safety metrics (e.g., 'min_distance', 'ttc')
-            
+            ego_speed: Current ego speed [m/s] for the speed-dependent
+                preventive trigger (0.0 reproduces the fixed-clearance trigger)
+
         Returns:
             StateMachineOutput containing the new state and planner constraints
         """
+        trigger_threshold = (self.trigger_clearance_caution
+                             + self.trigger_time_headway * max(ego_speed, 0.0))
         # Default transitions
         if self.current_state == VehicleState.NORMAL:
             if not plan_found:
                 self.current_state = VehicleState.CAUTION
                 self.consecutive_failures += 1
-            elif (self.trigger_clearance_caution > 0.0
+            elif (trigger_threshold > 0.0
                   and safety_metrics.get('clearance', float('inf'))
-                  < self.trigger_clearance_caution):
+                  < trigger_threshold):
                 # Preventive escalation: planning succeeded but a pedestrian
                 # is close — slow down defensively. Not a failure, so the
                 # counter stays at 0 and the ordinary recovery branch can
