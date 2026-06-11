@@ -31,6 +31,16 @@ d_road_w: 0.2  # Finer resolution for narrow corridor
 max_road_width: 3.4  # Wall inner edge 5.0 - footprint radius 1.25 - wall-point margin 0.2,
                      # floored to the 0.2 m lateral grid (= 3.4; clearance to wall points 1.6 m)
 
+# === Fail-Safe State Machine (clearance-based, footprint-independent) ===
+# Preventive slowdown: drop to CAUTION when the nearest pedestrian's clearance
+# (surface-to-surface) falls below 1.5 m even if planning succeeds. The narrow
+# corridor relies on cooperative passing: a stronger preventive slowdown makes
+# the ego linger in the oncoming flow and worsens interactions (verified).
+state_machine_trigger_clearance_caution: 1.5
+state_machine_recover_clearance_caution: 2.0
+state_machine_recover_clearance_emergency: 2.0
+state_machine_caution_speed_multiplier: 0.8
+
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2
 obstacle_radius: 0.2

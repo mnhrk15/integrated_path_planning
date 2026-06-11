@@ -349,12 +349,18 @@ class FrenetPlanner:
         n_ti = int((self.max_t - self.min_t) / self.dt + 1e-9)
         for Ti in self.min_t + np.arange(n_ti + 1) * self.dt:
             time_cache = self._build_time_cache(Ti)
-            tv_values = np.arange(
-                target_speed - self.d_t_s * self.n_s_sample,
-                target_speed + self.d_t_s * self.n_s_sample,
-                self.d_t_s
-            )
-            tv_values = tv_values[tv_values >= 0.0]
+            # Terminal-speed grid: from a full stop up to the target speed
+            # (the upper side intentionally has no over-target candidates).
+            # Spanning down to 0 lets the planner yield SMOOTHLY: when the
+            # fast candidates conflict with a prediction inside the horizon,
+            # it can adopt a gentle deceleration/stop profile instead of
+            # failing outright and leaving braking to the fail-safe
+            # escalation (which slams at the emergency rate). The fail-safe
+            # remains the backstop for genuinely unavoidable situations.
+            n_down = int(target_speed / self.d_t_s + 1e-9)
+            tv_values = target_speed - np.arange(n_down + 1) * self.d_t_s
+            if tv_values[-1] > 1e-9:
+                tv_values = np.append(tv_values, 0.0)  # always include a stop profile
             if tv_values.size == 0:
                 continue
 

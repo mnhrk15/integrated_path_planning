@@ -53,6 +53,44 @@ def test_distribution_aware_requires_multiple_samples():
     validate_config(_minimal_config(distribution_aware_planning=True, num_samples=20))
 
 
+def test_clearance_keys_validation():
+    # Direct clearance keys: positive values pass, ordering enforced.
+    validate_config(_minimal_config(
+        state_machine_recover_clearance_caution=1.3,
+        state_machine_recover_clearance_emergency=1.7))
+    with pytest.raises(ConfigValidationError, match="recover_clearance_caution"):
+        validate_config(_minimal_config(state_machine_recover_clearance_caution=0.0))
+    with pytest.raises(ConfigValidationError, match="recover_clearance_emergency"):
+        validate_config(_minimal_config(
+            state_machine_recover_clearance_caution=1.7,
+            state_machine_recover_clearance_emergency=1.3))
+    # Legacy keys are not validated when the clearance keys take over
+    # (safe_distance below the combined radius is fine then).
+    validate_config(_minimal_config(
+        state_machine_safe_distance_caution=0.5,
+        state_machine_safe_distance_emergency=1.0,
+        state_machine_recover_clearance_caution=1.3,
+        state_machine_recover_clearance_emergency=1.7))
+
+
+def test_trigger_clearance_hysteresis_enforced():
+    # Trigger below the recovery gate: OK.
+    validate_config(_minimal_config(
+        state_machine_trigger_clearance_caution=1.5,
+        state_machine_recover_clearance_caution=2.0,
+        state_machine_recover_clearance_emergency=2.0))
+    # Trigger at/above the recovery gate would oscillate NORMAL<->CAUTION.
+    with pytest.raises(ConfigValidationError, match="hysteresis"):
+        validate_config(_minimal_config(
+            state_machine_trigger_clearance_caution=2.0,
+            state_machine_recover_clearance_caution=2.0,
+            state_machine_recover_clearance_emergency=2.0))
+    # Also checked against the legacy-derived gate (2.0 - 1.2 = 0.8).
+    with pytest.raises(ConfigValidationError, match="hysteresis"):
+        validate_config(_minimal_config(state_machine_trigger_clearance_caution=0.9))
+    validate_config(_minimal_config(state_machine_trigger_clearance_caution=0.5))
+
+
 def test_state_machine_safe_distances_must_exceed_combined_radius():
     # Defaults (caution 2.0 / emergency 3.0) exceed ego 1.0 + ped 0.2.
     validate_config(_minimal_config())

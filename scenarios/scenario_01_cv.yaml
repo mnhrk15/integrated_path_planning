@@ -32,6 +32,15 @@ ego_radius: 1.0
 d_road_w: 0.3
 max_road_width: 2.7  # Road half-width 4.0 m minus multi-circle footprint radius 1.25 m
 
+# === Fail-Safe State Machine (clearance-based, footprint-independent) ===
+# Preventive slowdown: drop to CAUTION when the nearest pedestrian's clearance
+# (surface-to-surface) falls below 3.0 m even if planning succeeds, and slow
+# to 0.6x target — anticipatory slowing within a pedestrian-occupied zone.
+state_machine_trigger_clearance_caution: 3.0
+state_machine_recover_clearance_caution: 3.5
+state_machine_recover_clearance_emergency: 3.5
+state_machine_caution_speed_multiplier: 0.6
+
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2
 obstacle_radius: 0.2

@@ -32,8 +32,10 @@ class FailSafeStateMachine:
         self.consecutive_failures = 0
         # Recovery thresholds operate on clearance (= min_distance minus the
         # combined collision radius) so their meaning does not depend on the
-        # footprint mode. The config keys keep their legacy single-circle
-        # semantics (centre-to-pedestrian distance), hence the conversion:
+        # footprint mode. They can be specified directly via
+        # state_machine_recover_clearance_{caution,emergency}; when those are
+        # None the legacy single-circle keys (centre-to-pedestrian distance)
+        # are converted instead:
         # min_distance > safe_distance  <=>  clearance > safe_distance - combined
         # In multi_circle mode the effective ego radius is the footprint circle
         # radius (validate_config enforces safe_distance > combined either way,
@@ -44,11 +46,22 @@ class FailSafeStateMachine:
         else:
             ego_radius = getattr(config, 'ego_radius', 1.0)
         combined_radius = ego_radius + getattr(config, 'ped_radius', 0.2)
+        recover_caution = getattr(config, 'state_machine_recover_clearance_caution', None)
+        recover_emergency = getattr(config, 'state_machine_recover_clearance_emergency', None)
         self.clearance_caution = (
-            getattr(config, 'state_machine_safe_distance_caution', 2.0) - combined_radius
+            recover_caution if recover_caution is not None
+            else getattr(config, 'state_machine_safe_distance_caution', 2.0) - combined_radius
         )
         self.clearance_emergency = (
-            getattr(config, 'state_machine_safe_distance_emergency', 3.0) - combined_radius
+            recover_emergency if recover_emergency is not None
+            else getattr(config, 'state_machine_safe_distance_emergency', 3.0) - combined_radius
+        )
+        # Preventive escalation: clearance below which NORMAL drops to CAUTION
+        # even though planning succeeds (defensive slowdown near pedestrians).
+        # 0.0 disables the trigger (legacy behavior). validate_config enforces
+        # trigger < clearance_caution so NORMAL<->CAUTION cannot oscillate.
+        self.trigger_clearance_caution = getattr(
+            config, 'state_machine_trigger_clearance_caution', 0.0
         )
 
     def update(self, plan_found: bool, safety_metrics: Dict[str, Any]) -> StateMachineOutput:
@@ -66,6 +79,15 @@ class FailSafeStateMachine:
             if not plan_found:
                 self.current_state = VehicleState.CAUTION
                 self.consecutive_failures += 1
+            elif (self.trigger_clearance_caution > 0.0
+                  and safety_metrics.get('clearance', float('inf'))
+                  < self.trigger_clearance_caution):
+                # Preventive escalation: planning succeeded but a pedestrian
+                # is close — slow down defensively. Not a failure, so the
+                # counter stays at 0 and the ordinary recovery branch can
+                # return to NORMAL as soon as the clearance gate reopens.
+                self.current_state = VehicleState.CAUTION
+                self.consecutive_failures = 0
             else:
                 self.consecutive_failures = 0
                 

@@ -142,6 +142,46 @@ def test_curvature_limit_never_relaxed(config):
         config.ego_max_lat_accel
         * config.state_machine_emergency_lat_accel_multiplier)
 
+def test_preventive_escalation_disabled_by_default(config):
+    """trigger 0.0 (default): NORMAL never escalates on proximity alone."""
+    sm = FailSafeStateMachine(config)
+    sm.update(plan_found=True, safety_metrics={'clearance': 0.01})
+    assert sm.current_state == VehicleState.NORMAL
+
+def test_preventive_escalation_and_recovery(config):
+    """With a trigger set, NORMAL drops to CAUTION near pedestrians even when
+    planning succeeds, and recovers through the ordinary clearance gate
+    without oscillating in between."""
+    config.state_machine_trigger_clearance_caution = 1.5
+    config.state_machine_recover_clearance_caution = 2.0
+    config.state_machine_recover_clearance_emergency = 2.0
+    sm = FailSafeStateMachine(config)
+
+    # Pedestrian close: preventive CAUTION (not a failure).
+    sm.update(plan_found=True, safety_metrics={'clearance': 1.0})
+    assert sm.current_state == VehicleState.CAUTION
+    assert sm.consecutive_failures == 0
+
+    # In the hysteresis band (trigger 1.5 < clearance < recover 2.0): stay.
+    sm.update(plan_found=True, safety_metrics={'clearance': 1.8})
+    assert sm.current_state == VehicleState.CAUTION
+
+    # Above the recovery gate: back to NORMAL (counter was never raised).
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.5})
+    assert sm.current_state == VehicleState.NORMAL
+
+    # And clearly above the trigger it stays NORMAL.
+    sm.update(plan_found=True, safety_metrics={'clearance': 2.5})
+    assert sm.current_state == VehicleState.NORMAL
+
+def test_recover_clearance_keys_override_legacy(config):
+    """Direct clearance keys replace the centre-distance derivation."""
+    config.state_machine_recover_clearance_caution = 1.3
+    config.state_machine_recover_clearance_emergency = 1.7
+    sm = FailSafeStateMachine(config)
+    assert sm.clearance_caution == pytest.approx(1.3)
+    assert sm.clearance_emergency == pytest.approx(1.7)
+
 def test_caution_slows_target_speed(config):
     """CAUTION must lower the planner target speed, not only the speed cap."""
     config.ego_target_speed = 6.0

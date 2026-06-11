@@ -296,6 +296,16 @@ def test_road_corridor_check_whole_path(planner):
     result = planner._check_paths([fp0], no_obs, None, None)
     assert result['ok'] == [fp0]
 
+def test_speed_grid_spans_down_to_stop(planner):
+    """The terminal-speed grid must include a full-stop profile (and no
+    over-target candidates) so the planner can yield smoothly instead of
+    failing outright when fast candidates conflict."""
+    fstate = FrenetState(s=5.0, s_d=6.0, s_dd=0.0, d=0.0, d_d=0.0, d_dd=0.0)
+    paths = planner._generate_frenet_paths(fstate, target_speed=6.0)
+    terminal_v = {round(fp.s_d[-1], 4) for fp in paths if len(fp.s_d)}
+    assert 0.0 in terminal_v
+    assert max(terminal_v) <= 6.0 + 1e-9
+
 def test_lateral_candidates_bounded_by_max_road_width(mock_spline):
     """Lateral offsets must stay within ±max_road_width (treated as the
     allowed offset from the reference line, i.e. road half-width minus the

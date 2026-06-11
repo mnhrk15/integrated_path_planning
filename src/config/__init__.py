@@ -117,6 +117,12 @@ class SimulationConfig:
     # collision radius (validated) so the recovery clearance gate is meaningful.
     state_machine_safe_distance_caution: float = 2.0  # Safe distance for CAUTION->NORMAL transition [m]
     state_machine_safe_distance_emergency: float = 3.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+    # Clearance-based overrides (footprint-independent). When set they replace
+    # the legacy centre-distance keys above for the recovery gates; the
+    # trigger adds preventive NORMAL->CAUTION escalation (0.0 = disabled).
+    state_machine_recover_clearance_caution: Optional[float] = None  # CAUTION->NORMAL clearance gate [m]
+    state_machine_recover_clearance_emergency: Optional[float] = None  # EMERGENCY->CAUTION clearance gate [m]
+    state_machine_trigger_clearance_caution: float = 0.0  # NORMAL->CAUTION preventive trigger clearance [m]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
     state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
@@ -236,21 +242,49 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"state_machine_safe_distance_caution must be non-negative, got {config.state_machine_safe_distance_caution}")
     if config.state_machine_safe_distance_emergency < 0:
         errors.append(f"state_machine_safe_distance_emergency must be non-negative, got {config.state_machine_safe_distance_emergency}")
-    # The recovery thresholds are centre-to-pedestrian distances; values at or
+    # Recovery gates. The clearance keys (footprint-independent) take
+    # precedence when set; the legacy keys are centre-to-pedestrian distances
+    # and are validated only when they are the active source — values at or
     # below the combined collision radius make the clearance gate vacuous
     # (recovery would trigger even while overlapping the pedestrian).
     from ..core.footprint import effective_ego_radius
     combined_collision_radius = effective_ego_radius(config) + config.ped_radius
-    if config.state_machine_safe_distance_caution <= combined_collision_radius:
+    rec_caution = config.state_machine_recover_clearance_caution
+    rec_emergency = config.state_machine_recover_clearance_emergency
+    if rec_caution is None:
+        if config.state_machine_safe_distance_caution <= combined_collision_radius:
+            errors.append(
+                f"state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution}) must be > "
+                f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
+    elif rec_caution <= 0:
+        errors.append(f"state_machine_recover_clearance_caution must be positive, got {rec_caution}")
+    if rec_emergency is None:
+        if config.state_machine_safe_distance_emergency <= combined_collision_radius:
+            errors.append(
+                f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) must be > "
+                f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
+    elif rec_emergency <= 0:
+        errors.append(f"state_machine_recover_clearance_emergency must be positive, got {rec_emergency}")
+    if rec_caution is None and rec_emergency is None:
+        if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
+            errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
+    elif rec_caution is not None and rec_emergency is not None and rec_emergency < rec_caution:
         errors.append(
-            f"state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution}) must be > "
-            f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
-    if config.state_machine_safe_distance_emergency <= combined_collision_radius:
-        errors.append(
-            f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) must be > "
-            f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
-    if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
-        errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
+            f"state_machine_recover_clearance_emergency ({rec_emergency}) should be >= "
+            f"state_machine_recover_clearance_caution ({rec_caution})")
+    trigger = config.state_machine_trigger_clearance_caution
+    if trigger < 0:
+        errors.append(f"state_machine_trigger_clearance_caution must be non-negative, got {trigger}")
+    elif trigger > 0:
+        # Hysteresis: the preventive trigger must sit strictly below the
+        # CAUTION->NORMAL recovery gate or NORMAL<->CAUTION oscillates.
+        effective_rec_caution = (
+            rec_caution if rec_caution is not None
+            else config.state_machine_safe_distance_caution - combined_collision_radius)
+        if trigger >= effective_rec_caution:
+            errors.append(
+                f"state_machine_trigger_clearance_caution ({trigger}) must be < the effective "
+                f"CAUTION recovery clearance ({effective_rec_caution:.2f}) for hysteresis")
     if config.state_machine_caution_accel_multiplier <= 0:
         errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
     if config.state_machine_caution_curvature_multiplier <= 0:
@@ -443,6 +477,9 @@ def save_config(config: SimulationConfig, config_path: str):
         'max_t': config.max_t,
         'd_t_s': config.d_t_s,
         'n_s_sample': config.n_s_sample,
+        'state_machine_recover_clearance_caution': config.state_machine_recover_clearance_caution,
+        'state_machine_recover_clearance_emergency': config.state_machine_recover_clearance_emergency,
+        'state_machine_trigger_clearance_caution': config.state_machine_trigger_clearance_caution,
         'state_machine_safe_distance_caution': config.state_machine_safe_distance_caution,
         'state_machine_safe_distance_emergency': config.state_machine_safe_distance_emergency,
         'state_machine_caution_accel_multiplier': config.state_machine_caution_accel_multiplier,
