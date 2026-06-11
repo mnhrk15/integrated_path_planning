@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Generate clean trajectory-map figures for the AVEC full paper (Figs 1-3).
 
-Reads output/scenario_0X/trajectory.npz and the scenario YAML map_config, then
-renders a tightly-cropped, consistently styled figure per scenario into the
-paper's figs/ directory. Companion to plot_lateral_analysis.py. Safe to re-run;
+Reads trajectory.npz per scenario (default output/scenario_0X/, overridable
+with --inputs) and the scenario YAML map_config, then renders a
+tightly-cropped, consistently styled figure per scenario into the paper's
+figs/ directory. Companion to plot_lateral_analysis.py. Safe to re-run;
 writes only the three PNGs.
 """
+import argparse
 import sys
 from pathlib import Path
 
@@ -20,12 +22,27 @@ from matplotlib.lines import Line2D
 REPO = Path(__file__).resolve().parent.parent
 FIGS = Path("/Users/mnhrk/Research/AVEC_FullPaper/figs")
 
-# Per-scenario tweaks: optional annotation of the lateral artifact.
+# Per-scenario tweaks. "annotate_stop" marks the longest full stop (v < 0.05
+# for at least 0.5 s) detected in the run, the yield behavior analyzed in the
+# paper's discussion section.
 SCENARIOS = {
-    "scenario_01": {"annotate": None},
-    "scenario_02": {"annotate": None, "ylim": (-6.0, 6.0)},
-    "scenario_03": {"annotate": (3.5, -10.0)},
+    "scenario_01": {},
+    "scenario_02": {"ylim": (-6.0, 6.0)},
+    "scenario_03": {"annotate_stop": True},
 }
+
+
+def find_longest_stop(times, ego_v, v_stop=0.05, min_dur=0.5):
+    """Return (t_start, t_end, idx_start) of the longest full stop, or None."""
+    idx = np.where(np.asarray(ego_v, float) < v_stop)[0]
+    if idx.size == 0:
+        return None
+    best = None
+    for seg in np.split(idx, np.where(np.diff(idx) > 1)[0] + 1):
+        dur = times[seg[-1]] - times[seg[0]]
+        if dur >= min_dur and (best is None or dur > best[1] - best[0]):
+            best = (float(times[seg[0]]), float(times[seg[-1]]), int(seg[0]))
+    return best
 
 
 def load_map(scn):
@@ -34,8 +51,9 @@ def load_map(scn):
     return cfg.get("map_config", {}) or {}
 
 
-def plot_one(scn, opts):
-    data = np.load(REPO / "output" / scn / "trajectory.npz", allow_pickle=True)
+def plot_one(scn, opts, input_dir=None):
+    npz_dir = Path(input_dir) if input_dir else REPO / "output" / scn
+    data = np.load(npz_dir / "trajectory.npz", allow_pickle=True)
     ego_x = np.asarray(data["ego_x"], float)
     ego_y = np.asarray(data["ego_y"], float)
     ped = np.asarray(data["ped_positions"], float)  # [T, N, 2]
@@ -70,11 +88,17 @@ def plot_one(scn, opts):
     ax.plot(ego_x[0], ego_y[0], "o", color="green", ms=6, zorder=5)
     ax.plot(ego_x[-1], ego_y[-1], "o", color="red", ms=6, zorder=5)
 
-    if opts["annotate"]:
-        ax_, ay_ = opts["annotate"]
-        ax.annotate("lateral shift", xy=(ax_, ay_), xytext=(ax_ + 8.0, ay_ - 6.0),
-                    fontsize=8, color="black", zorder=6,
-                    arrowprops=dict(arrowstyle="->", color="black", lw=0.8))
+    if opts.get("annotate_stop"):
+        stop = find_longest_stop(np.asarray(data["times"], float),
+                                 np.asarray(data["ego_v"], float))
+        if stop is not None:
+            t0, t1, i0 = stop
+            sx, sy = float(ego_x[i0]), float(ego_y[i0])
+            ax.plot(sx, sy, "*", color="black", ms=9, zorder=6)
+            ax.annotate(f"yield stop ({t1 - t0:.1f} s)", xy=(sx, sy),
+                        xytext=(sx + 6.0, sy - 5.0), fontsize=8, color="black",
+                        zorder=6,
+                        arrowprops=dict(arrowstyle="->", color="black", lw=0.8))
 
     # --- tight limits from ego + pedestrians (+ margin) ---
     xs = np.concatenate([ego_x, ped[..., 0].ravel()])
@@ -114,8 +138,15 @@ def plot_one(scn, opts):
 
 
 def main():
-    for scn, opts in SCENARIOS.items():
-        plot_one(scn, opts)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--inputs", nargs=3, metavar=("S1_DIR", "S2_DIR", "S3_DIR"), default=None,
+        help="Directories containing trajectory.npz for scenarios 1-3 "
+             "(default: output/scenario_0X)")
+    args = parser.parse_args()
+    input_dirs = args.inputs if args.inputs else [None] * 3
+    for (scn, opts), input_dir in zip(SCENARIOS.items(), input_dirs):
+        plot_one(scn, opts, input_dir=input_dir)
 
 
 if __name__ == "__main__":
