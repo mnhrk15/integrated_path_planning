@@ -36,14 +36,16 @@ max_road_width: 2.7  # Road half-width 4.0 m minus multi-circle footprint radius
 # === Fail-Safe State Machine (clearance-based, footprint-independent) ===
 # Preventive slowdown (RSS-style, speed-dependent): drop to CAUTION when the
 # nearest pedestrian's clearance (surface-to-surface) falls below
-# 1.0 + 0.8*v m even if planning succeeds, and slow to 0.6x target. Fast
-# approaches escalate earlier (5.8 m at 6 m/s) while the low-speed regime
-# stays quiet; at the 3.6 m/s recovery speed the trigger is 3.88 m, below
-# the 4.2 m recovery gate (hysteresis).
+# 1.0 + 0.65*v m even if planning succeeds, and slow to 0.6x target. Fast
+# approaches escalate earlier (4.9 m at 6 m/s) while the low-speed regime
+# stays quiet; at the 3.6 m/s recovery speed the trigger is 3.34 m, below
+# the 3.5 m recovery gate (hysteresis). The gates stay at 3.5: raising them
+# to 4.2 left the ego unable to recover from EMERGENCY inside the dense
+# crossing flow (clearance rarely exceeds 4.2 there) and s1_sgan timed out.
 state_machine_trigger_clearance_caution: 1.0
-state_machine_trigger_time_headway: 0.8
-state_machine_recover_clearance_caution: 4.2
-state_machine_recover_clearance_emergency: 4.2
+state_machine_trigger_time_headway: 0.65
+state_machine_recover_clearance_caution: 3.5
+state_machine_recover_clearance_emergency: 3.5
 state_machine_caution_speed_multiplier: 0.6
 
 # === Obstacle / Pedestrian Parameters ===
