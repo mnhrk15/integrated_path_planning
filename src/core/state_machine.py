@@ -107,31 +107,30 @@ class FailSafeStateMachine:
             )
             
         elif self.current_state == VehicleState.CAUTION:
-            # Relax constraints to find a path
+            # Relax the acceleration limit to find a path, and slow down
+            # preventively. The curvature limit is NOT relaxed: it is a
+            # kinematic property of the vehicle (minimum turning radius) and
+            # cannot be traded against risk.
             accel_mult = getattr(self.config, 'state_machine_caution_accel_multiplier', 1.5)
-            curvature_mult = getattr(self.config, 'state_machine_caution_curvature_multiplier', 1.2)
             speed_mult = getattr(self.config, 'state_machine_caution_speed_multiplier', 0.8)
             return StateMachineOutput(
                 state=VehicleState.CAUTION,
-                target_speed_override=None, # Keep trying to move, maybe slower?
+                target_speed_override=self.config.ego_target_speed * speed_mult,
                 constraint_overrides={
                     "max_accel": self.config.ego_max_accel * accel_mult,
-                    "max_curvature": self.config.ego_max_curvature * curvature_mult,
                     "max_speed": self.config.ego_max_speed * speed_mult
                 }
             )
-            
+
         elif self.current_state == VehicleState.EMERGENCY:
-            # STOP immediately
+            # STOP immediately. Braking effort is relaxed, but the curvature
+            # limit stays (the vehicle cannot out-steer its own geometry).
             accel_mult = getattr(self.config, 'state_machine_emergency_accel_multiplier', 3.0)
-            curvature_mult = getattr(self.config, 'state_machine_emergency_curvature_multiplier', 2.0)
             return StateMachineOutput(
                 state=VehicleState.EMERGENCY,
                 target_speed_override=0.0,
-                # Allow extreme maneuvers to stop
                 constraint_overrides={
-                    "max_accel": self.config.ego_max_accel * accel_mult,
-                    "max_curvature": self.config.ego_max_curvature * curvature_mult
+                    "max_accel": self.config.ego_max_accel * accel_mult
                 }
             )
             

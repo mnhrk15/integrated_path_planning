@@ -124,3 +124,28 @@ def test_clearance_thresholds_match_legacy_circle_semantics(config):
     legacy_threshold_clearance = config.state_machine_safe_distance_caution - combined
     sm.update(plan_found=True, safety_metrics={'clearance': legacy_threshold_clearance})
     assert sm.current_state == VehicleState.CAUTION
+
+def test_curvature_limit_never_relaxed(config):
+    """The curvature limit is kinematic: no state may override it."""
+    sm = FailSafeStateMachine(config)
+
+    sm.current_state = VehicleState.CAUTION
+    output = sm._get_planner_config()
+    assert 'max_curvature' not in output.constraint_overrides
+
+    sm.current_state = VehicleState.EMERGENCY
+    output = sm._get_planner_config()
+    assert 'max_curvature' not in output.constraint_overrides
+
+def test_caution_slows_target_speed(config):
+    """CAUTION must lower the planner target speed, not only the speed cap."""
+    config.ego_target_speed = 6.0
+    sm = FailSafeStateMachine(config)
+    sm.current_state = VehicleState.CAUTION
+
+    output = sm._get_planner_config()
+    expected = config.ego_target_speed * config.state_machine_caution_speed_multiplier
+    assert output.target_speed_override == pytest.approx(expected)
+    # The max-speed cap stays as a second line of defence.
+    assert output.constraint_overrides['max_speed'] == pytest.approx(
+        config.ego_max_speed * config.state_machine_caution_speed_multiplier)

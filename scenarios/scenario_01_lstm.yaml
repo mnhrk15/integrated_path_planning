@@ -5,7 +5,7 @@
 
 # === Time Parameters ===
 dt: 0.1
-total_time: 20.0
+total_time: 30.0  # Allows yield-then-complete (60 m at 6 m/s nominal + crossing waits)
 
 # === Social Force Parameters (Tuning) ===
 social_force_params:
@@ -25,12 +25,12 @@ ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]  # Start from origin
 ego_target_speed: 6.0  # Target 6 m/s (~20 km/h)
 ego_max_speed: 10.0
 ego_max_accel: 2.0
-ego_max_curvature: 1.0
+ego_max_curvature: 0.2  # Passenger-car minimum turning radius ~5 m
 ego_radius: 1.0
 
 # === Planning Parameters ===
 d_road_w: 0.3
-max_road_width: 7.0
+max_road_width: 2.7  # Road half-width 4.0 m minus multi-circle footprint radius 1.25 m
 
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2

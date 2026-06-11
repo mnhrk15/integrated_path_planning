@@ -182,6 +182,70 @@ def test_speed_and_accel_checks_skip_index_zero(planner):
     result = planner._check_paths([fp_accel], no_obs, None, overrides)
     assert result['max_accel_error'] == [fp_accel]
 
+def test_curvature_check_skips_index_zero_and_low_speed(planner):
+    """c[0] is the current state and may transiently exceed the kinematic
+    limit; it must not veto the candidate. From index 1 on the limit applies,
+    but only at samples faster than LOW_SPEED_CURVATURE_GATE: a stopped,
+    yaw-misaligned vehicle produces a divergent discrete-curvature spike over
+    the first sub-centimetre steps of any restart candidate, which is
+    near-standstill steering, not a violated turning radius."""
+    def make_fp(c, v=None):
+        fp = FrenetPath()
+        n = len(c)
+        fp.x = [float(i) for i in range(n)]
+        fp.y = [0.0] * n
+        fp.t = [0.1 * i for i in range(n)]
+        fp.v = v if v is not None else [4.0] * n
+        fp.a = [0.0] * n
+        fp.c = c
+        return fp
+
+    no_obs = np.empty((0, 2))
+
+    # Over-limit only at index 0: kept as 'ok' (planner max_curvature = 1.0).
+    fp = make_fp(c=[1.5, 0.5, 0.5])
+    result = planner._check_paths([fp], no_obs, None, None)
+    assert result['ok'] == [fp]
+
+    # Over-limit at index 1 at speed: rejected.
+    fp_curv = make_fp(c=[0.5, 1.5, 0.5])
+    result = planner._check_paths([fp_curv], no_obs, None, None)
+    assert result['max_curvature_error'] == [fp_curv]
+
+    # Restart-from-standstill spike: curvature exceeds the limit only while
+    # v <= 0.5 m/s (indices 1-2), then the path settles. Must be kept.
+    fp_restart = make_fp(c=[0.1, 2.0, 1.4, 0.3, 0.1],
+                         v=[0.0, 0.05, 0.4, 1.2, 3.0])
+    result = planner._check_paths([fp_restart], no_obs, None, None)
+    assert result['ok'] == [fp_restart]
+
+    # Same spike at driving speed: rejected.
+    fp_fast = make_fp(c=[0.1, 2.0, 1.4, 0.3, 0.1],
+                      v=[3.0, 3.0, 3.0, 3.0, 3.0])
+    result = planner._check_paths([fp_fast], no_obs, None, None)
+    assert result['max_curvature_error'] == [fp_fast]
+
+def test_lateral_candidates_bounded_by_max_road_width(mock_spline):
+    """Lateral offsets must stay within ±max_road_width (treated as the
+    allowed offset from the reference line, i.e. road half-width minus the
+    vehicle footprint)."""
+    narrow = FrenetPlanner(
+        reference_path=mock_spline,
+        max_speed=10.0,
+        max_accel=2.0,
+        max_curvature=1.0,
+        dt=0.1,
+        d_road_w=0.3,
+        max_road_width=1.2
+    )
+    fstate = FrenetState(s=5.0, s_d=5.0, s_dd=0.0, d=0.0, d_d=0.0, d_dd=0.0)
+    paths = narrow._generate_frenet_paths(fstate, target_speed=5.0)
+    assert len(paths) > 0
+    terminal_d = {round(fp.d[-1], 6) for fp in paths if len(fp.d)}
+    assert max(abs(d) for d in terminal_d) <= 1.2 + 1e-9
+    # The grid is symmetric and contains the reference line itself.
+    assert 0.0 in terminal_d
+
 def test_collision_check_dynamic_same_time_only(planner):
     """Collision requires SAME-TIME co-location, not mere spatial overlap.
 

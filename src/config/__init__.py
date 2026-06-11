@@ -117,10 +117,10 @@ class SimulationConfig:
     state_machine_safe_distance_caution: float = 2.0  # Safe distance for CAUTION->NORMAL transition [m]
     state_machine_safe_distance_emergency: float = 3.0  # Safe distance for EMERGENCY->CAUTION transition [m]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
-    state_machine_caution_curvature_multiplier: float = 1.2  # Curvature multiplier in CAUTION state
-    state_machine_caution_speed_multiplier: float = 0.8  # Speed multiplier in CAUTION state
+    state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
+    state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
     state_machine_emergency_accel_multiplier: float = 3.0  # Acceleration multiplier in EMERGENCY state
-    state_machine_emergency_curvature_multiplier: float = 2.0  # Curvature multiplier in EMERGENCY state
+    state_machine_emergency_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     
     # Pedestrians
     ped_initial_states: list = field(default_factory=list)
@@ -251,6 +251,14 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
     if config.state_machine_caution_curvature_multiplier <= 0:
         errors.append(f"state_machine_caution_curvature_multiplier must be positive, got {config.state_machine_caution_curvature_multiplier}")
+    # The curvature limit is a kinematic vehicle property and is no longer
+    # relaxed by the state machine; the multiplier keys are kept only for
+    # backward compatibility with existing configs.
+    if (config.state_machine_caution_curvature_multiplier != 1.0
+            or config.state_machine_emergency_curvature_multiplier != 1.0):
+        logger.warning(
+            "state_machine_*_curvature_multiplier is deprecated and ignored: "
+            "the curvature limit is kinematic and never relaxed.")
     if config.state_machine_caution_speed_multiplier <= 0 or config.state_machine_caution_speed_multiplier > 1.0:
         errors.append(f"state_machine_caution_speed_multiplier must be in (0, 1], got {config.state_machine_caution_speed_multiplier}")
     if config.state_machine_emergency_accel_multiplier <= 0:

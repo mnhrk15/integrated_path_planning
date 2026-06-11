@@ -45,6 +45,15 @@ K_LON = 1.0  # Longitudinal cost weight
 # Safety
 ROBOT_RADIUS = 2.0  # Robot radius [m]
 
+# Curvature is only constrained at samples faster than this [m/s]. Below it
+# the per-sample arc length is sub-centimetre, so the discrete curvature
+# estimate of a candidate that re-aligns a stopped, yaw-misaligned vehicle
+# with the reference tangent diverges (Δyaw over ~mm of travel) even though
+# the manoeuvre is an ordinary near-standstill steering correction. Without
+# this gate a vehicle that stops with any heading offset can never produce a
+# feasible restart candidate and deadlocks in EMERGENCY.
+LOW_SPEED_CURVATURE_GATE = 0.5
+
 
 @dataclass(frozen=True)
 class TimeCache:
@@ -224,7 +233,12 @@ class FrenetPlanner:
             fp_list, static_obstacles, dynamic_obstacles, constraint_overrides,
             dynamic_obstacles_distribution
         )
-        
+
+        # Rejection breakdown of the last planning call. Diagnostic only (e.g.
+        # to verify predictions actually constrain the chosen path); never
+        # feeds back into planning.
+        self.last_check_stats = {k: len(v) for k, v in fp_dict.items()}
+
         # Select best path
         best_path = self._select_best_path(fp_dict)
         
@@ -814,8 +828,14 @@ class FrenetPlanner:
                 path_dict['max_speed_error'].append(fp)
             elif any(abs(a) > c_max_accel for a in islice(fp.a, 1, None)):
                 path_dict['max_accel_error'].append(fp)
-            # Check curvature limit (use generator expression for early termination)
-            elif any(abs(c) > c_max_curvature for c in fp.c):
+            # Curvature is also checked from index 1: c[0] is the current state,
+            # which can transiently exceed the (non-relaxable, kinematic) limit
+            # right after an emergency manoeuvre and must not veto every candidate.
+            # Samples below LOW_SPEED_CURVATURE_GATE are exempt: their discrete
+            # curvature is a numerical artefact of sub-centimetre arc lengths
+            # (near-standstill steering), not a violated turning radius.
+            elif any(abs(c) > c_max_curvature and v > LOW_SPEED_CURVATURE_GATE
+                     for c, v in islice(zip(fp.c, fp.v), 1, None)):
                 path_dict['max_curvature_error'].append(fp)
             # Check collision (chance-constrained over the distribution when provided)
             elif not self._path_is_collision_free(

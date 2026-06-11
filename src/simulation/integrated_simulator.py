@@ -700,7 +700,14 @@ class IntegratedSimulator:
         
         # Compute metrics
         result.metrics = result.compute_safety_metrics()
-        
+
+        # Diagnostic: how many candidates the last planning call rejected per
+        # reason (notably 'collision_error' — whether predictions actually
+        # constrained the chosen path this step).
+        check_stats = getattr(self.planner, 'last_check_stats', None)
+        if check_stats is not None:
+            result.metrics['n_collision_rejected'] = check_stats.get('collision_error', 0)
+
         # Record history
         self.history.append(result)
         
