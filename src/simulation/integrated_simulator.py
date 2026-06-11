@@ -420,11 +420,19 @@ class IntegratedSimulator:
             try:
                 # Get observations
                 obs_traj, obs_traj_rel, seq_start_end = self.observer.get_observation()
-                
+
+                # Re-anchor predictions from the last observation sample time to
+                # the current pedestrian time (observer samples every sgan_dt,
+                # so the anchor can be up to sgan_dt - dt stale).
+                last_sample_time = self.observer.last_sample_time
+                staleness = 0.0
+                if last_sample_time is not None:
+                    staleness = max(ped_state.timestamp - last_sample_time, 0.0)
+
                 # Predict
                 t_start = time.perf_counter()
                 predicted_traj, predicted_dist = self.predictor.predict_single_best(
-                    obs_traj, obs_traj_rel, seq_start_end
+                    obs_traj, obs_traj_rel, seq_start_end, staleness=staleness
                 )
                 t_pred = time.perf_counter() - t_start
                 

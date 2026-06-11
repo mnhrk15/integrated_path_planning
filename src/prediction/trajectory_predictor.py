@@ -124,20 +124,27 @@ class TrajectoryPredictor:
         self,
         obs_traj: torch.Tensor,
         obs_traj_rel: torch.Tensor,
-        seq_start_end: torch.Tensor
+        seq_start_end: torch.Tensor,
+        staleness: float = 0.0
     ) -> np.ndarray:
         """Predict future trajectories.
-        
+
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2]
             obs_traj_rel: Observed relative trajectories [obs_len, n_peds, 2]
             seq_start_end: Sequence boundaries [n_seq, 2]
-            
+            staleness: Elapsed time [s] between the last observation sample
+                (obs_traj[-1]) and the current simulation time. The dense
+                output grid is anchored to the current time, so the raw
+                predictions (anchored to the last sample) are shifted back
+                by this amount.
+
         Returns:
-            Predicted trajectories [n_peds, n_dense_steps, 2] in simulation time resolution
+            Predicted trajectories [n_peds, n_dense_steps, 2] in simulation time
+            resolution; index k corresponds to current time + (k+1)*sim_dt
         """
         if self.method == 'cv':
-             return self.predict_cv(obs_traj)
+             return self.predict_cv(obs_traj, staleness)
 
         if self.generator is None:
             raise RuntimeError("Generator not loaded. Call load_model before predict().")
@@ -167,14 +174,19 @@ class TrajectoryPredictor:
             f"Predicted {pred_traj.shape[1]} pedestrians for {pred_traj.shape[0]} coarse steps"
         )
 
-        return self.process_prediction(pred_traj)
-        
-    def predict_cv(self, obs_traj: torch.Tensor) -> np.ndarray:
+        anchor_pos = obs_traj[-1].cpu().numpy()
+        return self.process_prediction(pred_traj, anchor_pos=anchor_pos,
+                                       staleness=staleness)
+
+    def predict_cv(self, obs_traj: torch.Tensor, staleness: float = 0.0) -> np.ndarray:
         """Predict using Constant Velocity model.
-        
+
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2] (Absolute coordinates)
-            
+            staleness: Elapsed time [s] between obs_traj[-1] and the current
+                simulation time (the extrapolation origin is shifted forward
+                so the output grid is anchored to the current time)
+
         Returns:
             Predicted trajectories [n_peds, n_dense_steps, 2]
         """
@@ -201,21 +213,33 @@ class TrajectoryPredictor:
         
         # [n_peds, n_steps, 2]
         dense_preds = np.zeros((n_peds, len(time_target), 2))
-        
+
         for i in range(len(time_target)):
-            t = time_target[i]
+            # time_target is relative to the current time; the velocity origin
+            # (last observation sample) is `staleness` seconds in the past.
+            t = time_target[i] + staleness
             dense_preds[:, i, :] = current_pos + velocities * t
             
         logger.debug(f"Generated CV predictions for {n_peds} pedestrians")
         return dense_preds
 
-    def process_prediction(self, pred_traj: np.ndarray) -> np.ndarray:
+    def process_prediction(self, pred_traj: np.ndarray,
+                           anchor_pos: Optional[np.ndarray] = None,
+                           staleness: float = 0.0) -> np.ndarray:
         """Resample and extrapolate predictions to simulation resolution and planner horizon.
-        
+
         Uses robust extrapolation to avoid unrealistic jumps.
 
         Args:
-            pred_traj: Raw SGAN predictions [pred_len, n_peds, 2]
+            pred_traj: Raw SGAN predictions [pred_len, n_peds, 2], anchored to
+                the last observation sample (point k is k*sgan_dt after it)
+            anchor_pos: Last observed positions [n_peds, 2]. When given, it is
+                used as an extra interpolation point at the anchor time so the
+                first sim steps interpolate from the observed position instead
+                of clamping to the first prediction point.
+            staleness: Elapsed time [s] between the last observation sample and
+                the current simulation time. The output grid is anchored to the
+                current time: index k = current time + (k+1)*sim_dt.
 
         Returns:
             Resampled trajectories [n_peds, n_dense_steps, 2] with sim_dt spacing
@@ -228,9 +252,16 @@ class TrajectoryPredictor:
             raise ValueError(f"Unexpected prediction shape: {pred_traj.shape}")
 
         pred_len, n_peds, _ = pred_traj.shape
-        time_src = np.arange(1, pred_len + 1) * self.sgan_dt
+        # Source times relative to the current time (anchor is `staleness` ago)
+        time_src = np.arange(1, pred_len + 1) * self.sgan_dt - staleness
+        if anchor_pos is not None:
+            time_src = np.concatenate(([-staleness], time_src))
+            pred_traj = np.concatenate((anchor_pos[None, ...], pred_traj), axis=0)
 
-        target_horizon = max(self.plan_horizon, time_src[-1])
+        # The horizon must not depend on staleness, otherwise the dense length
+        # varies between steps (breaking np.stack over samples and the metric
+        # indexing) whenever plan_horizon < pred_len * sgan_dt.
+        target_horizon = max(self.plan_horizon, pred_len * self.sgan_dt)
         time_target = np.arange(self.sim_dt, target_horizon + 1e-9, self.sim_dt)
 
         # Prepare output
@@ -278,28 +309,31 @@ class TrajectoryPredictor:
         self,
         obs_traj: torch.Tensor,
         obs_traj_rel: torch.Tensor,
-        seq_start_end: torch.Tensor
+        seq_start_end: torch.Tensor,
+        staleness: float = 0.0
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """Predict trajectories, returning best sample and full distribution.
-        
+
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2]
             obs_traj_rel: Observed relative trajectories [obs_len, n_peds, 2]
             seq_start_end: Sequence boundaries [n_seq, 2]
-            
+            staleness: Elapsed time [s] between obs_traj[-1] and current time
+                (see predict())
+
         Returns:
             Tuple of:
             - Best predicted trajectory [n_peds, n_dense_steps, 2]
             - Full distribution [num_samples, n_peds, n_dense_steps, 2] or None
         """
         if self.num_samples == 1:
-            pred = self.predict(obs_traj, obs_traj_rel, seq_start_end)
+            pred = self.predict(obs_traj, obs_traj_rel, seq_start_end, staleness)
             return pred, None
-        
+
         # Generate multiple samples
         samples = []
         for _ in range(self.num_samples):
-            pred = self.predict(obs_traj, obs_traj_rel, seq_start_end)
+            pred = self.predict(obs_traj, obs_traj_rel, seq_start_end, staleness)
             samples.append(pred)
         
         samples = np.stack(samples, axis=0)  # [num_samples, n_peds, pred_len, 2]

@@ -173,8 +173,12 @@ def calculate_standard_ade_fde(
     """Calculate SGAN-style fixed-horizon, scene-level best-of-N ADE/FDE.
 
     Only prediction origins with a complete future horizon are evaluated.
-    Dense planning trajectories are sampled at the predictor cadence so that
-    interpolation and planner-only extrapolation do not affect this metric.
+    Dense trajectories are sampled at the predictor cadence. Note that dense
+    predictions are re-anchored to the evaluation origin (current time), so at
+    origins where the last observation sample is stale (3 out of 4 steps at
+    dt=0.1) the sampled values are linear interpolations between raw predictor
+    outputs, and the last evaluation point lies up to `staleness` beyond the
+    raw support (filled by the predictor's clamped tail extrapolation).
     minADE and minFDE select their best scene-level sample independently.
     """
     ade, fde, max_samples, _ = _standard_ade_fde_details(
