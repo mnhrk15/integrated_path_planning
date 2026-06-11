@@ -24,7 +24,8 @@ num_samples: 20
 # === Ego Vehicle Parameters ===
 # Start: West Leg (-30, 2.5), Heading East (0 rad)
 ego_initial_state: [-30.0, 2.5, 0.0, 5.0, 0.0]
-ego_target_speed: 5.0  # Urban right turn: lateral accel v^2/R = 25/10.5 = 2.4 m/s^2
+ego_target_speed: 5.0  # Urban approach speed (18 km/h); the planner's lateral-acceleration
+                       # limit (ego_max_lat_accel 3.0) forces a slowdown to ~4 m/s at the apex
 ego_max_speed: 8.0
 ego_max_accel: 2.0
 ego_max_curvature: 0.2  # Passenger-car minimum turning radius ~5 m
@@ -42,8 +43,9 @@ obstacle_radius: 0.2
 
 # === Reference Path (Right Turn) ===
 # From West (-30, 2.5) to South (2.5, -30)
-# A smooth curve connecting the two lanes (Rounded R=8m approx)
-# A smooth curve connecting the two lanes (Geometric Arc R=10.5m)
+# Cubic-spline interpolation of these waypoints has max curvature 0.186 /m
+# at the apex (tightest radius ~5.4 m) - a realistic curb-side right turn,
+# feasible under ego_max_curvature 0.2.
 reference_waypoints_x: [-30.0, -8.0, -0.4, 2.0, 2.0]
 reference_waypoints_y: [2.5, 2.5, -0.4, -8.0, -30.0]
 

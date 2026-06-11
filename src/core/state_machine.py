@@ -123,14 +123,18 @@ class FailSafeStateMachine:
             )
 
         elif self.current_state == VehicleState.EMERGENCY:
-            # STOP immediately. Braking effort is relaxed, but the curvature
-            # limit stays (the vehicle cannot out-steer its own geometry).
+            # STOP immediately. Braking effort and lateral acceleration are
+            # relaxed towards the friction limit (evasive regime), but the
+            # curvature limit stays (the vehicle cannot out-steer its own
+            # geometry).
             accel_mult = getattr(self.config, 'state_machine_emergency_accel_multiplier', 3.0)
+            lat_mult = getattr(self.config, 'state_machine_emergency_lat_accel_multiplier', 2.0)
             return StateMachineOutput(
                 state=VehicleState.EMERGENCY,
                 target_speed_override=0.0,
                 constraint_overrides={
-                    "max_accel": self.config.ego_max_accel * accel_mult
+                    "max_accel": self.config.ego_max_accel * accel_mult,
+                    "max_lat_accel": getattr(self.config, 'ego_max_lat_accel', 3.0) * lat_mult
                 }
             )
             

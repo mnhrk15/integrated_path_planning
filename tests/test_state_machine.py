@@ -136,6 +136,11 @@ def test_curvature_limit_never_relaxed(config):
     sm.current_state = VehicleState.EMERGENCY
     output = sm._get_planner_config()
     assert 'max_curvature' not in output.constraint_overrides
+    # EMERGENCY relaxes the lateral-acceleration limit towards the friction
+    # limit instead (evasive regime).
+    assert output.constraint_overrides['max_lat_accel'] == pytest.approx(
+        config.ego_max_lat_accel
+        * config.state_machine_emergency_lat_accel_multiplier)
 
 def test_caution_slows_target_speed(config):
     """CAUTION must lower the planner target speed, not only the speed cap."""

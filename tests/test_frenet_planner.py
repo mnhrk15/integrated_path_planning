@@ -182,48 +182,119 @@ def test_speed_and_accel_checks_skip_index_zero(planner):
     result = planner._check_paths([fp_accel], no_obs, None, overrides)
     assert result['max_accel_error'] == [fp_accel]
 
+def _make_kinematic_fp(c, v, yaw=None, x=None, d=None, s=None, dt=0.1):
+    """Hand-built FrenetPath with consistent kinematics for check tests."""
+    fp = FrenetPath()
+    n = len(c)
+    if x is None:
+        # Integrate positions from speeds so per-sample arc lengths match v.
+        x = [0.0]
+        for i in range(1, n):
+            x.append(x[-1] + v[i] * dt)
+    fp.x = x
+    fp.y = [0.0] * n
+    fp.yaw = yaw if yaw is not None else [0.0] * n
+    fp.t = [dt * i for i in range(n)]
+    fp.v = v
+    fp.a = [0.0] * n
+    fp.c = c
+    fp.d = d if d is not None else [0.0] * n
+    fp.s = s if s is not None else list(x)
+    return fp
+
 def test_curvature_check_skips_index_zero_and_low_speed(planner):
     """c[0] is the current state and may transiently exceed the kinematic
-    limit; it must not veto the candidate. From index 1 on the limit applies,
-    but only at samples faster than LOW_SPEED_CURVATURE_GATE: a stopped,
-    yaw-misaligned vehicle produces a divergent discrete-curvature spike over
-    the first sub-centimetre steps of any restart candidate, which is
-    near-standstill steering, not a violated turning radius."""
-    def make_fp(c, v=None):
-        fp = FrenetPath()
-        n = len(c)
-        fp.x = [float(i) for i in range(n)]
-        fp.y = [0.0] * n
-        fp.t = [0.1 * i for i in range(n)]
-        fp.v = v if v is not None else [4.0] * n
-        fp.a = [0.0] * n
-        fp.c = c
-        return fp
-
+    limit; it must not veto the candidate. From index 1 on the pointwise limit
+    applies at driving speed; at or below LOW_SPEED_CURVATURE_GATE the limit
+    applies to the per-sample yaw change with a floored arc length, so a
+    stopped, yaw-misaligned vehicle can realign (parking-speed steering) but
+    cannot pivot in place."""
     no_obs = np.empty((0, 2))
 
-    # Over-limit only at index 0: kept as 'ok' (planner max_curvature = 1.0).
-    fp = make_fp(c=[1.5, 0.5, 0.5])
+    # Over-limit only at index 0: kept as 'ok' (planner max_curvature = 1.0;
+    # v=2.0 keeps v^2*kappa below the lateral-acceleration limit).
+    fp = _make_kinematic_fp(c=[1.5, 0.5, 0.5], v=[2.0, 2.0, 2.0])
     result = planner._check_paths([fp], no_obs, None, None)
     assert result['ok'] == [fp]
 
     # Over-limit at index 1 at speed: rejected.
-    fp_curv = make_fp(c=[0.5, 1.5, 0.5])
+    fp_curv = _make_kinematic_fp(c=[0.5, 1.5, 0.5], v=[2.0, 2.0, 2.0])
     result = planner._check_paths([fp_curv], no_obs, None, None)
     assert result['max_curvature_error'] == [fp_curv]
 
-    # Restart-from-standstill spike: curvature exceeds the limit only while
-    # v <= 0.5 m/s (indices 1-2), then the path settles. Must be kept.
-    fp_restart = make_fp(c=[0.1, 2.0, 1.4, 0.3, 0.1],
-                         v=[0.0, 0.05, 0.4, 1.2, 3.0])
+    # Restart from standstill: pointwise curvature spikes while v <= 0.5
+    # (indices 1-2, mm-scale arc lengths) but the per-sample yaw change is
+    # tiny. Must be kept.
+    fp_restart = _make_kinematic_fp(
+        c=[0.1, 2.0, 1.4, 0.3, 0.1],
+        v=[0.0, 0.05, 0.4, 1.2, 3.0],
+        yaw=[0.0, 0.002, 0.004, 0.006, 0.008])
     result = planner._check_paths([fp_restart], no_obs, None, None)
     assert result['ok'] == [fp_restart]
 
-    # Same spike at driving speed: rejected.
-    fp_fast = make_fp(c=[0.1, 2.0, 1.4, 0.3, 0.1],
-                      v=[3.0, 3.0, 3.0, 3.0, 3.0])
+    # Snap pivot: 0.3 rad heading change in one near-standstill sample
+    # (cap is max(kappa*ds, 0.1 rad)). Rejected.
+    fp_pivot = _make_kinematic_fp(
+        c=[0.1, 2.0, 1.4, 0.3, 0.1],
+        v=[0.0, 0.05, 0.4, 1.2, 3.0],
+        yaw=[0.0, 0.3, 0.31, 0.32, 0.33])
+    result = planner._check_paths([fp_pivot], no_obs, None, None)
+    assert result['max_curvature_error'] == [fp_pivot]
+
+    # Sideways slide: 0.3 m of lateral displacement with ~zero longitudinal
+    # progress while nearly stopped — the metric-relevant exploit (evading a
+    # collision without rolling). Rejected.
+    fp_slide = _make_kinematic_fp(
+        c=[0.1, 2.0, 1.4, 0.3, 0.1],
+        v=[0.0, 0.05, 0.4, 1.2, 3.0],
+        d=[0.0, 0.3, 0.6, 0.7, 0.7],
+        s=[0.0, 0.001, 0.04, 0.16, 0.46])
+    result = planner._check_paths([fp_slide], no_obs, None, None)
+    assert result['max_curvature_error'] == [fp_slide]
+
+    # Same pointwise spike at driving speed: rejected.
+    fp_fast = _make_kinematic_fp(c=[0.1, 2.0, 1.4, 0.3, 0.1],
+                                 v=[3.0, 3.0, 3.0, 3.0, 3.0])
     result = planner._check_paths([fp_fast], no_obs, None, None)
     assert result['max_curvature_error'] == [fp_fast]
+
+def test_lateral_accel_check(planner):
+    """v^2*kappa must not exceed max_lat_accel (default 3.0); EMERGENCY may
+    relax it via constraint_overrides."""
+    no_obs = np.empty((0, 2))
+
+    # 8 m/s at kappa 0.05 -> 3.2 m/s^2 > 3.0: rejected (within the curvature
+    # limit 1.0, so this is caught by the lateral-acceleration check alone).
+    fp = _make_kinematic_fp(c=[0.0, 0.05, 0.05], v=[8.0, 8.0, 8.0])
+    result = planner._check_paths([fp], no_obs, None, None)
+    assert result['max_lat_accel_error'] == [fp]
+
+    # Index 0 is exempt (current state).
+    fp0 = _make_kinematic_fp(c=[0.05, 0.01, 0.01], v=[8.0, 8.0, 8.0])
+    result = planner._check_paths([fp0], no_obs, None, None)
+    assert result['ok'] == [fp0]
+
+    # EMERGENCY-style override admits the same path.
+    fp2 = _make_kinematic_fp(c=[0.0, 0.05, 0.05], v=[8.0, 8.0, 8.0])
+    result = planner._check_paths([fp2], no_obs, None, {'max_lat_accel': 6.0})
+    assert result['ok'] == [fp2]
+
+def test_road_corridor_check_whole_path(planner):
+    """|d(t)| must stay within max_road_width over the whole path, not only
+    at the terminal offset (the sampling grid only pins d(T))."""
+    no_obs = np.empty((0, 2))
+
+    # Mid-path overshoot beyond max_road_width (7.0): rejected.
+    fp = _make_kinematic_fp(c=[0.0, 0.0, 0.0], v=[4.0, 4.0, 4.0],
+                            d=[0.0, 7.5, 6.9])
+    result = planner._check_paths([fp], no_obs, None, None)
+    assert result['road_bound_error'] == [fp]
+
+    # Index 0 outside the corridor (e.g. ego starts off-grid) is tolerated.
+    fp0 = _make_kinematic_fp(c=[0.0, 0.0, 0.0], v=[4.0, 4.0, 4.0],
+                             d=[7.5, 6.9, 6.0])
+    result = planner._check_paths([fp0], no_obs, None, None)
+    assert result['ok'] == [fp0]
 
 def test_lateral_candidates_bounded_by_max_road_width(mock_spline):
     """Lateral offsets must stay within ±max_road_width (treated as the
@@ -242,9 +313,9 @@ def test_lateral_candidates_bounded_by_max_road_width(mock_spline):
     paths = narrow._generate_frenet_paths(fstate, target_speed=5.0)
     assert len(paths) > 0
     terminal_d = {round(fp.d[-1], 6) for fp in paths if len(fp.d)}
-    assert max(abs(d) for d in terminal_d) <= 1.2 + 1e-9
-    # The grid is symmetric and contains the reference line itself.
-    assert 0.0 in terminal_d
+    # Full symmetric grid: 9 distinct offsets at 0.3 m spacing, extremes at
+    # exactly +-1.2, reference line included.
+    assert terminal_d == {round(0.3 * i, 6) for i in range(-4, 5)}
 
 def test_collision_check_dynamic_same_time_only(planner):
     """Collision requires SAME-TIME co-location, not mere spatial overlap.

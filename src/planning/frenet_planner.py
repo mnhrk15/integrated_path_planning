@@ -45,14 +45,32 @@ K_LON = 1.0  # Longitudinal cost weight
 # Safety
 ROBOT_RADIUS = 2.0  # Robot radius [m]
 
-# Curvature is only constrained at samples faster than this [m/s]. Below it
-# the per-sample arc length is sub-centimetre, so the discrete curvature
-# estimate of a candidate that re-aligns a stopped, yaw-misaligned vehicle
-# with the reference tangent diverges (Δyaw over ~mm of travel) even though
-# the manoeuvre is an ordinary near-standstill steering correction. Without
-# this gate a vehicle that stops with any heading offset can never produce a
-# feasible restart candidate and deadlocks in EMERGENCY.
+# Below this speed [m/s] the pointwise curvature limit is replaced by two
+# near-standstill feasibility bounds (see _curvature_feasible). Pointwise
+# curvature of any restart candidate diverges over the first millimetres of
+# travel (the time-parameterised lateral quintic gives the path a small
+# tangent jump while s barely advances — the known low-speed breakdown of
+# the time-parameterised Frenet formulation, cf. Werling et al. 2010 §V-B),
+# so enforcing it deadlocks the vehicle after every stop. Instead:
+#   1. |Δd| <= max(1.5*|Δs|, 0.02 m) per sample — lateral displacement
+#      requires longitudinal progress (no sideways sliding while stopped;
+#      1.5 ~ tan 56° heading headroom). This blocks the metric-relevant
+#      exploit: near-standstill lateral evasion of a collision.
+#   2. |Δyaw| <= max(max_curvature*ds, 0.1 rad) per sample — generous
+#      parking-regime allowance that admits restart realignment but rejects
+#      snap pivots. The residual optimism (a real car yaws at v*kappa) is
+#      positionally bounded by rule 1 to centimetres.
 LOW_SPEED_CURVATURE_GATE = 0.5
+LOW_SPEED_LAT_SLIP_RATIO = 1.5
+LOW_SPEED_LAT_SLIP_FLOOR = 0.02
+LOW_SPEED_DYAW_CAP = 0.1
+
+# Lateral acceleration limit v^2*kappa [m/s^2] for candidate paths. Urban
+# "acceptable" bound (comfort studies place comfortable at ~1.8-2.0 and
+# unpleasant at >=4); the kinematic curvature limit alone does not prevent
+# friction-infeasible candidates at speed (v^2*kappa exceeds the tyre limit
+# above ~6.3 m/s for kappa=0.2).
+MAX_LAT_ACCEL = 3.0
 
 
 @dataclass(frozen=True)
@@ -131,6 +149,7 @@ class FrenetPlanner:
         self.max_speed = max_speed
         self.max_accel = max_accel
         self.max_curvature = max_curvature
+        self.max_lat_accel = float(kwargs.get("max_lat_accel", MAX_LAT_ACCEL))
         self.dt = dt
         self.d_road_w = d_road_w
         self.max_road_width = max_road_width
@@ -212,9 +231,13 @@ class FrenetPlanner:
         Returns:
             Best trajectory, or None if no valid trajectory found
         """
+        # Reset the diagnostic so an early return cannot leave a stale
+        # breakdown from the previous call.
+        self.last_check_stats = None
+
         # Convert ego state to Frenet frame
         frenet_state = self._cartesian_to_frenet_state(ego_state)
-        
+
         if frenet_state is None:
             logger.warning("Failed to convert ego state to Frenet frame")
             return None
@@ -778,19 +801,23 @@ class FrenetPlanner:
             'max_speed_error': [],
             'max_accel_error': [],
             'max_curvature_error': [],
+            'max_lat_accel_error': [],
+            'road_bound_error': [],
             'collision_error': [],
             'ok': []
         }
-        
+
         # Resolve constraints
         c_max_speed = self.max_speed
         c_max_accel = self.max_accel
         c_max_curvature = self.max_curvature
-        
+        c_max_lat_accel = self.max_lat_accel
+
         if constraint_overrides:
             c_max_speed = constraint_overrides.get('max_speed', c_max_speed)
             c_max_accel = constraint_overrides.get('max_accel', c_max_accel)
             c_max_curvature = constraint_overrides.get('max_curvature', c_max_curvature)
+            c_max_lat_accel = constraint_overrides.get('max_lat_accel', c_max_lat_accel)
         
         for fp in fp_list:
             if len(fp.x) == 0:
@@ -828,15 +855,23 @@ class FrenetPlanner:
                 path_dict['max_speed_error'].append(fp)
             elif any(abs(a) > c_max_accel for a in islice(fp.a, 1, None)):
                 path_dict['max_accel_error'].append(fp)
-            # Curvature is also checked from index 1: c[0] is the current state,
-            # which can transiently exceed the (non-relaxable, kinematic) limit
-            # right after an emergency manoeuvre and must not veto every candidate.
-            # Samples below LOW_SPEED_CURVATURE_GATE are exempt: their discrete
-            # curvature is a numerical artefact of sub-centimetre arc lengths
-            # (near-standstill steering), not a violated turning radius.
-            elif any(abs(c) > c_max_curvature and v > LOW_SPEED_CURVATURE_GATE
-                     for c, v in islice(zip(fp.c, fp.v), 1, None)):
+            elif not self._curvature_feasible(fp, c_max_curvature):
                 path_dict['max_curvature_error'].append(fp)
+            # Lateral acceleration v^2*kappa: the kinematic curvature limit
+            # alone admits friction-infeasible candidates at speed. Checked
+            # from index 1 (index 0 is the unchangeable current state). This
+            # also produces realistic curve negotiation: the planner must slow
+            # down where the reference curvature is high.
+            elif any(v * v * abs(c) > c_max_lat_accel
+                     for v, c in islice(zip(fp.v, fp.c), 1, None)):
+                path_dict['max_lat_accel_error'].append(fp)
+            # Stay inside the road corridor over the WHOLE path, not only at
+            # the terminal lateral offset (the sampling grid only pins d(T)):
+            # an aggressive evasion candidate can overshoot |d| mid-path, and
+            # scenarios without wall obstacles have nothing else to stop it.
+            elif any(abs(d) > self.max_road_width + 1e-9
+                     for d in islice(fp.d, 1, None)):
+                path_dict['road_bound_error'].append(fp)
             # Check collision (chance-constrained over the distribution when provided)
             elif not self._path_is_collision_free(
                 fp, static_obstacles, dynamic_obstacles, dynamic_obstacles_distribution
@@ -844,8 +879,48 @@ class FrenetPlanner:
                 path_dict['collision_error'].append(fp)
             else:
                 path_dict['ok'].append(fp)
-        
+
         return path_dict
+
+    def _curvature_feasible(self, fp: FrenetPath, c_max_curvature: float) -> bool:
+        """Kinematic curvature feasibility with a near-standstill regime.
+
+        Index 0 is the current state and is never checked (the planner cannot
+        change it; it can transiently exceed the limit right after an
+        emergency manoeuvre).
+
+        At samples faster than LOW_SPEED_CURVATURE_GATE the pointwise
+        curvature must respect the (non-relaxable, kinematic) limit. At or
+        below the gate the pointwise value diverges for every restart
+        candidate (low-speed breakdown of the time-parameterised Frenet
+        formulation), so two near-standstill bounds replace it — see the
+        constant definitions for the rationale:
+          1. lateral displacement requires longitudinal progress
+             (|Δd| <= max(LOW_SPEED_LAT_SLIP_RATIO*|Δs|, FLOOR)), and
+          2. per-sample yaw change is capped
+             (|Δyaw| <= max(max_curvature*ds, LOW_SPEED_DYAW_CAP)).
+        """
+        n = min(len(fp.c), len(fp.v))
+        # The low-speed branch needs the converted geometry and the Frenet
+        # arrays; internally generated paths carry them in lockstep,
+        # externally constructed ones may not.
+        n_geo = min(len(fp.x), len(fp.y), len(fp.yaw), len(fp.s), len(fp.d))
+        for i in range(1, n):
+            if fp.v[i] > LOW_SPEED_CURVATURE_GATE:
+                if abs(fp.c[i]) > c_max_curvature:
+                    return False
+            elif i < n_geo:
+                dd = abs(fp.d[i] - fp.d[i - 1])
+                d_s = abs(fp.s[i] - fp.s[i - 1])
+                if dd > max(LOW_SPEED_LAT_SLIP_RATIO * d_s,
+                            LOW_SPEED_LAT_SLIP_FLOOR):
+                    return False
+                dyaw = abs(np.arctan2(np.sin(fp.yaw[i] - fp.yaw[i - 1]),
+                                      np.cos(fp.yaw[i] - fp.yaw[i - 1])))
+                ds = float(np.hypot(fp.x[i] - fp.x[i - 1], fp.y[i] - fp.y[i - 1]))
+                if dyaw > max(c_max_curvature * ds, LOW_SPEED_DYAW_CAP):
+                    return False
+        return True
     
     def _path_is_collision_free(
         self,

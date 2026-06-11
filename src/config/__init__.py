@@ -68,7 +68,8 @@ class SimulationConfig:
     ego_target_speed: float = 8.33  # 30 km/h
     ego_max_speed: float = 13.89  # 50 km/h
     ego_max_accel: float = 2.0
-    ego_max_curvature: float = 1.0
+    ego_max_curvature: float = 0.2  # Passenger-car minimum turning radius ~5 m
+    ego_max_lat_accel: float = 3.0  # Urban acceptable lateral acceleration v^2*kappa [m/s^2]
     ego_radius: float = 1.0
     
     # Obstacle / pedestrian safety parameters
@@ -120,6 +121,7 @@ class SimulationConfig:
     state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
     state_machine_emergency_accel_multiplier: float = 3.0  # Acceleration multiplier in EMERGENCY state
+    state_machine_emergency_lat_accel_multiplier: float = 2.0  # Lateral-acceleration multiplier in EMERGENCY (towards the friction limit)
     state_machine_emergency_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     
     # Pedestrians
@@ -204,6 +206,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ego_max_accel must be positive, got {config.ego_max_accel}")
     if config.ego_max_curvature <= 0:
         errors.append(f"ego_max_curvature must be positive, got {config.ego_max_curvature}")
+    if config.ego_max_lat_accel <= 0:
+        errors.append(f"ego_max_lat_accel must be positive, got {config.ego_max_lat_accel}")
     if config.ego_radius <= 0:
         errors.append(f"ego_radius must be positive, got {config.ego_radius}")
     
@@ -263,6 +267,8 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"state_machine_caution_speed_multiplier must be in (0, 1], got {config.state_machine_caution_speed_multiplier}")
     if config.state_machine_emergency_accel_multiplier <= 0:
         errors.append(f"state_machine_emergency_accel_multiplier must be positive, got {config.state_machine_emergency_accel_multiplier}")
+    if config.state_machine_emergency_lat_accel_multiplier <= 0:
+        errors.append(f"state_machine_emergency_lat_accel_multiplier must be positive, got {config.state_machine_emergency_lat_accel_multiplier}")
     if config.state_machine_emergency_curvature_multiplier <= 0:
         errors.append(f"state_machine_emergency_curvature_multiplier must be positive, got {config.state_machine_emergency_curvature_multiplier}")
     
@@ -428,6 +434,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'ego_max_speed': config.ego_max_speed,
         'ego_max_accel': config.ego_max_accel,
         'ego_max_curvature': config.ego_max_curvature,
+        'ego_max_lat_accel': config.ego_max_lat_accel,
         'reference_waypoints_x': config.reference_waypoints_x,
         'reference_waypoints_y': config.reference_waypoints_y,
         'd_road_w': config.d_road_w,

@@ -344,6 +344,7 @@ class IntegratedSimulator:
             max_speed=config.ego_max_speed,
             max_accel=config.ego_max_accel,
             max_curvature=config.ego_max_curvature,
+            max_lat_accel=getattr(config, 'ego_max_lat_accel', 3.0),
             dt=config.dt,
             d_road_w=config.d_road_w,
             max_road_width=config.max_road_width,
