@@ -11,7 +11,7 @@ social_force_params:
   # Increase ego-repulsion field range (sigma) and strength (v0)
   ego_repulsion.sigma: 0.7
   ego_repulsion.v0: 3.5
-  agent_radius: 0.4
+  agent_radius: 0.3  # Gen-5b F: unified across scenarios (was 0.4); sigma/v0 stay per-scenario
 
 
 # === Observation Parameters ===

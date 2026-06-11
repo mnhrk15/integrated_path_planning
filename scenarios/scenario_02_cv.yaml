@@ -11,7 +11,7 @@ total_time: 30.0
 social_force_params:
   ego_repulsion.sigma: 0.3
   ego_repulsion.v0: 2.1
-  agent_radius: 0.2
+  agent_radius: 0.3  # Gen-5b F: unified across scenarios (was 0.2); sigma/v0 stay per-scenario
 
 # === Observation Parameters ===
 obs_len: 8
