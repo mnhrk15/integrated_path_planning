@@ -67,7 +67,8 @@ BASELINE_LABEL = "sgan_single_inf1.00"
 
 
 def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
-            ego_footprint=None, n_circles=None, total_time=None):
+            ego_footprint=None, n_circles=None, total_time=None,
+            v0_randomization=False):
     set_seed(seed)
     config = load_config(scenario)
     config.prediction_method = method
@@ -75,6 +76,8 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
     config.distribution_aware_planning = distribution_aware
     config.chance_epsilon = epsilon
     config.collision_margin_inflation = inflation
+    if v0_randomization:
+        config.sfm_v0_randomization = True
     if ego_footprint is not None:
         config.ego_footprint = ego_footprint
     if n_circles is not None:
@@ -143,12 +146,17 @@ def main():
     ap.add_argument("--total-time", type=float, default=None,
                     help="Override total_time [s] for all scenarios (use a "
                          "separate --outdir: cached runs do not key on this)")
+    ap.add_argument("--v0-randomization", action="store_true",
+                    help="Per-agent desired-speed randomization "
+                         "(sfm_v0_randomization=true, as in the rand benchmark; "
+                         "use a separate --outdir: cached runs do not key on this)")
     args = ap.parse_args()
 
-    if ((args.ego_footprint or args.total_time) and
+    if ((args.ego_footprint or args.total_time or args.v0_randomization) and
             args.outdir == "output/exp_margin_control"):
-        ap.error("--ego-footprint/--total-time change run semantics but are not "
-                 "part of the cache key; use a separate --outdir")
+        ap.error("--ego-footprint/--total-time/--v0-randomization change run "
+                 "semantics but are not part of the cache key; use a separate "
+                 "--outdir")
 
     scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
     wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
@@ -174,7 +182,8 @@ def main():
                     r = run_one(scenario, method, da, eps, inflation, seed,
                                 ego_footprint=args.ego_footprint,
                                 n_circles=args.ego_footprint_n_circles,
-                                total_time=args.total_time)
+                                total_time=args.total_time,
+                                v0_randomization=args.v0_randomization)
                 except Exception:
                     failed += 1
                     print(f"[{done}/{total}] FAILED {Path(scenario).stem} "
