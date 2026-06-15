@@ -68,12 +68,25 @@ class SimulationConfig:
     ego_target_speed: float = 8.33  # 30 km/h
     ego_max_speed: float = 13.89  # 50 km/h
     ego_max_accel: float = 2.0
-    ego_max_curvature: float = 1.0
+    # Deceleration of the last-resort emergency stop (planner found no path
+    # even in EMERGENCY) [m/s²]. None keeps the legacy ego_max_accel * 2.0.
+    ego_emergency_decel: Optional[float] = None
+    ego_max_curvature: float = 0.2  # Passenger-car minimum turning radius ~5 m
+    ego_max_lat_accel: float = 3.0  # Urban acceptable lateral acceleration v^2*kappa [m/s^2]
     ego_radius: float = 1.0
     
     # Obstacle / pedestrian safety parameters
     ped_radius: float = 0.2
     obstacle_radius: float = 0.2
+
+    # Ego footprint for safety-metric evaluation
+    # "circle": legacy single circle of ego_radius at the vehicle centre
+    # "multi_circle": n equal circles covering the vehicle_length x vehicle_width
+    #                 rectangle along the heading axis
+    ego_footprint: str = "circle"
+    vehicle_length: float = 4.5
+    vehicle_width: float = 2.0
+    ego_footprint_n_circles: int = 3
 
     # Planner cost weights (optional override)
     k_j: float = 1.0
@@ -91,6 +104,11 @@ class SimulationConfig:
     d_road_w: float = 0.5
     max_road_width: float = 7.0
     
+    # Distribution-aware (chance-constrained) planning
+    distribution_aware_planning: bool = False  # Consume the full prediction distribution in collision checking
+    chance_epsilon: float = 0.0  # Allowed fraction of colliding samples (0.0 = robust/worst-case)
+    collision_margin_inflation: float = 1.0  # Multiplier on the combined radius in the planner's single-sample dynamic collision check (metrics are unaffected)
+
     # Planner time horizon parameters
     min_t: float = 4.0  # Minimum prediction time [s]
     max_t: float = 5.0  # Maximum prediction time [s]
@@ -98,13 +116,38 @@ class SimulationConfig:
     n_s_sample: int = 1  # Sampling number of target speed
     
     # State machine parameters
-    state_machine_safe_distance_caution: float = 0.5  # Safe distance for CAUTION->NORMAL transition [m]
-    state_machine_safe_distance_emergency: float = 1.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+    # Safe distances are centre-to-pedestrian; they must exceed the combined
+    # collision radius (validated) so the recovery clearance gate is meaningful.
+    state_machine_safe_distance_caution: float = 2.0  # Safe distance for CAUTION->NORMAL transition [m]
+    state_machine_safe_distance_emergency: float = 3.0  # Safe distance for EMERGENCY->CAUTION transition [m]
+    # Clearance-based overrides (footprint-independent). When set they replace
+    # the legacy centre-distance keys above for the recovery gates; the
+    # trigger adds preventive NORMAL->CAUTION escalation (0.0 = disabled).
+    state_machine_recover_clearance_caution: Optional[float] = None  # CAUTION->NORMAL clearance gate [m]
+    state_machine_recover_clearance_emergency: Optional[float] = None  # EMERGENCY->CAUTION clearance gate [m]
+    state_machine_trigger_clearance_caution: float = 0.0  # NORMAL->CAUTION preventive trigger clearance [m]
+    # RSS-style speed-dependent preventive trigger: NORMAL drops to CAUTION
+    # when clearance < trigger_clearance + time_headway * ego_speed. The
+    # headway term makes fast approaches escalate earlier without making the
+    # low-speed regime noisy; 0.0 keeps the legacy fixed-clearance trigger.
+    state_machine_trigger_time_headway: float = 0.0  # tau [s]
+    # Safe-speed envelope in CAUTION: the planner target speed is capped at
+    # v_env = sqrt(2 * envelope_decel * (clearance - envelope_standoff)), the
+    # speed from which a constant envelope_decel braking stops envelope_standoff
+    # short of the nearest pedestrian. "The closer, the slower" is thereby
+    # enforced at planning time, so braking starts while a comfortable stop is
+    # still possible instead of slamming when the same-time collision check
+    # finally bites; near standstill (clearance <= standoff) the target is 0,
+    # which also removes the restart-and-slam jitter while pedestrians pass.
+    # envelope_decel 0.0 disables the envelope (legacy fixed CAUTION target).
+    state_machine_envelope_decel: float = 0.0  # comfortable braking rate [m/s²]
+    state_machine_envelope_standoff: float = 0.5  # stop margin to clearance [m]
     state_machine_caution_accel_multiplier: float = 1.5  # Acceleration multiplier in CAUTION state
-    state_machine_caution_curvature_multiplier: float = 1.2  # Curvature multiplier in CAUTION state
-    state_machine_caution_speed_multiplier: float = 0.8  # Speed multiplier in CAUTION state
+    state_machine_caution_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
+    state_machine_caution_speed_multiplier: float = 0.8  # Target/max speed multiplier in CAUTION state (preventive slowdown)
     state_machine_emergency_accel_multiplier: float = 3.0  # Acceleration multiplier in EMERGENCY state
-    state_machine_emergency_curvature_multiplier: float = 2.0  # Curvature multiplier in EMERGENCY state
+    state_machine_emergency_lat_accel_multiplier: float = 2.0  # Lateral-acceleration multiplier in EMERGENCY (towards the friction limit)
+    state_machine_emergency_curvature_multiplier: float = 1.0  # Deprecated, ignored (curvature is kinematic and never relaxed)
     
     # Pedestrians
     ped_initial_states: list = field(default_factory=list)
@@ -114,6 +157,15 @@ class SimulationConfig:
     # Social Force config
     social_force_config: Optional[str] = None
     social_force_params: Dict[str, Any] = field(default_factory=dict)
+
+    # Per-agent desired-speed randomization (distributional ground truth, A-1).
+    # When enabled, each pedestrian's desired speed (pysocialforce max_speeds)
+    # gets additive N(0, sfm_v0_std) noise, floored at sfm_v0_min. The default
+    # std is the inter-individual SD reported by Moussaid et al. 2009
+    # (Proc. R. Soc. B 276:2755: v0 ~ N(1.29, 0.19) m/s).
+    sfm_v0_randomization: bool = False
+    sfm_v0_std: float = 0.19
+    sfm_v0_min: float = 0.3
     
     # Model
     # Model
@@ -177,8 +229,22 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ego_max_speed ({config.ego_max_speed}) must be >= ego_target_speed ({config.ego_target_speed})")
     if config.ego_max_accel <= 0:
         errors.append(f"ego_max_accel must be positive, got {config.ego_max_accel}")
+    if config.ego_emergency_decel is not None and config.ego_emergency_decel <= 0:
+        errors.append(f"ego_emergency_decel must be positive, got {config.ego_emergency_decel}")
+    if (config.ego_emergency_decel is not None
+            and config.ego_emergency_decel < config.ego_max_accel):
+        # The adaptive emergency stop clips the required rate to
+        # [ego_max_accel, ego_emergency_decel]; an inverted range silently
+        # degenerates (np.clip with lo > hi always returns hi) and the
+        # "emergency" stop would be SOFTER than ordinary planner braking.
+        errors.append(
+            f"ego_emergency_decel ({config.ego_emergency_decel}) must be >= "
+            f"ego_max_accel ({config.ego_max_accel}): the emergency stop rate "
+            f"is clipped to [ego_max_accel, ego_emergency_decel]")
     if config.ego_max_curvature <= 0:
         errors.append(f"ego_max_curvature must be positive, got {config.ego_max_curvature}")
+    if config.ego_max_lat_accel <= 0:
+        errors.append(f"ego_max_lat_accel must be positive, got {config.ego_max_lat_accel}")
     if config.ego_radius <= 0:
         errors.append(f"ego_radius must be positive, got {config.ego_radius}")
     
@@ -207,16 +273,95 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"state_machine_safe_distance_caution must be non-negative, got {config.state_machine_safe_distance_caution}")
     if config.state_machine_safe_distance_emergency < 0:
         errors.append(f"state_machine_safe_distance_emergency must be non-negative, got {config.state_machine_safe_distance_emergency}")
-    if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
-        errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
+    # Recovery gates. The clearance keys (footprint-independent) take
+    # precedence when set; the legacy keys are centre-to-pedestrian distances
+    # and are validated only when they are the active source — values at or
+    # below the combined collision radius make the clearance gate vacuous
+    # (recovery would trigger even while overlapping the pedestrian).
+    from ..core.footprint import effective_ego_radius
+    combined_collision_radius = effective_ego_radius(config) + config.ped_radius
+    rec_caution = config.state_machine_recover_clearance_caution
+    rec_emergency = config.state_machine_recover_clearance_emergency
+    if rec_caution is None:
+        if config.state_machine_safe_distance_caution <= combined_collision_radius:
+            errors.append(
+                f"state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution}) must be > "
+                f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
+    elif rec_caution <= 0:
+        errors.append(f"state_machine_recover_clearance_caution must be positive, got {rec_caution}")
+    if rec_emergency is None:
+        if config.state_machine_safe_distance_emergency <= combined_collision_radius:
+            errors.append(
+                f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) must be > "
+                f"combined collision radius ({combined_collision_radius:.2f} = effective ego radius + ped_radius)")
+    elif rec_emergency <= 0:
+        errors.append(f"state_machine_recover_clearance_emergency must be positive, got {rec_emergency}")
+    if rec_caution is None and rec_emergency is None:
+        if config.state_machine_safe_distance_emergency < config.state_machine_safe_distance_caution:
+            errors.append(f"state_machine_safe_distance_emergency ({config.state_machine_safe_distance_emergency}) should be >= state_machine_safe_distance_caution ({config.state_machine_safe_distance_caution})")
+    elif rec_caution is not None and rec_emergency is not None and rec_emergency < rec_caution:
+        errors.append(
+            f"state_machine_recover_clearance_emergency ({rec_emergency}) should be >= "
+            f"state_machine_recover_clearance_caution ({rec_caution})")
+    trigger = config.state_machine_trigger_clearance_caution
+    headway = config.state_machine_trigger_time_headway
+    if trigger < 0:
+        errors.append(f"state_machine_trigger_clearance_caution must be non-negative, got {trigger}")
+    if headway < 0:
+        errors.append(f"state_machine_trigger_time_headway must be non-negative, got {headway}")
+    if trigger >= 0 and headway >= 0 and (trigger > 0 or headway > 0):
+        # Hysteresis sanity check: the trigger evaluated at the CAUTION
+        # target speed (caution_speed_multiplier * ego_target_speed) must sit
+        # strictly below the CAUTION->NORMAL recovery gate, otherwise the
+        # configured gate has no effect at the commanded speed (recovery is
+        # then governed entirely by the trigger threshold, which demands a
+        # larger clearance than the gate the user asked for). The
+        # runtime recovery gate is additionally speed-aware
+        # (clearance > max(gate, trigger + headway * v)), which prevents an
+        # immediate re-trigger at ANY speed; this static check only rejects
+        # configurations that are inconsistent at their nominal speed.
+        # (Do not tighten this to ego_target_speed: the tuned S1/S3 scenarios
+        # rely on the envelope keeping the post-recovery speed low.)
+        effective_rec_caution = (
+            rec_caution if rec_caution is not None
+            else config.state_machine_safe_distance_caution - combined_collision_radius)
+        recovery_speed = (config.state_machine_caution_speed_multiplier
+                          * config.ego_target_speed)
+        trigger_at_recovery = trigger + headway * recovery_speed
+        if trigger_at_recovery >= effective_rec_caution:
+            errors.append(
+                f"preventive trigger at the CAUTION recovery speed "
+                f"({trigger_at_recovery:.2f} = {trigger} + {headway} * {recovery_speed:.2f}) "
+                f"must be < the effective CAUTION recovery clearance "
+                f"({effective_rec_caution:.2f}) for hysteresis")
+    if config.state_machine_envelope_decel < 0:
+        errors.append(f"state_machine_envelope_decel must be non-negative, got {config.state_machine_envelope_decel}")
+    if config.state_machine_envelope_standoff < 0:
+        errors.append(f"state_machine_envelope_standoff must be non-negative, got {config.state_machine_envelope_standoff}")
+    if config.state_machine_envelope_decel > config.ego_max_accel:
+        # The envelope promises a stop at envelope_decel; a rate above the
+        # planner's acceleration limit cannot be realised by any candidate.
+        logger.warning(
+            f"state_machine_envelope_decel ({config.state_machine_envelope_decel}) exceeds "
+            f"ego_max_accel ({config.ego_max_accel}); the promised stop is not plannable")
     if config.state_machine_caution_accel_multiplier <= 0:
         errors.append(f"state_machine_caution_accel_multiplier must be positive, got {config.state_machine_caution_accel_multiplier}")
     if config.state_machine_caution_curvature_multiplier <= 0:
         errors.append(f"state_machine_caution_curvature_multiplier must be positive, got {config.state_machine_caution_curvature_multiplier}")
+    # The curvature limit is a kinematic vehicle property and is no longer
+    # relaxed by the state machine; the multiplier keys are kept only for
+    # backward compatibility with existing configs.
+    if (config.state_machine_caution_curvature_multiplier != 1.0
+            or config.state_machine_emergency_curvature_multiplier != 1.0):
+        logger.warning(
+            "state_machine_*_curvature_multiplier is deprecated and ignored: "
+            "the curvature limit is kinematic and never relaxed.")
     if config.state_machine_caution_speed_multiplier <= 0 or config.state_machine_caution_speed_multiplier > 1.0:
         errors.append(f"state_machine_caution_speed_multiplier must be in (0, 1], got {config.state_machine_caution_speed_multiplier}")
     if config.state_machine_emergency_accel_multiplier <= 0:
         errors.append(f"state_machine_emergency_accel_multiplier must be positive, got {config.state_machine_emergency_accel_multiplier}")
+    if config.state_machine_emergency_lat_accel_multiplier <= 0:
+        errors.append(f"state_machine_emergency_lat_accel_multiplier must be positive, got {config.state_machine_emergency_lat_accel_multiplier}")
     if config.state_machine_emergency_curvature_multiplier <= 0:
         errors.append(f"state_machine_emergency_curvature_multiplier must be positive, got {config.state_machine_emergency_curvature_multiplier}")
     
@@ -225,6 +370,24 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"ped_radius must be positive, got {config.ped_radius}")
     if config.obstacle_radius <= 0:
         errors.append(f"obstacle_radius must be positive, got {config.obstacle_radius}")
+    if config.collision_margin_inflation < 1.0:
+        errors.append(f"collision_margin_inflation must be >= 1.0, got {config.collision_margin_inflation}")
+    # chance_epsilon >= 1.0 would accept paths colliding under every sample
+    # (max_violations = floor(eps * n) = n); catch percent-style typos early.
+    if not (0.0 <= config.chance_epsilon < 1.0):
+        errors.append(f"chance_epsilon must be in [0.0, 1.0), got {config.chance_epsilon}")
+    if config.distribution_aware_planning and config.num_samples < 2:
+        errors.append(
+            f"distribution_aware_planning requires num_samples >= 2 (got {config.num_samples}); "
+            "with a single sample the planner silently degrades to single-sample planning")
+    if config.ego_footprint not in ("circle", "multi_circle"):
+        errors.append(f"ego_footprint must be 'circle' or 'multi_circle', got {config.ego_footprint!r}")
+    if config.vehicle_length <= 0:
+        errors.append(f"vehicle_length must be positive, got {config.vehicle_length}")
+    if config.vehicle_width <= 0:
+        errors.append(f"vehicle_width must be positive, got {config.vehicle_width}")
+    if config.ego_footprint_n_circles < 1:
+        errors.append(f"ego_footprint_n_circles must be >= 1, got {config.ego_footprint_n_circles}")
     
     # Reference path
     if len(config.reference_waypoints_x) < 2:
@@ -252,7 +415,12 @@ def validate_config(config: SimulationConfig) -> None:
         # Check if all pedestrians are in at least one group (optional warning, not error)
         if len(all_group_indices) < n_peds:
             logger.warning(f"Some pedestrians are not in any group: {set(range(n_peds)) - all_group_indices}")
-    
+
+    if config.sfm_v0_std < 0:
+        errors.append(f"sfm_v0_std must be non-negative, got {config.sfm_v0_std}")
+    if config.sfm_v0_min <= 0:
+        errors.append(f"sfm_v0_min must be positive, got {config.sfm_v0_min}")
+
     # Static obstacles
     for i, obs in enumerate(config.static_obstacles):
         if len(obs) != 4:
@@ -358,7 +526,9 @@ def save_config(config: SimulationConfig, config_path: str):
         'ego_target_speed': config.ego_target_speed,
         'ego_max_speed': config.ego_max_speed,
         'ego_max_accel': config.ego_max_accel,
+        'ego_emergency_decel': config.ego_emergency_decel,
         'ego_max_curvature': config.ego_max_curvature,
+        'ego_max_lat_accel': config.ego_max_lat_accel,
         'reference_waypoints_x': config.reference_waypoints_x,
         'reference_waypoints_y': config.reference_waypoints_y,
         'd_road_w': config.d_road_w,
@@ -367,6 +537,12 @@ def save_config(config: SimulationConfig, config_path: str):
         'max_t': config.max_t,
         'd_t_s': config.d_t_s,
         'n_s_sample': config.n_s_sample,
+        'state_machine_recover_clearance_caution': config.state_machine_recover_clearance_caution,
+        'state_machine_recover_clearance_emergency': config.state_machine_recover_clearance_emergency,
+        'state_machine_trigger_clearance_caution': config.state_machine_trigger_clearance_caution,
+        'state_machine_trigger_time_headway': config.state_machine_trigger_time_headway,
+        'state_machine_envelope_decel': config.state_machine_envelope_decel,
+        'state_machine_envelope_standoff': config.state_machine_envelope_standoff,
         'state_machine_safe_distance_caution': config.state_machine_safe_distance_caution,
         'state_machine_safe_distance_emergency': config.state_machine_safe_distance_emergency,
         'state_machine_caution_accel_multiplier': config.state_machine_caution_accel_multiplier,

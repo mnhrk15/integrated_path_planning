@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import Optional, List, Tuple, Dict, Any, Union
 import numpy as np
 
+from .footprint import EgoFootprint
+
 # Import VehicleState but avoid circular dependency if possible is tricky.
 # Instead, we just import it. If circular dependency happens, we might need to move enum here.
 # For now, let's redefine the Enum here or import it if appropriate.
@@ -276,10 +278,11 @@ class SimulationResult:
     ego_radius: float = 1.0
     ped_radius: float = 0.3
     state: VehicleState = VehicleState.NORMAL
-    
+    footprint: Optional["EgoFootprint"] = None
+
     def compute_safety_metrics(self) -> Dict[str, Any]:
         """Compute safety-related metrics.
-        
+
         Returns:
             Dictionary containing:
                 - min_distance: Minimum distance to any pedestrian [m]
@@ -290,7 +293,8 @@ class SimulationResult:
             ego_state=self.ego_state,
             ped_state=self.ped_state,
             ego_radius=self.ego_radius,
-            ped_radius=self.ped_radius
+            ped_radius=self.ped_radius,
+            footprint=self.footprint
         )
 
 
@@ -298,50 +302,87 @@ def compute_safety_metrics_static(
     ego_state: EgoVehicleState,
     ped_state: PedestrianState,
     ego_radius: float,
-    ped_radius: float
+    ped_radius: float,
+    footprint: Optional["EgoFootprint"] = None
 ) -> Dict[str, Any]:
     """Compute safety-related metrics from ego and pedestrian states.
-    
+
     This is a static function that can be called independently, useful for
     computing metrics before creating a SimulationResult (e.g., for state machine decisions).
-    
+
     Args:
         ego_state: Current ego vehicle state
         ped_state: Current pedestrian state
         ego_radius: Collision radius for ego vehicle [m]
         ped_radius: Collision radius for pedestrians [m]
-        
+        footprint: Optional multi-circle footprint. When given, distances and
+            collisions are evaluated against every footprint circle (radius
+            footprint.radius) instead of the single ego_radius centre circle.
+
     Returns:
         Dictionary containing:
-            - min_distance: Minimum distance to any pedestrian [m]
+            - min_distance: Minimum distance from any reference circle centre
+              to any pedestrian [m] (vehicle centre in single-circle mode)
             - collision: Whether collision occurred (bool)
             - ttc: Time to collision [s] (if applicable)
+            - clearance: min_distance minus the combined collision radius [m]
+            - clearance_ahead: clearance restricted to pedestrians in the
+              forward half-plane of the vehicle (inf when none). Braking only
+              helps against frontal conflicts, so the safe-speed envelope and
+              the adaptive emergency stop key on this; pedestrians beside or
+              behind a stopped vehicle must not pin its speed target at zero.
     """
-    # Compute minimum distance to pedestrians
-    ego_pos = np.array([ego_state.x, ego_state.y])
-    distances = np.linalg.norm(ped_state.positions - ego_pos, axis=1)
-    min_distance = np.min(distances) if len(distances) > 0 else float('inf')
-    
-    combined_radius = ego_radius + ped_radius
+    if footprint is None:
+        centers = np.array([[ego_state.x, ego_state.y]])
+        combined_radius = ego_radius + ped_radius
+    else:
+        centers = footprint.circle_centers(ego_state.x, ego_state.y, ego_state.yaw)
+        combined_radius = footprint.radius + ped_radius
+
+    # Minimum distance over (circle centre, pedestrian) pairs
+    if len(ped_state.positions) > 0:
+        # [n_circles, n_peds]
+        dist_matrix = np.linalg.norm(
+            ped_state.positions[None, :, :] - centers[:, None, :], axis=2
+        )
+        min_distance = float(np.min(dist_matrix))
+    else:
+        dist_matrix = np.empty((len(centers), 0))
+        min_distance = float('inf')
+
     collision = min_distance < combined_radius
-    
-    # Time to collision (simplified, along relative approach)
+
+    # Time to collision (simplified, along relative approach), evaluated for
+    # each footprint circle as a translating point with the ego velocity
     ttc = float('inf')
-    if len(distances) > 0:
+    if len(ped_state.positions) > 0:
         ego_vx = ego_state.v * np.cos(ego_state.yaw)
         ego_vy = ego_state.v * np.sin(ego_state.yaw)
         ego_vel = np.array([ego_vx, ego_vy])
-        for pos, vel, dist in zip(ped_state.positions, ped_state.velocities, distances):
-            rel_pos = pos - ego_pos
-            rel_vel = vel - ego_vel
-            rel_speed_along_line = -np.dot(rel_pos, rel_vel) / (np.linalg.norm(rel_pos) + 1e-8)
-            if rel_speed_along_line > 1e-5:
-                time_to_collision = (dist - combined_radius) / rel_speed_along_line
-                if time_to_collision >= 0:
-                    ttc = min(ttc, time_to_collision)
-    
+        for ci, center in enumerate(centers):
+            for pi, (pos, vel) in enumerate(zip(ped_state.positions, ped_state.velocities)):
+                rel_pos = pos - center
+                rel_vel = vel - ego_vel
+                rel_speed_along_line = -np.dot(rel_pos, rel_vel) / (np.linalg.norm(rel_pos) + 1e-8)
+                if rel_speed_along_line > 1e-5:
+                    time_to_collision = (dist_matrix[ci, pi] - combined_radius) / rel_speed_along_line
+                    if time_to_collision >= 0:
+                        ttc = min(ttc, time_to_collision)
+
+    # Forward-restricted clearance: pedestrians whose longitudinal coordinate
+    # in the vehicle frame is positive (strictly ahead of the vehicle centre).
+    clearance_ahead = float('inf')
+    if len(ped_state.positions) > 0:
+        heading = np.array([np.cos(ego_state.yaw), np.sin(ego_state.yaw)])
+        rel = ped_state.positions - np.array([ego_state.x, ego_state.y])
+        ahead = rel @ heading > 0.0
+        if np.any(ahead):
+            clearance_ahead = float(np.min(dist_matrix[:, ahead])) - combined_radius
+
     return {
         'min_distance': min_distance,
         'collision': collision,
-        'ttc': ttc
+        'ttc': ttc,
+        'clearance': min_distance - combined_radius,
+        'clearance_ahead': clearance_ahead
     }

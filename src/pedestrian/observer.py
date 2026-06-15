@@ -33,6 +33,7 @@ class PedestrianObserver:
         self.timestamps: deque = deque(maxlen=obs_len)
         self.n_peds = 0
         self.accumulated_time: float = 0.0
+        self._last_update_timestamp: Optional[float] = None
 
         logger.info(
             f"Pedestrian observer initialized with obs_len={obs_len}, "
@@ -45,6 +46,7 @@ class PedestrianObserver:
         self.timestamps.clear()
         self.n_peds = 0
         self.accumulated_time = 0.0
+        self._last_update_timestamp = None
         logger.debug("Observer history reset")
     
     def update(self, ped_state: PedestrianState):
@@ -53,15 +55,19 @@ class PedestrianObserver:
         Args:
             ped_state: Current pedestrian state
         """
-        # Accumulate simulation time and only sample when reaching SGAN interval
-        if len(self.timestamps) > 0:
+        # Accumulate simulation time and only sample when reaching SGAN interval.
+        # The reference time must be the previous update() call (not the last
+        # sampled frame), otherwise elapsed time between samples is counted
+        # multiple times and sampling happens faster than sgan_dt.
+        if self._last_update_timestamp is not None:
             delta_t = max(
-                ped_state.timestamp - self.timestamps[-1],
+                ped_state.timestamp - self._last_update_timestamp,
                 0.0
             )
         else:
             # Fall back to configured simulation dt for the first step
             delta_t = self.dt
+        self._last_update_timestamp = ped_state.timestamp
 
         self.accumulated_time += delta_t
 
@@ -69,14 +75,23 @@ class PedestrianObserver:
             self.history.append(ped_state.positions.copy())
             self.timestamps.append(ped_state.timestamp)
             self.n_peds = ped_state.n_peds
-            # Keep leftover time so we stay aligned to sgan_dt
-            self.accumulated_time %= self.sgan_dt
+            # Keep leftover time so we stay aligned to sgan_dt. Subtraction
+            # (not modulo) so that a leftover within the 1e-9 tolerance does
+            # not survive as ~sgan_dt and trigger an immediate resample.
+            self.accumulated_time = max(self.accumulated_time - self.sgan_dt, 0.0)
 
             logger.debug(
                 f"Observer sampled at t={ped_state.timestamp:.2f}s, "
                 f"history length={len(self.history)}/{self.obs_len}"
             )
     
+    @property
+    def last_sample_time(self) -> Optional[float]:
+        """Timestamp of the most recent sampled frame, or None if empty."""
+        if len(self.timestamps) == 0:
+            return None
+        return self.timestamps[-1]
+
     @property
     def is_ready(self) -> bool:
         """Check if enough observations have been accumulated.

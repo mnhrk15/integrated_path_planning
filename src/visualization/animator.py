@@ -40,15 +40,19 @@ class SimulationAnimator:
         figsize: Figure size (width, height) in inches
         dpi: Dots per inch for rendered output
         interval: Frame interval in milliseconds
+        vehicle_length: Drawn ego body length [m] (from config.vehicle_length)
+        vehicle_width: Drawn ego body width [m] (from config.vehicle_width)
     """
-    
+
     def __init__(
         self,
         results: List[SimulationResult],
         map_config: Optional[Dict] = None,
         figsize: Tuple[float, float] = (14, 8),
         dpi: int = 100,
-        interval: int = 100  # ms between frames
+        interval: int = 100,  # ms between frames
+        vehicle_length: float = 4.5,
+        vehicle_width: float = 2.0
     ):
         if len(results) == 0:
             raise ValueError("SimulationAnimator requires at least one result")
@@ -57,6 +61,8 @@ class SimulationAnimator:
         self.figsize = figsize
         self.dpi = dpi
         self.interval = interval
+        self.vehicle_length = vehicle_length
+        self.vehicle_width = vehicle_width
         self.n_frames = len(results)
         
         # Setup figure
@@ -128,7 +134,10 @@ class SimulationAnimator:
         # Add legend with proxy artists
         legend_elements = [
             Patch(facecolor=ego_color, edgecolor='black', alpha=0.9, label='Ego Vehicle'),
-            Line2D([0], [0], color=ped_color, marker='o', linestyle='None', 
+            Line2D([0], [0], color='magenta', marker='o', linestyle='None',
+                  markerfacecolor='none', markersize=10,
+                  label='Collision footprint'),
+            Line2D([0], [0], color=ped_color, marker='o', linestyle='None',
                   markersize=8, alpha=0.7, label='Pedestrian'),
         ]
         
@@ -247,7 +256,12 @@ class SimulationAnimator:
         self.ax_distance.set_ylabel('Distance [m]', fontsize=10)
         self.ax_distance.set_title('Min Distance to Pedestrians', fontsize=11, fontweight='bold')
         self.ax_distance.grid(True, alpha=0.3)
-        self.ax_distance.axhline(y=1.0, color='r', linestyle='--', 
+        # Combined collision radius actually used by the safety metrics
+        # (footprint circle radius in multi_circle mode, ego_radius otherwise)
+        first = self.results[0]
+        ego_r = (first.footprint.radius if first.footprint is not None
+                 else first.ego_radius)
+        self.ax_distance.axhline(y=ego_r + first.ped_radius, color='r', linestyle='--',
                                 linewidth=1, alpha=0.7, label='Safety threshold')
         self.ax_distance.legend(fontsize=9)
     
@@ -265,7 +279,10 @@ class SimulationAnimator:
             zorder=10, label='Ego Vehicle'
         )
         self.ax_main.add_patch(artists['ego'])
-        
+
+        # Collision footprint overlay (recreated per frame like pedestrians)
+        artists['footprint'] = []
+
         # Ego trail
         artists['ego_trail'], = self.ax_main.plot(
             [], [], '-', color=ego_color, alpha=0.3, linewidth=1,
@@ -343,12 +360,12 @@ class SimulationAnimator:
     def _update_ego(self, artists, result, frame, trail_length):
         """Update ego vehicle visualization."""
         ego = result.ego_state
-        
+
         # Update arrow position and rotation
-        # Car dimensions (approximate average car size)
-        L = 4.5  # Length
-        W = 2.0  # Width
-        
+        # Car body dimensions (from config.vehicle_length / vehicle_width)
+        L = self.vehicle_length
+        W = self.vehicle_width
+
         # Calculate corners relative to center (Yaw=0 points East/+X)
         # FL, FR, RR, RL
         corners_local = np.array([
@@ -367,7 +384,30 @@ class SimulationAnimator:
         
         # Update polygon vertices
         artists['ego'].set_xy(corners_global)
-        
+
+        # Collision footprint actually used by the safety metrics: the body
+        # rectangle above is what the vehicle occupies, the dashed circles are
+        # what collision checking sees (single ego_radius circle in circle
+        # mode, the multi-circle cover otherwise) — drawn so the mismatch
+        # between the two is visible instead of hidden.
+        for circle in artists.get('footprint', []):
+            circle.remove()
+        artists['footprint'] = []
+        if result.footprint is not None:
+            centers = result.footprint.circle_centers(ego.x, ego.y, ego.yaw)
+            radius = result.footprint.radius
+        else:
+            centers = np.array([[ego.x, ego.y]])
+            radius = result.ego_radius
+        for center in centers:
+            circle = Circle(
+                center, radius=radius, facecolor='none',
+                edgecolor='magenta', linestyle='--', linewidth=1.2,
+                alpha=0.9, zorder=11
+            )
+            self.ax_main.add_patch(circle)
+            artists['footprint'].append(circle)
+
         # Update trail
         start_idx = max(0, frame - trail_length)
         trail_x = [self.results[i].ego_state.x for i in range(start_idx, frame + 1)]
@@ -553,6 +593,8 @@ def create_simple_animation(
     trail_length: int = 50,
     figsize: Tuple[float, float] = (14, 8),
     fps: int = 10,
+    vehicle_length: float = 4.5,
+    vehicle_width: float = 2.0,
     **kwargs,
 ) -> SimulationAnimator:
     """Convenience function to create and display/save animation.
@@ -567,7 +609,10 @@ def create_simple_animation(
     Returns:
         SimulationAnimator instance
     """
-    animator = SimulationAnimator(results, map_config=map_config, figsize=figsize)
+    animator = SimulationAnimator(
+        results, map_config=map_config, figsize=figsize,
+        vehicle_length=vehicle_length, vehicle_width=vehicle_width
+    )
     
     # Determine writer from file extension
     writer = 'pillow'  # Default to GIF

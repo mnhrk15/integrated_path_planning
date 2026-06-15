@@ -12,9 +12,9 @@ total_time: 30.0
 
 # === Social Force Parameters ===
 social_force_params:
-  ped_repulsion.sigma: 0.7 
-  ped_repulsion.v0: 3.5 
-  agent_radius: 0.4
+  ego_repulsion.sigma: 0.7
+  ego_repulsion.v0: 3.5
+  agent_radius: 0.3  # Gen-5b F: unified across scenarios (was 0.4); sigma/v0 stay per-scenario
 
 # === Observation Parameters ===
 obs_len: 8
@@ -23,33 +23,51 @@ num_samples: 20
 
 # === Ego Vehicle Parameters ===
 # Start: West Leg (-30, 2.5), Heading East (0 rad)
-ego_initial_state: [-30.0, 2.5, 0.0, 6.0, 0.0]
-ego_target_speed: 8.0
-ego_max_speed: 10.0
-ego_max_accel: 3.0
-ego_max_curvature: 1.0
+ego_initial_state: [-30.0, 2.5, 0.0, 5.0, 0.0]
+ego_target_speed: 5.0  # Urban approach speed (18 km/h); the planner's lateral-acceleration
+                       # limit (ego_max_lat_accel 3.0) forces a slowdown to ~4 m/s at the apex
+ego_max_speed: 8.0
+ego_max_accel: 2.0
+ego_emergency_decel: 4.0  # Last-resort stop deceleration, unified across scenarios
+ego_max_curvature: 0.2  # Passenger-car minimum turning radius ~5 m
 ego_radius: 1.0
 
 # === Planning Parameters ===
 d_road_w: 0.3
-max_road_width: 7.0
+max_road_width: 1.2  # Lane centre at 2.5 m from road centre; outer margin 5.0-2.5-1.25 m
+
+# === Fail-Safe State Machine (clearance-based, footprint-independent) ===
+# Preventive slowdown (RSS-style, speed-dependent): drop to CAUTION when the
+# nearest pedestrian's clearance (surface-to-surface) falls below
+# 1.0 + 0.8*v m even if planning succeeds, and slow to 0.6x target. Fast
+# approaches escalate earlier (5.0 m at 5 m/s) while the low-speed regime
+# stays quiet; at the 3.0 m/s recovery speed the trigger is 3.4 m, below
+# the 3.5 m recovery gate (hysteresis).
+state_machine_trigger_clearance_caution: 1.0
+state_machine_trigger_time_headway: 0.8
+state_machine_recover_clearance_caution: 3.5
+state_machine_recover_clearance_emergency: 3.5
+state_machine_caution_speed_multiplier: 0.6
+# Safe-speed envelope (CAUTION): target speed capped at
+# sqrt(2 * 1.2 * (clearance - 1.0)) — the speed a comfortable 1.2 m/s²
+# braking can stop from, 1.0 m short of the nearest pedestrian. Braking
+# starts while a gentle stop is still possible instead of slamming when
+# the same-time collision check finally bites; at standstill it also
+# suppresses the restart-and-slam jitter while pedestrians pass.
+state_machine_envelope_decel: 1.2
+state_machine_envelope_standoff: 1.0
 
 # === Obstacle / Pedestrian Parameters ===
 ped_radius: 0.2
 obstacle_radius: 0.2
 
-# === Planner Cost Weights (optional) ===
-k_j: 0.5
-k_t: 1.0
-k_d: 1.0
-k_s_dot: 0.5
-k_lat: 1.5
-k_lon: 1.0
+# === Planner Cost Weights: unified to defaults (all 1.0) ===
 
 # === Reference Path (Right Turn) ===
 # From West (-30, 2.5) to South (2.5, -30)
-# A smooth curve connecting the two lanes (Rounded R=8m approx)
-# A smooth curve connecting the two lanes (Geometric Arc R=10.5m)
+# Cubic-spline interpolation of these waypoints has max curvature 0.186 /m
+# at the apex (tightest radius ~5.4 m) - a realistic curb-side right turn,
+# feasible under ego_max_curvature 0.2.
 reference_waypoints_x: [-30.0, -8.0, -0.4, 2.0, 2.0]
 reference_waypoints_y: [2.5, 2.5, -0.4, -8.0, -30.0]
 

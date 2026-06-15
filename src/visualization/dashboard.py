@@ -66,7 +66,12 @@ class DashboardGenerator:
         # 4. Safety (Bottom-Left)
         ax_safe = fig.add_subplot(gs[2, 0])
         ax_safe.plot(times, min_dists, color='orange')
-        ax_safe.axhline(1.0, color='red', linestyle='--', label='Critical Threshold')
+        # Combined collision radius actually used by the safety metrics
+        # (footprint circle radius in multi_circle mode, ego_radius otherwise)
+        first = self.history[0]
+        ego_r = first.footprint.radius if first.footprint is not None else first.ego_radius
+        ax_safe.axhline(ego_r + first.ped_radius, color='red', linestyle='--',
+                        label='Critical Threshold')
         ax_safe.set_title("Minimum Distance")
         ax_safe.set_xlabel("Time [s]")
         ax_safe.set_ylabel("Distance [m]")
@@ -115,15 +120,22 @@ class DashboardGenerator:
 
     def _plot_summary_table(self, ax, metrics: dict):
         """Render summary table."""
+        def fmt_metric(value, precision=3):
+            if value is None or not np.isfinite(value):
+                return "n/a"
+            return f"{value:.{precision}f}"
+
         # Format data
         data = [
             ["Metric", "Value", "Unit"],
             ["Min Distance", f"{metrics.get('min_dist', 0):.2f}", "m"],
-            ["Min TTC", f"{metrics.get('min_ttc', np.inf):.2f}", "s"],
+            ["Min TTC", fmt_metric(metrics.get('min_ttc'), 2), "s"],
             ["Collisions", f"{int(metrics.get('collision_count', 0))}", "#"],
             ["Max Jerk", f"{metrics.get('max_jerk', 0):.2f}", "m/s³"],
-            ["ADE (Pred)", f"{metrics.get('ade', 0):.3f}", "m"],
-            ["FDE (Pred)", f"{metrics.get('fde', 0):.3f}", "m"],
+            ["ADE (Standard)", fmt_metric(metrics.get('ade')), "m"],
+            ["FDE (Standard)", fmt_metric(metrics.get('fde')), "m"],
+            ["ADE (Planning)", fmt_metric(metrics.get('planning_ade')), "m"],
+            ["FDE (Planning)", fmt_metric(metrics.get('planning_fde')), "m"],
         ]
         
         table = ax.table(

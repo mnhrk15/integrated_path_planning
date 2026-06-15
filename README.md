@@ -49,7 +49,7 @@
 - **ロバストなNaN処理 (v3.7 Update)**: スプライン境界外参照時のNaN値を適切に検出し、不正な経路セグメントを自動的に除外するロジックを実装しました。
 
 ### シミュレーションエンジン (v1.2 Update)
-- **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。
+- **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。Ego車両から歩行者への斥力は `ego_repulsion.sigma`, `ego_repulsion.v0`, `ego_radius` で明示的に設定できます。
 - **自動終了機能 (v3.1 Update)**: 車両が参照経路のゴール地点（2m以内）に到達すると、設定された `total_time` を待たずにシミュレーションを自動終了し、効率的な評価が可能になりました。
 - **予測ウォームアップ機能 (v3.2 Update)**: シミュレーション開始時 ($t=0$) に自動的に過去の観測データを生成（プリロール）する初期化フェーズを導入しました。これにより、**開始直後からSocial-GANによる有効な軌道予測が可能**となり、初期のラグが解消されました。
 
@@ -256,6 +256,8 @@ integrated_path_planning/
 - **Ego車両**: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature` (default=1.0)
 - **安全パラメータ**: `ego_radius` (自車半径), `ped_radius` (プランナ用マージン), `obstacle_radius`
   - `social_force_params.agent_radius`: 歩行者シミュレータ内での歩行者の物理半径
+  - `social_force_params.ego_repulsion.sigma`: Ego車両から歩行者への斥力の減衰距離
+  - `social_force_params.ego_repulsion.v0`: Ego車両から歩行者への斥力の強度
 - **経路**: `reference_waypoints_x`, `reference_waypoints_y`
 - **歩行者**: `ped_initial_states`, `ped_groups`
 - **障害物**: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
@@ -307,7 +309,7 @@ integrated_path_planning/
  
  2. **`metrics_summary.csv`**: メトリクス集計（CSV形式）
     - **上書きモード**: 実行ごとにファイルが上書きされます（最新の結果のみ保持）
-    - 内容: シナリオ設定（モデル、メソッド）、ADE/FDE、安全性指標（最小距離、衝突有無）、効率性指標
+    - 内容: シナリオ設定（モデル、メソッド）、標準 ADE/FDE、計画用 ADE/FDE、安全性指標（最小距離、衝突有無）、効率性指標
  
  3. **`metrics_report.txt`**: レポート（テキスト形式）
     - 人間が読みやすい形式の実行サマリ
@@ -325,7 +327,8 @@ pytest tests/
 ## 評価指標
 
 - **安全性**: 最小距離（歩行者との最短距離）、衝突回数、TTC（Time to Collision）
-- **予測精度**: ADE（Average Displacement Error）、FDE（Final Displacement Error）
+- **標準予測精度**: `ade`, `fde`。SGAN 標準に合わせ、完全な予測区間のみを対象に、0.4 秒間隔・固定ホライズンでシーン単位 best-of-N ADE/FDE を計算
+- **計画用予測精度**: `planning_ade`, `planning_fde`。プランナへ実際に入力した単一の高密度軌道について、利用可能な未来区間でローリング ADE/FDE を計算
 - **効率性**: 目標到達時間、平均速度
 - **快適性**: 最大加速度、最大ジャーク、平均ジャーク
 

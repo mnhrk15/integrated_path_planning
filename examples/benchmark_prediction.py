@@ -15,76 +15,71 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import load_config
 from src.simulation.integrated_simulator import IntegratedSimulator
 from src.core.metrics import calculate_aggregate_metrics
+from examples.run_statistical_benchmark import resolve_model_path, set_seed
 
-def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "benchmark_results"):
+def run_benchmark(scenario_path: str, steps: int = None, output_path: str = "benchmark_results",
+                  seed: int = 0):
     """Run benchmark for all prediction methods."""
-    
+
     methods = ['cv', 'lstm', 'sgan']
     results_list = []
-    
+
     scenario_name = Path(scenario_path).stem
     output_dir = Path(output_path) / scenario_name
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     logger.info(f"Starting benchmark on scenario: {scenario_path}")
-    logger.info(f"Results will be saved to: {output_dir}")
-    
+    logger.info(f"Results will be saved to: {output_dir} (seed={seed})")
+
     for method in methods:
         logger.info(f"Testing method: {method.upper()}")
-        
+
+        # Re-seed per method: the methods run sequentially in one process, and
+        # without this the RNG state (and thus the pedestrian ground truth)
+        # would differ between methods, breaking the comparison.
+        set_seed(seed)
+
         # Reload config for fresh start
         config = load_config(scenario_path)
         config.prediction_method = method
         config.output_path = str(output_dir / method)
         config.visualization_enabled = False  # Disable viz for speed
-        
-        # [Fix] Use correct model for benchmarking
-        # LSTM -> sgan-models (No Pooling)
-        # SGAN -> sgan-p-models (Pooling)
-        if config.sgan_model_path and method in ['lstm', 'sgan']:
-            original_path = Path(config.sgan_model_path)
-            model_name = original_path.name
-            
-            # Determine correct directory
-            if method == 'lstm':
-                new_dir = "models/sgan-models"
-            else: # sgan
-                new_dir = "models/sgan-p-models"
-            
-            # Update path relative to project root
-            new_path = Path(new_dir) / model_name
-            
-            # Verify existence before switching
-            if new_path.exists():
-                logger.info(f"Switched model for {method}: {new_path}")
-                config.sgan_model_path = str(new_path)
-            else:
-                logger.warning(f"Desired model {new_path} not found. Using default: {original_path}")
 
-        
         # Init simulator
         try:
+            # Inside the try: a missing model directory becomes an Error row
+            # for this method instead of aborting the whole benchmark and
+            # discarding the already-completed methods.
+            resolve_model_path(config, method)
             simulator = IntegratedSimulator(config)
             
             # Run simulation
             history = simulator.run(n_steps=steps)
             
             # Calculate metrics
-            metrics = calculate_aggregate_metrics(history, config.dt)
+            metrics = calculate_aggregate_metrics(
+                history,
+                config.dt,
+                prediction_dt=simulator.observer.sgan_dt,
+                prediction_steps=config.pred_len,
+            )
             
             # Add additional efficiency metrics
             total_time = history[-1].time
             avg_speed = np.mean([r.ego_state.v for r in history])
             
-            # Compile row
             row = {
                 "Method": method.upper(),
+                "Termination": simulator.termination_reason,
+                "Goal Reached": simulator.goal_reached,
                 "Min Dist (m)": metrics['min_dist'],
                 "Collisions": metrics['collision_count'],
                 "Min TTC (s)": metrics['min_ttc'],
                 "Max Jerk": metrics['max_jerk'],
-                "ADE (m)": metrics['ade'],
-                "FDE (m)": metrics['fde'],
+                "Standard ADE (m)": metrics['ade'],
+                "Standard FDE (m)": metrics['fde'],
+                "Planning ADE (m)": metrics['planning_ade'],
+                "Planning FDE (m)": metrics['planning_fde'],
                 "Total Time (s)": total_time,
                 "Avg Speed (m/s)": avg_speed,
                 "Steps": len(history)
@@ -149,10 +144,12 @@ def main():
                       help='Number of steps')
     parser.add_argument('--output', type=str, default='output/benchmark',
                       help='Output directory')
-    
+    parser.add_argument('--seed', type=int, default=0,
+                      help='Random seed applied before each method')
+
     args = parser.parse_args()
-    
-    run_benchmark(args.scenario, args.steps, args.output)
+
+    run_benchmark(args.scenario, args.steps, args.output, seed=args.seed)
 
 if __name__ == "__main__":
     main()

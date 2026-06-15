@@ -572,4 +572,4 @@ pytest tests/ -v
 
 - プロジェクト構造: [README.md](README.md)
 - API リファレンス: コード内のdocstring参照
-- 設定オプション: [src/config/default_config.yaml](src/config/default_config.yaml)
+- 設定オプション: [src/config/__init__.py](src/config/__init__.py) の `SimulationConfig` dataclass

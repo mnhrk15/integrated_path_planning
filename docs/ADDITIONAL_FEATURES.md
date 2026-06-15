@@ -27,7 +27,7 @@ PySocialForce/可視化など多くの機能はオプションですが、軌道
 ## 4. 静的障害物と安全パラメータ
 
 - シナリオYAMLで`static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）を指定すると、プランナの衝突判定に組み込まれます。
-- 安全パラメータ（デフォルトは`default_config.yaml`参照）:
+- 安全パラメータ（デフォルトは `src/config/__init__.py` の `SimulationConfig` dataclass 参照）:
   - `ego_radius`, `ped_radius`, `obstacle_radius`, `safety_buffer`
 - これらは膨張半径として衝突判定・安全メトリクス（`min_distance`, `ttc`）に利用されます。
 
