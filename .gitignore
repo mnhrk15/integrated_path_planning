@@ -39,11 +39,9 @@ ENV/
 htmlcov/
 *.cover
 
-# Models and Data
-models/
-models/*.pt
-models/*.pth
-datasets/
+# Models and Data (raw data only at repo root; keep src/datasets/ code tracked)
+/models/
+/datasets/
 *.zip
 
 # Outputs

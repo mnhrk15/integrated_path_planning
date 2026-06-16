@@ -34,6 +34,7 @@ setup(
         "torch>=2.0.0",
         "torchvision>=0.15.0",
         "matplotlib>=3.5.0",
+        "pandas>=1.5.0",
         "pyyaml>=6.0",
         "attrdict>=2.0.1",
         "numba>=0.57.0",

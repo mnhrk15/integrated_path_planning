@@ -1,5 +1,7 @@
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from scipy.stats import ks_2samp
 
 from .data_structures import SimulationResult
 
@@ -294,3 +296,149 @@ def calculate_aggregate_metrics(
         "nll": nll,
         "nll_eval_count": nll_eval_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Fidelity metrics for real-data calibration (MSc thesis, Axis A / RQ2).
+#
+# These compare ego-pedestrian *interaction* between a simulation and recorded
+# ground truth: how close pedestrians get to the vehicle (min separation) and at
+# what distance they begin to evade it (avoidance onset). A two-sample KS test
+# then quantifies sim-vs-real distribution agreement. The core functions take
+# plain position/velocity arrays so the same code applies to both AVEC
+# SimulationResult histories and raw DUT/CITR recordings (enabling KS
+# comparison). A fixed pedestrian population N within the window is assumed.
+#
+# NOTE: "distance"/"separation" here is centre-to-centre ego-pedestrian
+# distance, NOT envelope breach; interpret as a relative comparison between
+# conditions (see thesis limitations on the 1.2 m collision envelope).
+# ---------------------------------------------------------------------------
+
+
+def min_separation_series(ego_xy: np.ndarray, ped_xy: np.ndarray) -> np.ndarray:
+    """Per-step minimum ego-pedestrian distance.
+
+    Args:
+        ego_xy: Ego positions [T, 2].
+        ped_xy: Pedestrian positions [T, N, 2] (fixed N).
+    Returns:
+        [T] minimum distance to any pedestrian at each step (inf where N == 0).
+    """
+    ego_xy = np.asarray(ego_xy, dtype=float)
+    ped_xy = np.asarray(ped_xy, dtype=float)
+    if ego_xy.shape[0] != ped_xy.shape[0]:
+        raise ValueError(
+            f"ego_xy T={ego_xy.shape[0]} != ped_xy T={ped_xy.shape[0]}"
+        )
+    if ped_xy.shape[1] == 0:
+        return np.full(ego_xy.shape[0], np.inf)
+    dists = np.linalg.norm(ped_xy - ego_xy[:, None, :], axis=2)  # [T, N]
+    return np.min(dists, axis=1)
+
+
+def avoidance_onset_distance(
+    ego_xy: np.ndarray,
+    ped_xy: np.ndarray,
+    ped_vel: Optional[np.ndarray] = None,
+    dt: float = 0.4,
+    accel_threshold: float = 0.3,
+    max_distance: float = 5.0,
+) -> np.ndarray:
+    """Ego-pedestrian distance at which each pedestrian starts evading the ego.
+
+    For every pedestrian, find the first step at which it accelerates *away*
+    from the ego (acceleration component along the ego->ped direction exceeds
+    ``accel_threshold``) while within ``max_distance``, and record the ego-ped
+    distance there. This captures the reactive standoff that the SFM ego
+    repulsion (sigma, v0) should reproduce when calibrated.
+
+    Args:
+        ego_xy: Ego positions [T, 2].
+        ped_xy: Pedestrian positions [T, N, 2].
+        ped_vel: Pedestrian velocities [T, N, 2]; finite-differenced if None.
+        dt: Time step [s].
+        accel_threshold: Min away-pointing acceleration [m/s^2] to count as onset.
+        max_distance: Only consider steps within this ego-ped distance [m].
+    Returns:
+        1-D array of onset distances [m], one per pedestrian that evades.
+    """
+    ego_xy = np.asarray(ego_xy, dtype=float)
+    ped_xy = np.asarray(ped_xy, dtype=float)
+    T, N, _ = ped_xy.shape
+    if T < 2 or N == 0:
+        return np.array([])
+    if ped_vel is None:
+        vel = np.gradient(ped_xy, dt, axis=0)  # [T, N, 2]
+    else:
+        vel = np.asarray(ped_vel, dtype=float)
+        if vel.shape != ped_xy.shape:
+            raise ValueError(
+                f"ped_vel shape {vel.shape} != ped_xy shape {ped_xy.shape}"
+            )
+    # Acceleration via np.gradient (central differences, one-sided at the ends)
+    # so it is defined at every step (no fabricated boundary zero) AND computed
+    # by the SAME rule whether the velocity was provided or finite-differenced
+    # from positions -- the two branches must agree, with identical step count
+    # and acc[t]<->ped_xy[t] alignment, or the sim-vs-real KS comparison the
+    # metric exists for would be biased between its two inputs.
+    acc = np.gradient(vel, dt, axis=0)  # [T, N, 2]
+
+    onsets: List[float] = []
+    for j in range(N):
+        for t in range(T):
+            rel = ped_xy[t, j] - ego_xy[t]
+            dist = float(np.linalg.norm(rel))
+            if dist < 1e-9 or dist > max_distance:
+                continue
+            away = float(np.dot(acc[t, j], rel / dist))
+            if away > accel_threshold:
+                onsets.append(dist)
+                break
+    return np.array(onsets)
+
+
+def compare_distributions_ks(
+    sim_samples: np.ndarray, real_samples: np.ndarray
+) -> Tuple[float, float]:
+    """Two-sample Kolmogorov-Smirnov test: (statistic, p-value).
+
+    Inputs are flattened to 1-D and non-finite values are dropped. The test
+    assumes the samples are i.i.d.: do NOT pool a strongly autocorrelated
+    series (e.g. every per-step min-separation of a single encounter) without
+    thinning, or the p-value is anti-conservative.
+
+    A small p-value means the simulated and real samples differ. A large
+    p-value only means equality could not be rejected -- it is NOT proof of a
+    good match (low power from few samples also yields a large p), so always
+    report the statistic alongside it. Returns (nan, nan) if either sample is
+    empty after filtering.
+    """
+    sim = np.asarray(sim_samples, dtype=float)
+    real = np.asarray(real_samples, dtype=float)
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return float("nan"), float("nan")
+    result = ks_2samp(sim, real)
+    return float(result.statistic), float(result.pvalue)
+
+
+def calculate_min_separation(
+    history: List[SimulationResult],
+) -> Tuple[np.ndarray, float]:
+    """Min-separation series and overall minimum from a SimulationResult history.
+
+    Requires a fixed pedestrian population across the history (e.g. a replayed
+    encounter window). Returns ([T] per-step min distance, overall min).
+    """
+    ego_xy = np.array([[r.ego_state.x, r.ego_state.y] for r in history], dtype=float)
+    try:
+        ped_xy = np.stack([r.ped_state.positions for r in history], axis=0)
+    except ValueError as exc:
+        raise ValueError(
+            "calculate_min_separation requires a fixed pedestrian population "
+            "across the history (pedestrian count varies between steps)"
+        ) from exc
+    series = min_separation_series(ego_xy, ped_xy)
+    overall = float(np.min(series)) if series.size else float("inf")
+    return series, overall
