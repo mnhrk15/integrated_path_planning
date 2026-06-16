@@ -25,12 +25,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 DUT_FPS = 23.98  # DUT drone recording; CITR rate is unstated -> pass explicitly
+
+# Filtered (metre-converted) trajectory file suffixes, one pair per video clip.
+# The clip stem is the file name with the suffix stripped, e.g.
+# "intersection_01_traj_ped_filtered.csv" -> stem "intersection_01". Matching on
+# the full suffix (not just ".csv") structurally excludes co-located ratio .txt
+# / plot .pdf files (CITR) and raw px CSVs (no "_filtered").
+PED_SUFFIX = "_traj_ped_filtered.csv"
+VEH_SUFFIX = "_traj_veh_filtered.csv"
 
 
 @dataclass
@@ -172,3 +180,164 @@ def vehicle_speed_samples(tracks: AgentTracks) -> np.ndarray:
     if vel is None:
         return np.array([])
     return vel[np.isfinite(vel)]
+
+
+def agent_speed_samples(tracks: AgentTracks, dt: Optional[float] = None) -> np.ndarray:
+    """Per-step speeds [m/s] from finite adjacent grid positions (ped or veh).
+
+    The AgentTracks analogue of the ETH/UCY ``walking_speed_stats``: it differs
+    by masking on NaN (an agent's absent span) rather than on a frame-gap mode,
+    since VCI tracks are already on a uniform ``target_dt`` grid. Only steps
+    whose *both* endpoints are finite are counted, so NaN never propagates into
+    a spurious speed. Gives a sanity distribution that should peak near
+    ~1.3 m/s for pedestrians; also an independent cross-check of the recorded
+    vehicle 'vel' channel.
+
+    ``dt`` defaults to the grid's own step (``times[1]-times[0]``) so the speed
+    is never silently divided by a target_dt that differs from how the tracks
+    were resampled; pass it only to override.
+    """
+    pos = tracks.positions  # [T, A, 2]
+    if pos.shape[0] < 2:
+        return np.array([])
+    if dt is None:
+        dt = float(tracks.times[1] - tracks.times[0])  # the grid's actual target_dt
+    step = np.linalg.norm(pos[1:] - pos[:-1], axis=2) / dt  # [T-1, A]; NaN where absent
+    return step[np.isfinite(step)]
+
+
+@dataclass
+class ClipTracks:
+    """One VCI video clip: paired pedestrian/vehicle tracks plus provenance.
+
+    ``ped`` and ``veh`` are independently resampled :class:`AgentTracks` on each
+    file's own clip-local time grid; either is None when that file is absent
+    (a ped-only or veh-only clip). Clips are kept separate rather than merged
+    into one AgentTracks because ids restart at 1 per clip (merging would alias
+    different people) and frames restart at 0 (merging would collide their time
+    grids). ``scenario`` is the CITR subfolder (e.g. 'vci_front'); None for the
+    flat DUT layout.
+    """
+
+    clip: str  # clip stem, e.g. "intersection_01"
+    dataset: str  # "dut" | "citr"
+    scenario: Optional[str]  # CITR subfolder name, None for DUT
+    ped: Optional[AgentTracks]
+    veh: Optional[AgentTracks]
+    ped_path: Optional[Path]
+    veh_path: Optional[Path]
+    fps: float
+
+
+def _discover_clip_files(
+    root: Union[str, Path], dataset: str
+) -> Dict[Tuple[Optional[str], str], Dict[str, Path]]:
+    """Recursively find ``*_traj_{ped,veh}_filtered.csv`` under ``root``.
+
+    Returns ``{(scenario, stem): {"ped": path, "veh": path}}``. ``rglob`` is
+    depth-agnostic, so the flat DUT ``trajectories_filtered/`` and the nested
+    CITR ``trajectories_filtered/<scenario>/`` layouts are both walked by one
+    pass -- and an unknown number of extra wrapper directories from a zip
+    extraction is absorbed (the user only points ``root`` at datasets/vci_*).
+    For CITR the scenario is the file's parent directory name (which
+    disambiguates a stem reused across scenarios); for the flat DUT it is None.
+    """
+    root = Path(root)
+    found: Dict[Tuple[Optional[str], str], Dict[str, Path]] = {}
+    for suffix, key in ((PED_SUFFIX, "ped"), (VEH_SUFFIX, "veh")):
+        for path in root.rglob("*" + suffix):
+            stem = path.name[: -len(suffix)]
+            scenario = None if dataset == "dut" else path.parent.name
+            side = found.setdefault((scenario, stem), {})
+            if key in side and side[key] != path:
+                # Two files collapse onto the same (scenario, stem) key -- e.g. a
+                # DUT zip with the clip duplicated under different wrapper dirs
+                # (scenario is None for DUT, so the directory no longer
+                # disambiguates). Keeping the last would drop a clip
+                # nondeterministically (rglob order is filesystem-dependent), so
+                # fail loudly rather than silently lose data.
+                raise ValueError(
+                    f"duplicate {key} file for clip {(scenario, stem)!r}: "
+                    f"{side[key]} and {path}"
+                )
+            if side and any(existing.parent != path.parent for existing in side.values()):
+                # The same (scenario, stem) key must represent one directory-local
+                # ped/veh pair. Otherwise a ped-only file under one wrapper dir and
+                # a veh-only file under another wrapper dir would be silently
+                # paired into a synthetic clip that never existed.
+                raise ValueError(
+                    f"mixed directories for clip {(scenario, stem)!r}: "
+                    f"{sorted(str(existing.parent) for existing in side.values())} "
+                    f"and {path.parent}"
+                )
+            side[key] = path
+    return found
+
+
+def load_vci_clips(
+    root: Union[str, Path],
+    dataset: str,
+    fps: Optional[float] = None,
+    target_dt: float = 0.4,
+    require_both: bool = False,
+    strict: bool = True,
+) -> List[ClipTracks]:
+    """Scan ``root`` for all VCI clips and load each via the single-file API.
+
+    ``dataset`` is "dut" (flat layout, fps defaults to :data:`DUT_FPS`) or
+    "citr" (nested per-scenario layout; fps is unstated upstream so it is
+    required). Each clip reuses :func:`load_vci_pedestrians` /
+    :func:`load_vci_vehicles`, so column validation, resampling and heading
+    unwrapping are unchanged. With ``require_both`` a clip missing either file
+    is skipped; otherwise the absent side is None. With ``strict=False`` a clip
+    whose CSV fails to parse/validate keeps that side as None (its path is still
+    retained) instead of aborting the whole scan -- so a diagnostic caller can
+    still report the offending file rather than crash on the first bad one.
+    Returns clips in a deterministic (scenario, stem) order.
+    """
+    if dataset not in ("dut", "citr"):
+        raise ValueError(f"dataset must be 'dut' or 'citr', got {dataset!r}")
+    if fps is None:
+        if dataset == "dut":
+            fps = DUT_FPS
+        else:
+            raise ValueError(
+                "CITR fps is unstated upstream; pass fps explicitly "
+                "(estimate it via examples/inspect_vci_data.py)"
+            )
+
+    def _load(loader, path):
+        if path is None:
+            return None
+        try:
+            return loader(path, fps=fps, target_dt=target_dt)
+        # Only data problems (bad columns -> ValueError, unparseable/empty CSV,
+        # unreadable file) are demoted under strict=False; programming/resource
+        # errors (AttributeError, MemoryError, ...) propagate so a real bug or an
+        # OOM is never silently reported as a merely "bad file".
+        except (ValueError, OSError, pd.errors.EmptyDataError, pd.errors.ParserError):
+            if strict:
+                raise
+            return None
+
+    discovered = _discover_clip_files(root, dataset)
+    clips: List[ClipTracks] = []
+    for scenario, stem in sorted(discovered, key=lambda k: (k[0] or "", k[1])):
+        paths = discovered[(scenario, stem)]
+        ped_path = paths.get("ped")
+        veh_path = paths.get("veh")
+        if require_both and (ped_path is None or veh_path is None):
+            continue
+        clips.append(
+            ClipTracks(
+                clip=stem,
+                dataset=dataset,
+                scenario=scenario,
+                ped=_load(load_vci_pedestrians, ped_path),
+                veh=_load(load_vci_vehicles, veh_path),
+                ped_path=ped_path,
+                veh_path=veh_path,
+                fps=fps,
+            )
+        )
+    return clips
