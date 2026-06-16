@@ -45,7 +45,11 @@ from src.datasets.vci_loader import (  # noqa: E402
     vehicle_speed_samples,
 )
 
-PED_EXPECTED = ["id", "frame", "label", "x_est", "y_est", "xv_est", "yv_est"]
+# A tuple entry is an alias group satisfied by any one of its names: the real
+# filtered CSVs spell pedestrian velocity vx_est/vy_est, the README xv_est/yv_est
+# (mirrors PED_V*_ALIASES in the loader, so neither spelling reads as a mismatch).
+PED_EXPECTED = ["id", "frame", "label", "x_est", "y_est",
+                ("vx_est", "xv_est"), ("vy_est", "yv_est")]
 VEH_EXPECTED = ["id", "frame", "label", "x_est", "y_est", "psi_est", "vel_est"]
 
 DEFAULT_ROOTS = {"dut": "datasets/vci_dut", "citr": "datasets/vci_citr"}
@@ -242,8 +246,15 @@ def report_columns(clips: List[ClipTracks]) -> List[str]:
                 mismatches += 1
                 lines.append(f"  {c.scenario or '.'}/{c.clip} [{kind}]: UNREADABLE ({type(e).__name__})")
                 continue
-            missing = [e for e in expected if e not in cols]
-            extra = [a for a in cols if a not in expected]
+            # An alias group (tuple) is satisfied by any one of its names; a bare
+            # string must be present. Report a missing group as "a|b".
+            missing = []
+            for e in expected:
+                group = (e,) if isinstance(e, str) else e
+                if not any(name in cols for name in group):
+                    missing.append("|".join(group))
+            allowed = {name for e in expected for name in ((e,) if isinstance(e, str) else e)}
+            extra = [a for a in cols if a not in allowed]
             if missing or extra:
                 mismatches += 1
                 lines.append(

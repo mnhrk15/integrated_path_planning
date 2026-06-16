@@ -4,8 +4,12 @@ The VCI datasets (fetched manually, see scripts/download_vci_data.sh) ship
 per-sequence CSVs with a header row, comma-separated, pedestrians and vehicles
 in separate files:
 
-  pedestrians: id, frame, label, x_est, y_est, xv_est, yv_est
+  pedestrians: id, frame, label, x_est, y_est, vx_est, vy_est
   vehicles:    id, frame, label, x_est, y_est, psi_est, vel_est
+
+The real filtered CSVs spell the pedestrian velocity columns ``vx_est``/
+``vy_est``; the published README documents them as ``xv_est``/``yv_est``. Both
+spellings are accepted (see ``PED_VX_ALIASES`` / ``PED_VY_ALIASES``).
 
 Positions are already in metres (filtered trajectories are pre-converted from
 the 1920x1080 pixel frame via the per-folder ``.txt`` ratio file). DUT is
@@ -40,6 +44,15 @@ DUT_FPS = 23.98  # DUT drone recording; CITR rate is unstated -> pass explicitly
 PED_SUFFIX = "_traj_ped_filtered.csv"
 VEH_SUFFIX = "_traj_veh_filtered.csv"
 
+# Velocity/heading channel columns. The published README documents the
+# pedestrian velocity columns as xv_est/yv_est, but the real filtered CSVs spell
+# them vx_est/vy_est -- accept either. Vehicles use psi_est/vel_est in both, kept
+# here so all optional channels resolve through one alias mechanism.
+PED_VX_ALIASES = ("vx_est", "xv_est")
+PED_VY_ALIASES = ("vy_est", "yv_est")
+VEH_PSI_ALIASES = ("psi_est",)
+VEH_VEL_ALIASES = ("vel_est",)
+
 
 @dataclass
 class AgentTracks:
@@ -64,6 +77,14 @@ def _read_agent_csv(path: Union[str, Path]) -> pd.DataFrame:
     if missing:
         raise ValueError(f"{path}: missing columns {sorted(missing)} (got {list(df.columns)})")
     return df
+
+
+def _resolve_col(df: pd.DataFrame, aliases: Tuple[str, ...]) -> Optional[str]:
+    """Return the first of ``aliases`` present in ``df``'s columns, else None."""
+    for name in aliases:
+        if name in df.columns:
+            return name
+    return None
 
 
 def _resample_agents(
@@ -130,8 +151,25 @@ def _resample_agents(
 def load_vci_pedestrians(
     path: Union[str, Path], fps: float = DUT_FPS, target_dt: float = 0.4
 ) -> AgentTracks:
-    """Load and resample the pedestrians CSV of one VCI sequence."""
-    return _resample_agents(_read_agent_csv(path), fps, target_dt, extra_cols={})
+    """Load and resample the pedestrians CSV of one VCI sequence.
+
+    Recorded velocity (m/s) is read into 'vx'/'vy' channels when present, under
+    either the real vx_est/vy_est or the README's xv_est/yv_est spelling; both
+    components must be present (a lone component is ignored). These channels live
+    on the returned AgentTracks but are NOT carried by
+    :func:`extract_fixed_windows` (which returns positions only), so a caller
+    wanting to feed recorded velocity to ReplayPedestrianSource instead of
+    finite-differencing must read ``tracks.extra`` directly rather than go
+    through the window helper.
+    """
+    df = _read_agent_csv(path)
+    extra = {}
+    vx = _resolve_col(df, PED_VX_ALIASES)
+    vy = _resolve_col(df, PED_VY_ALIASES)
+    if vx is not None and vy is not None:
+        extra["vx"] = vx
+        extra["vy"] = vy
+    return _resample_agents(df, fps, target_dt, extra_cols=extra)
 
 
 def load_vci_vehicles(
@@ -140,10 +178,12 @@ def load_vci_vehicles(
     """Load and resample the vehicles CSV (carries 'psi' and 'vel' channels)."""
     df = _read_agent_csv(path)
     extra = {}
-    if "psi_est" in df.columns:
-        extra["psi"] = "psi_est"
-    if "vel_est" in df.columns:
-        extra["vel"] = "vel_est"
+    psi = _resolve_col(df, VEH_PSI_ALIASES)
+    vel = _resolve_col(df, VEH_VEL_ALIASES)
+    if psi is not None:
+        extra["psi"] = psi
+    if vel is not None:
+        extra["vel"] = vel
     # psi is a heading angle -> unwrap before interpolation.
     return _resample_agents(df, fps, target_dt, extra_cols=extra, angular_cols=("psi",))
 

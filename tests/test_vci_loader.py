@@ -70,6 +70,39 @@ def test_missing_columns_raise(tmp_path):
         load_vci_pedestrians(_write(tmp_path, "bad.csv", bad), fps=10.0)
 
 
+# --- pedestrian velocity channels (vx_est/vy_est real vs xv_est/yv_est README) -
+
+PED_CSV_REAL_VEL = """id,frame,label,x_est,y_est,vx_est,vy_est
+1,0,ped,0.0,0.0,1.5,0.0
+1,10,ped,1.5,0.0,1.5,0.0
+1,20,ped,3.0,0.0,1.5,0.0
+"""
+
+
+def test_pedestrian_reads_velocity_real_spelling(tmp_path):
+    # Real filtered CSVs spell ped velocity vx_est/vy_est -> must fill 'vx'/'vy'.
+    tracks = load_vci_pedestrians(
+        _write(tmp_path, "ped.csv", PED_CSV_REAL_VEL), fps=10.0, target_dt=0.5
+    )
+    assert "vx" in tracks.extra and "vy" in tracks.extra
+    vx = tracks.extra["vx"][:, 0]
+    np.testing.assert_allclose(vx[np.isfinite(vx)], 1.5)  # constant across the span
+
+
+def test_pedestrian_reads_velocity_readme_spelling(tmp_path):
+    # The documented xv_est/yv_est spelling is equally accepted (PED_CSV uses it).
+    tracks = load_vci_pedestrians(_write(tmp_path, "ped.csv", PED_CSV), fps=10.0, target_dt=0.5)
+    assert "vx" in tracks.extra and "vy" in tracks.extra
+
+
+def test_pedestrian_without_velocity_omits_channels(tmp_path):
+    # Velocity is optional: positions still load, no vx/vy channels appear.
+    csv = "id,frame,label,x_est,y_est\n1,0,ped,0.0,0.0\n1,10,ped,1.0,0.0\n"
+    tracks = load_vci_pedestrians(_write(tmp_path, "ped.csv", csv), fps=10.0, target_dt=0.5)
+    assert "vx" not in tracks.extra and "vy" not in tracks.extra
+    assert tracks.positions.shape[1] == 1  # ped still loaded
+
+
 def test_vehicle_heading_interpolates_across_pi_wrap(tmp_path):
     # psi goes 3.0 -> -3.0 (a ~0.28 rad turn across +/-pi). Linear interp would
     # wrongly pass through 0; angular unwrap must keep the midpoint near +/-pi.

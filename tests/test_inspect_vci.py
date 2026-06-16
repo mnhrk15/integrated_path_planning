@@ -231,6 +231,18 @@ def test_report_columns_detects_missing_and_extra(tmp_path):
     assert any("foo" in ln for ln in lines[1:])  # extra reported
 
 
+def test_report_columns_accepts_real_velocity_spelling(tmp_path):
+    # vx_est/vy_est (the real filtered CSVs) must NOT read as a header mismatch.
+    d = tmp_path / "trajectories_filtered"
+    d.mkdir(parents=True)
+    ped = "id,frame,label,x_est,y_est,vx_est,vy_est\n1,0,ped,0,0,1,0\n1,10,ped,1,0,1,0\n"
+    (d / f"c1{PED_SUFFIX}").write_text(ped)
+    (d / f"c1{VEH_SUFFIX}").write_text(METRE_VEH)
+    clips = inspect_vci.load_vci_clips(tmp_path, "dut", fps=10.0)
+    lines = inspect_vci.report_columns(clips)
+    assert lines[0] == "header mismatches: 0  (all OK)"
+
+
 def test_report_speed_mismatch_has_quantiles_and_ego_ratio(tmp_path):
     d = tmp_path / "trajectories_filtered"
     d.mkdir(parents=True)
