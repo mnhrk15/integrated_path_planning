@@ -15,12 +15,16 @@ from src.datasets.vci_encounter import (
     Encounter,
     align_clip_to_grid,
     encounters_from_clips,
+    encounters_from_clips_multivehicle,
     extract_encounters,
+    _split_clip_per_vehicle,
 )
 from src.calibration import calibrate
 from src.simulation.calibration_harness import (
     _cruise_speeds,
     _far_goals,
+    cruise_freewalk,
+    cruise_upper_quantile,
     fidelity_report,
     objective_one_step,
     objective_rollout_ade,
@@ -410,3 +414,103 @@ def test_extract_excludes_frames_with_nan_ego_channels():
         assert np.all(np.isfinite(enc.ego_vel))
         assert np.all(np.isfinite(enc.ego_psi))
         assert enc.times[0] > aligned.times[0]  # poisoned frame 0 dropped
+
+
+# --------------------------------------------------------------------------- #
+# multi-vehicle expansion (DUT validation, C)
+# --------------------------------------------------------------------------- #
+def test_split_clip_per_vehicle_count():
+    """A 3-vehicle clip splits into 3 single-vehicle virtual clips sharing peds."""
+    clip = make_clip(n_veh=3)
+    subs = _split_clip_per_vehicle(clip)
+    assert len(subs) == 3
+    for sub in subs:
+        assert sub.veh.positions.shape[1] == 1  # downstream single-vehicle assert holds
+        assert sub.ped is clip.ped  # pedestrians shared, not copied
+        assert sub.clip != clip.clip  # stem disambiguated (#v{id})
+
+
+def test_split_single_vehicle_passthrough():
+    """A single-vehicle clip is returned unchanged (identity), reproducing CITR."""
+    clip = make_clip(n_veh=1)
+    subs = _split_clip_per_vehicle(clip)
+    assert subs == [clip]
+    assert subs[0] is clip
+
+
+def test_multivehicle_equals_single_for_one_vehicle_clip():
+    """On a single-vehicle clip the multi-vehicle path is a superset == the original."""
+    clip = make_clip(n_veh=1)
+    a = encounters_from_clips([clip], min_sep_threshold=8.0, min_len=5)
+    b = encounters_from_clips_multivehicle([clip], min_sep_threshold=8.0, min_len=5)
+    assert len(a) == len(b) == 1
+
+
+def test_multivehicle_extracts_from_two_vehicle_clip():
+    """A two-vehicle clip yields encounters via expansion but is skipped by the
+    single-vehicle extractor."""
+    clip = make_clip(n_veh=2)
+    single = encounters_from_clips([clip], min_sep_threshold=8.0, min_len=5)
+    multi = encounters_from_clips_multivehicle([clip], min_sep_threshold=8.0, min_len=5)
+    assert single == []  # multi-vehicle clip skipped by the legacy extractor
+    assert len(multi) >= 1  # at least the lead vehicle crosses the ped
+
+
+# --------------------------------------------------------------------------- #
+# cruise-speed estimators + cruise_fn injection (RQ2 cruise-bias diagnostic, D)
+# --------------------------------------------------------------------------- #
+def _speed_varying_encounter(near_speed=0.5, far_speed=1.5, T=10):
+    """One ped fixed at the origin; ego far (frames 0..T/2) then near (T/2..T).
+
+    Speed is set INDEPENDENTLY of position so the estimators (which read velocity
+    for speed and positions for ego distance) can be probed in isolation: the ped
+    walks ``far_speed`` while the ego is far and ``near_speed`` while it is near.
+    """
+    half = T // 2
+    times = DT * np.arange(T)
+    ped_xy = np.zeros((T, 1, 2))  # ped pinned at origin
+    ego_xy = np.zeros((T, 2))
+    ego_xy[:half, 0] = 100.0  # far (dist 100 > 8) for the first half
+    ego_xy[half:, 0] = 0.0    # near (dist 0 < 8) for the second half
+    ped_vel = np.zeros((T, 1, 2))
+    ped_vel[:half, 0, 1] = far_speed
+    ped_vel[half:, 0, 1] = near_speed
+    return Encounter(
+        clip="speedvar", times=times, ego_xy=ego_xy, ego_psi=np.zeros(T),
+        ego_vel=np.ones(T), ped_xy=ped_xy, ped_vel=ped_vel, ped_ids=np.array([0]),
+        dt=DT, min_separation=0.0,
+    )
+
+
+def test_cruise_fn_injection_default_matches_baseline():
+    """cruise_fn=None and an explicit baseline estimator give bit-identical rollouts."""
+    enc = make_encounter()
+    a = simulate_encounter(enc, 0.7, 3.5)
+    b = simulate_encounter(enc, 0.7, 3.5, cruise_fn=lambda e: _cruise_speeds(e.ped_vel))
+    assert np.array_equal(a, b)
+
+
+def test_cruise_freewalk_excludes_near_frames():
+    """Free-walking cruise uses only the far (fast) frames, beating the all-frame median."""
+    enc = _speed_varying_encounter(near_speed=0.5, far_speed=1.5)
+    baseline = _cruise_speeds(enc.ped_vel)[0]      # median over all frames -> ~1.0
+    free = cruise_freewalk(enc, ego_distance_threshold=8.0, quantile=0.5)[0]  # far frames -> 1.5
+    assert free > baseline
+    assert np.isclose(free, 1.5, atol=1e-6)
+
+
+def test_cruise_freewalk_fallback_when_all_near():
+    """A ped that is never free-walking falls back to the all-frame median (finite, floored)."""
+    enc = _speed_varying_encounter(near_speed=1.0, far_speed=1.0)
+    enc.ego_xy[:] = 0.0  # ego near at every frame -> no free-walking sample
+    free = cruise_freewalk(enc, ego_distance_threshold=8.0)[0]
+    assert np.isfinite(free) and free >= 1e-3
+    assert np.isclose(free, 1.0, atol=1e-6)  # fallback median of constant 1.0
+
+
+def test_cruise_upper_quantile_above_median():
+    """The 85th-percentile estimator sits above the median for a slowdown-skewed ped."""
+    enc = _speed_varying_encounter(near_speed=0.5, far_speed=1.5)
+    median = _cruise_speeds(enc.ped_vel)[0]
+    upper = cruise_upper_quantile(enc, quantile=0.85)[0]
+    assert upper >= median
