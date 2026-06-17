@@ -1,0 +1,23 @@
+RQ2 cross-validated evaluation  protocol=loso  folds=4
+========================================================================
+
+Calibrated (sigma, v0) stability across folds:
+  sigma     : 0.985 +/- 0.171 (n=4)
+  v0        : 1.996 +/- 0.331 (n=4)
+  AVEC default for reference: sigma=0.7, v0=3.5
+
+Held-out test metrics (mean +/- std over folds), 3 groups:
+  calibrated     ADE : 0.644 +/- 0.093 (n=4)
+  AVEC default   ADE : 0.645 +/- 0.079 (n=4)
+  no-repulsion   ADE : 0.671 +/- 0.094 (n=4)
+
+  calibrated     KS_closest : 0.725 +/- 0.277 (n=4)
+  AVEC default   KS_closest : 0.725 +/- 0.277 (n=4)
+  no-repulsion   KS_closest : 0.725 +/- 0.277 (n=4)
+  calibrated     KS_onset   : 0.963 +/- 0.052 (n=3)
+
+  closest-approach sim/real (calibrated): 1.470 +/- 0.918 (n=4) / 2.274 +/- 0.590 (n=4)
+
+CITR vehicle speed domain (calibration is valid only here; AVEC ego runs at 5-6 m/s = extrapolation, RQ2 limitation #2):
+  p5=0.39  p50=2.38  p90=3.65  p95=3.99  max=4.79 m/s  (n=621 samples)
+  => identified (sigma, v0) holds for ego speeds in ~[0.4, 4.0] m/s; 5-6 m/s is unverified by this data.

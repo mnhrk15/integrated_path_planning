@@ -45,7 +45,7 @@ simulation, making a KS objective ill-defined).
 from __future__ import annotations
 
 import warnings
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 import numpy as np
 
@@ -63,6 +63,15 @@ DEFAULT_AGENT_RADIUS = 0.35  # pysocialforce default pedestrian radius [m]
 GOAL_DISTANCE = 50.0  # far-goal distance along recorded heading [m]
 
 
+def _floor(cruise: np.ndarray) -> np.ndarray:
+    """Floor non-finite / non-positive desired speeds to a small positive value.
+
+    A zero or NaN desired speed would make pysocialforce's stop-when-arrived
+    freeze the ped, so every cruise estimator routes its result through this floor.
+    """
+    return np.where(np.isfinite(cruise) & (cruise > 1e-3), cruise, 1e-3)
+
+
 def _cruise_speeds(ped_vel: np.ndarray) -> np.ndarray:
     """Per-ped representative walking speed [N] from recorded velocities [T,N,2].
 
@@ -76,8 +85,65 @@ def _cruise_speeds(ped_vel: np.ndarray) -> np.ndarray:
         # floored just below, so silence the "All-NaN slice" RuntimeWarning.
         warnings.simplefilter("ignore", category=RuntimeWarning)
         cruise = np.nanmedian(speeds, axis=0)  # [N]
-    cruise = np.where(np.isfinite(cruise) & (cruise > 1e-3), cruise, 1e-3)
-    return cruise
+    return _floor(cruise)
+
+
+# A cruise-speed estimator maps a whole Encounter to a per-ped desired speed [N].
+# The default (_cruise_speeds on the recorded velocity) and the free-walking /
+# upper-quantile alternatives below all share this shape so they are swappable
+# via the harness's ``cruise_fn`` hook (the RQ2 cruise-bias diagnostic, D).
+CruiseEstimator = Callable[["Encounter"], np.ndarray]
+
+
+def cruise_freewalk(
+    enc: Encounter, ego_distance_threshold: float = 8.0, quantile: float = 0.5
+) -> np.ndarray:
+    """Per-ped desired speed [N] from FREE-WALKING frames only (RQ2 cruise bias).
+
+    The default estimator (:func:`_cruise_speeds`) takes the median over the whole
+    window, but the recorded speed already dips while the ped slows to avoid the
+    ego, biasing the desired speed DOWN -- which in turn lets the fitter explain
+    the observed avoidance with a weaker (lower-v0) repulsion. This estimator
+    instead pools only the frames where the ped is farther than
+    ``ego_distance_threshold`` from the ego (not yet reacting) and takes the
+    ``quantile`` speed there. A ped with no such free-walking frame (always close)
+    falls back to the all-frame median, so the floor / stop-when-arrived guarantee
+    of the baseline is preserved.
+    """
+    speeds = np.linalg.norm(enc.ped_vel, axis=2)  # [T, N]
+    dist = np.linalg.norm(enc.ped_xy - enc.ego_xy[:, None, :], axis=2)  # [T, N]
+    free = (dist > ego_distance_threshold) & np.isfinite(speeds)  # [T, N]
+    N = speeds.shape[1]
+    out = np.empty(N)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)  # all-NaN ped column
+        for j in range(N):
+            sj = speeds[:, j]
+            if free[:, j].any():
+                out[j] = np.quantile(sj[free[:, j]], quantile)
+            else:  # never free-walking -> baseline median fallback
+                finite = np.isfinite(sj)
+                out[j] = np.median(sj[finite]) if finite.any() else 1e-3
+    return _floor(out)
+
+
+def cruise_upper_quantile(enc: Encounter, quantile: float = 0.85) -> np.ndarray:
+    """Per-ped desired speed [N] as an upper ``quantile`` over ALL frames.
+
+    The cheapest correction for the avoidance-slowdown bias: instead of selecting
+    free-walking frames, it just shifts the per-ped speed statistic to an upper
+    quantile so the (rarer) full-speed strides dominate the (avoidance) dips.
+    """
+    speeds = np.linalg.norm(enc.ped_vel, axis=2)  # [T, N]
+    N = speeds.shape[1]
+    out = np.empty(N)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        for j in range(N):
+            sj = speeds[:, j]
+            finite = np.isfinite(sj)
+            out[j] = np.quantile(sj[finite], quantile) if finite.any() else 1e-3
+    return _floor(out)
 
 
 def _far_goals(ped_xy: np.ndarray, ped_vel: np.ndarray, distance: float = GOAL_DISTANCE) -> np.ndarray:
@@ -146,8 +212,15 @@ def _build_ped_sim(
     ego_radius: float,
     agent_radius: float,
     dt: float,
+    cruise_fn: Optional[CruiseEstimator] = None,
 ) -> PedestrianSimulator:
-    """Construct a PedestrianSimulator for one encounter at given (sigma, v0)."""
+    """Construct a PedestrianSimulator for one encounter at given (sigma, v0).
+
+    ``cruise_fn`` (default :func:`_cruise_speeds` on the recorded velocity)
+    estimates each ped's desired walking speed; pass an alternative (e.g.
+    :func:`cruise_freewalk`) for the RQ2 cruise-bias diagnostic. Default None
+    reproduces the original behaviour bit-for-bit.
+    """
     pos0 = enc.ped_xy[0]  # [N, 2]
     vel0 = enc.ped_vel[0]  # [N, 2]
     goals = _resolve_goals(enc)  # [N, 2]
@@ -163,7 +236,10 @@ def _build_ped_sim(
         },
         v0_randomization=False,
     )
-    _set_cruise_speed(ped_sim, _cruise_speeds(enc.ped_vel))
+    cruise = _cruise_speeds(enc.ped_vel) if cruise_fn is None else cruise_fn(enc)
+    # Floor at the consumption point so the stop-when-arrived guarantee holds for
+    # ANY cruise_fn (the built-ins self-floor, so this is a no-op for them).
+    _set_cruise_speed(ped_sim, _floor(cruise))
     return ped_sim
 
 
@@ -190,6 +266,7 @@ def simulate_encounter(
     ego_radius: float = DEFAULT_EGO_RADIUS,
     agent_radius: float = DEFAULT_AGENT_RADIUS,
     dt: float = 0.1,
+    cruise_fn: Optional[CruiseEstimator] = None,
 ) -> np.ndarray:
     """Roll out SFM pedestrians reacting to the recorded ego; return sim ped xy.
 
@@ -215,7 +292,7 @@ def simulate_encounter(
     """
     substeps = max(1, int(round(enc.dt / dt)))
     dt_sub = enc.dt / substeps
-    ped_sim = _build_ped_sim(enc, sigma, v0, ego_radius, agent_radius, dt_sub)
+    ped_sim = _build_ped_sim(enc, sigma, v0, ego_radius, agent_radius, dt_sub, cruise_fn)
     T, N, _ = enc.ped_xy.shape
     sim_xy = np.empty((T, N, 2))
     sim_xy[0] = enc.ped_xy[0]
@@ -235,6 +312,7 @@ def objective_rollout_ade(
     agent_radius: float = DEFAULT_AGENT_RADIUS,
     dt: float = 0.1,
     interaction_distance: Optional[float] = None,
+    cruise_fn: Optional[CruiseEstimator] = None,
 ) -> float:
     """Short-rollout displacement error vs the recorded pedestrians (the FITTER).
 
@@ -259,7 +337,7 @@ def objective_rollout_ade(
     total = 0.0
     count = 0
     for enc in encounters:
-        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt)
+        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt, cruise_fn)
         err = np.linalg.norm(sim_xy - enc.ped_xy, axis=2)  # [T, N]
         if interaction_distance is not None:
             dist = np.linalg.norm(enc.ped_xy - enc.ego_xy[:, None, :], axis=2)  # [T, N]
@@ -356,6 +434,7 @@ def fidelity_report(
     ego_radius: float = DEFAULT_EGO_RADIUS,
     agent_radius: float = DEFAULT_AGENT_RADIUS,
     dt: float = 0.1,
+    cruise_fn: Optional[CruiseEstimator] = None,
 ) -> Dict[str, float]:
     """Roll out at (sigma, v0) and compare simulated vs real avoidance (VALIDATION).
 
@@ -373,7 +452,7 @@ def fidelity_report(
     ade_sum = 0.0
     ade_count = 0
     for enc in encounters:
-        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt)
+        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt, cruise_fn)
         sim_sep = min_separation_series(enc.ego_xy, sim_xy)
         real_sep = min_separation_series(enc.ego_xy, enc.ped_xy)
         sim_closest.append(float(np.min(sim_sep)))

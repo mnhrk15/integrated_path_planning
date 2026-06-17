@@ -23,7 +23,7 @@ Two design choices specific to calibration (vs RQ1a open-loop replay):
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import List, Optional
 
 import numpy as np
@@ -284,4 +284,71 @@ def encounters_from_clips(
         out.extend(
             extract_encounters(align_clip_to_grid(clip), min_sep_threshold, min_len)
         )
+    return out
+
+
+def _split_clip_per_vehicle(clip: ClipTracks) -> List[ClipTracks]:
+    """Split a multi-vehicle clip into one virtual single-vehicle clip per vehicle.
+
+    The calibration harness drives the ego from ONE recorded vehicle and lets the
+    SFM pedestrians react, so a DUT clip with K vehicles is projected into K views,
+    each treating vehicle k as the ego and ALL pedestrians as the reacting crowd.
+    Each virtual clip carries exactly one vehicle (so the downstream single-vehicle
+    assertion in :func:`align_clip_to_grid` holds unchanged) and shares the
+    pedestrian tracks; its stem gets a ``#v{id}`` suffix to stay distinguishable.
+
+    A clip with no vehicle, or with a single vehicle, is returned unchanged as a
+    one-element list (a true upgrade over the single-vehicle path: identity is
+    preserved, so the existing CITR behaviour is bit-for-bit reproduced).
+
+    LIMITATION (validation-only): with vehicle k as the ego, the influence of the
+    OTHER vehicles on the pedestrians becomes unmodelled disturbance. DUT is used
+    only to test whether the CITR-fit (sigma, v0) survives out of domain, not to
+    identify parameters, so this is acceptable -- a sim that breaks under that
+    disturbance is itself evidence of the domain gap.
+    """
+    veh = clip.veh
+    if veh is None or veh.positions.shape[1] <= 1:
+        return [clip]
+    out: List[ClipTracks] = []
+    for k in range(veh.positions.shape[1]):
+        veh_k = AgentTracks(
+            times=veh.times,
+            ids=veh.ids[k : k + 1],
+            positions=veh.positions[:, k : k + 1, :],
+            extra={name: arr[:, k : k + 1] for name, arr in veh.extra.items()},
+        )
+        out.append(replace(clip, clip=f"{clip.clip}#v{int(veh.ids[k])}", veh=veh_k))
+    return out
+
+
+def encounters_from_clips_multivehicle(
+    clips: List[ClipTracks],
+    min_sep_threshold: float = 8.0,
+    min_len: int = 5,
+) -> List[Encounter]:
+    """Like :func:`encounters_from_clips` but also handles multi-vehicle clips.
+
+    Each clip is first expanded by :func:`_split_clip_per_vehicle` into virtual
+    single-vehicle clips, then run through the unchanged
+    :func:`align_clip_to_grid` + :func:`extract_encounters`. For single-vehicle
+    CITR clips this is an exact superset of :func:`encounters_from_clips` (the
+    one-element passthrough reproduces it), so it is safe on either dataset; the
+    original function is kept because the CITR calibration/tests depend on it and
+    on its skip-multi-vehicle contract.
+
+    Because a pedestrian reacting to K vehicles appears in up to K encounters, the
+    pooled pedestrian count is inflated by the per-vehicle expansion; callers
+    reporting distributions should note this (DUT validation does).
+    """
+    out: List[Encounter] = []
+    for clip in clips:
+        for sub in _split_clip_per_vehicle(clip):
+            if sub.ped is None or sub.veh is None:
+                continue
+            if sub.veh.positions.shape[1] != 1:  # defensive: split guarantees this
+                continue
+            out.extend(
+                extract_encounters(align_clip_to_grid(sub), min_sep_threshold, min_len)
+            )
     return out
