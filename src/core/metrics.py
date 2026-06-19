@@ -33,13 +33,27 @@ def _standard_ade_fde_details(
     dt: float,
     prediction_dt: float,
     prediction_steps: int,
-) -> Tuple[float, float, int, int]:
-    """Calculate fixed-horizon, scene-level best-of-N SGAN evaluation metrics."""
+) -> Tuple[float, float, float, float, int, int]:
+    """Fixed-horizon best-of-N SGAN ADE/FDE: scene-level AND per-agent.
+
+    Returns ``(ade, fde, ade_per_agent, fde_per_agent, max_samples, count)``.
+
+    ``ade``/``fde`` are the historical SCENE-LEVEL joint best-of-N: one sample is
+    chosen for the whole scene (``min`` over the ped+step mean). ``ade_per_agent``
+    /``fde_per_agent`` are the canonical SGAN minADE/minFDE where EACH pedestrian
+    picks its own best sample. The two differ for stochastic predictors (N>1) and
+    are identical for a deterministic one (N=1, the per-ped min is the identity),
+    so reporting both (review M1) shows whether the cv/lstm/sgan ordering is an
+    artefact of the non-canonical scene-level joint selection -- the scene-level
+    one inflates only the multi-sample methods.
+    """
     stride = _steps_for_interval(prediction_dt, dt)
     pred_indices = stride * np.arange(1, prediction_steps + 1) - 1
     future_offsets = stride * np.arange(1, prediction_steps + 1)
     total_ade = 0.0
     total_fde = 0.0
+    total_ade_pa = 0.0
+    total_fde_pa = 0.0
     trajectory_count = 0
     max_samples = 0
 
@@ -78,17 +92,23 @@ def _standard_ade_fde_details(
         ade_samples = np.mean(displacement, axis=(1, 2))
         fde_samples = np.mean(displacement[:, :, -1], axis=1)
 
-        # SGAN minADE/minFDE each select one scene-level sample independently.
+        # Scene-level joint best-of-N: one sample chosen for the whole scene.
         total_ade += float(np.min(ade_samples)) * n_peds
         total_fde += float(np.min(fde_samples)) * n_peds
+        # Per-agent best-of-N (canonical SGAN minADE/minFDE): each ped picks its
+        # own best sample. min over the sample axis, after the per-ped step mean.
+        total_ade_pa += float(np.sum(np.min(np.mean(displacement, axis=2), axis=0)))
+        total_fde_pa += float(np.sum(np.min(displacement[:, :, -1], axis=0)))
         trajectory_count += n_peds
         max_samples = max(max_samples, n_samples)
 
     if trajectory_count == 0:
-        return float("nan"), float("nan"), 0, 0
+        return float("nan"), float("nan"), float("nan"), float("nan"), 0, 0
     return (
         total_ade / trajectory_count,
         total_fde / trajectory_count,
+        total_ade_pa / trajectory_count,
+        total_fde_pa / trajectory_count,
         max_samples,
         trajectory_count,
     )
@@ -183,7 +203,7 @@ def calculate_standard_ade_fde(
     raw support (filled by the predictor's clamped tail extrapolation).
     minADE and minFDE select their best scene-level sample independently.
     """
-    ade, fde, max_samples, _ = _standard_ade_fde_details(
+    ade, fde, _ade_pa, _fde_pa, max_samples, _ = _standard_ade_fde_details(
         history,
         dt,
         prediction_dt,
@@ -263,7 +283,7 @@ def calculate_aggregate_metrics(
     jerks = [abs(r.ego_state.jerk) for r in history]
     accels = [abs(r.ego_state.a) for r in history]
 
-    ade, fde, n_samples, ade_eval_count = _standard_ade_fde_details(
+    ade, fde, ade_pa, fde_pa, n_samples, ade_eval_count = _standard_ade_fde_details(
         history,
         dt,
         prediction_dt,
@@ -288,6 +308,8 @@ def calculate_aggregate_metrics(
         "mean_accel": np.mean(accels) if accels else 0.0,
         "ade": ade,
         "fde": fde,
+        "ade_per_agent": ade_pa,
+        "fde_per_agent": fde_pa,
         "pred_samples": n_samples,
         "ade_eval_count": ade_eval_count,
         "planning_ade": planning_ade,

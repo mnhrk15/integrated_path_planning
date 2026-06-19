@@ -1,5 +1,5 @@
-gt_label,robust_gain_holds,dominating_inflations,robust_collisions,cv_danger_holds,lstm_danger_holds
-avec,True,,0,True,True
-calib,True,,0,True,True
-calib_lo,True,,0,True,True
-calib_hi,True,,0,False,True
+gt_label,robust_gain_holds,dominating_inflations,robust_collisions,cv_danger_holds,cv_danger_undetermined,cv_fisher_p,lstm_danger_holds,lstm_danger_undetermined,lstm_fisher_p
+avec,True,,0,False,True,0.5,True,False,0.0287
+calib,True,,0,False,True,0.5,False,True,0.1822
+calib_lo,True,,0,False,True,0.2458,False,True,0.1186
+calib_hi,True,,0,False,False,1.0,False,True,0.306

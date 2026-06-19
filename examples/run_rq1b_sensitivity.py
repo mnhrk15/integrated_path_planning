@@ -28,7 +28,9 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
+from scipy.stats import fisher_exact
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -51,6 +53,16 @@ DEFAULT_SCENARIOS = [
 # scenario's YAML value. The AVEC default is per-scenario (NOT uniform):
 # S1/S3 sigma=0.7/v0=3.5, S2 sigma=0.3/v0=2.1. The calibrated arms apply the
 # single RQ2 (sigma, v0) uniformly across scenarios.
+#
+# M6 corner check (radius-consistency fix): these (sigma, v0) are the radius=0.35
+# LOCO calibration. After fixing DEFAULT_AGENT_RADIUS to 0.30 (matching these
+# scenarios), the radius=0.30 recalibration gives LOCO mean (1.168, 1.712) -- a
+# ~1-2% shift that lies INSIDE the +/-1SD box already swept here
+# ([1.040,1.272] x [1.542,1.820]), so the sensitivity conclusions (robust gain
+# holds across the box; claim-2 reaction-model dependent) already cover the
+# corrected point. The 1980-run campaign is therefore NOT re-run, and these
+# values are kept so the cached runs' provenance (ego_repulsion_sigma/v0) stays
+# consistent with the GT labels.
 GT_CORE = [
     {"label": "avec",     "sigma": None,  "v0": None,
      "meaning": "AVEC per-scenario default (re-baseline)"},
@@ -107,6 +119,46 @@ def _cond_collisions(df, scenario, condition):
     return int(g.collision_count.sum())
 
 
+# Significance gating for the rand (claim-2) verdicts (review finding M8). The
+# raw collision COUNT comparison (cv_single > sgan_robust) is fragile: the
+# aggregate sums single-digit counts over scenarios with unequal seed budgets,
+# so a 1-vs-0 "flip" is indistinguishable from Monte-Carlo noise. We compare
+# at the run level (a run "collided" iff collision_count > 0, the same Bernoulli
+# unit run_da_poc already uses for n_collision_runs) and gate the verdict on a
+# one-sided Fisher exact test, so a danger claim must be both directional AND
+# statistically distinguishable from the robust arm.
+DANGER_ALPHA = 0.05
+
+
+def _run_collided(df, conditions):
+    """(collided_runs, n_runs) pooled over ``conditions`` (a run = one DataFrame row).
+
+    ``conditions`` may be a single label or an iterable of labels (e.g. all the
+    single-planner conditions pooled together for a per-scenario test).
+    """
+    if isinstance(conditions, str):
+        g = df[df.condition == conditions]
+    else:
+        g = df[df.condition.isin(list(conditions))]
+    return int((g.collision_count > 0).sum()), int(len(g))
+
+
+def _fisher_greater(a_collided, a_n, b_collided, b_n):
+    """One-sided Fisher exact p that group A collides MORE often than group B.
+
+    Run-level 2x2 (collided / clean). Returns NaN when either arm is empty so a
+    missing cell never reads as significant.
+    """
+    if a_n == 0 or b_n == 0:
+        return float("nan")
+    table = [[a_collided, a_n - a_collided], [b_collided, b_n - b_collided]]
+    try:
+        _, p = fisher_exact(table, alternative="greater")
+    except ValueError:  # pragma: no cover - guarded by the empty-arm check above
+        return float("nan")
+    return float(p)
+
+
 def margin_verdict(df):
     """Claim (1) robust gain: does robust(eps=0) dominate margin inflation?
 
@@ -151,9 +203,18 @@ def margin_verdict(df):
     }
 
 
-def rand_verdict(df):
+def rand_verdict(df, alpha=DANGER_ALPHA):
     """Claim (2) CV danger: distributionless prediction collides more than
-    distribution-aware (robust), per predictor (apples-to-apples)."""
+    distribution-aware (robust), per predictor (apples-to-apples).
+
+    Significance-gated (M8): a danger claim requires BOTH a directional
+    difference in collided runs AND a one-sided Fisher p < ``alpha``. A
+    directional-but-non-significant difference (e.g. a single-digit 1-vs-0
+    aggregate flip) is reported as ``*_undetermined`` rather than counted as the
+    claim holding. The aggregate still sums over scenarios -- which the review
+    flags as contaminated by GT-artifact scenarios -- so the honest evidence for
+    claim (2) is the per-scenario table (rand_scenario_rows), not this number.
+    """
     scenarios = sorted(df.scenario.unique())
 
     def tot(cond):
@@ -162,12 +223,37 @@ def rand_verdict(df):
     coll = {c: tot(c) for c in
             ["cv_single", "lstm_single", "lstm_robust_eps0.0",
              "sgan_single_inf1.00", "sgan_robust_eps0.0"]}
+
+    cv_c, cv_n = _run_collided(df, "cv_single")
+    sr_c, sr_n = _run_collided(df, "sgan_robust_eps0.0")
+    ls_c, ls_n = _run_collided(df, "lstm_single")
+    lr_c, lr_n = _run_collided(df, "lstm_robust_eps0.0")
+    cv_p = _fisher_greater(cv_c, cv_n, sr_c, sr_n)
+    lstm_p = _fisher_greater(ls_c, ls_n, lr_c, lr_n)
+    cv_dir = cv_c > sr_c
+    lstm_dir = ls_c > lr_c
+    cv_sig = bool(np.isfinite(cv_p) and cv_p < alpha)
+    lstm_sig = bool(np.isfinite(lstm_p) and lstm_p < alpha)
     return {
         # CV (no distribution at all) vs the distribution-aware SGAN robust.
-        "cv_danger_holds": coll["cv_single"] > coll["sgan_robust_eps0.0"],
+        "cv_danger_holds": bool(cv_dir and cv_sig),
+        "cv_danger_direction": bool(cv_dir),
+        "cv_danger_undetermined": bool(cv_dir and not cv_sig),
+        "cv_fisher_p": cv_p,
         # Same predictor, single vs robust over its own distribution.
-        "lstm_danger_holds": coll["lstm_single"] > coll["lstm_robust_eps0.0"],
+        "lstm_danger_holds": bool(lstm_dir and lstm_sig),
+        "lstm_danger_direction": bool(lstm_dir),
+        "lstm_danger_undetermined": bool(lstm_dir and not lstm_sig),
+        "lstm_fisher_p": lstm_p,
         "collisions_by_condition": coll,
+        "collided_runs_by_condition": {
+            "cv_single": cv_c, "sgan_robust_eps0.0": sr_c,
+            "lstm_single": ls_c, "lstm_robust_eps0.0": lr_c},
+        # Per-condition run denominators (NOT a single scalar: seed budgets can
+        # differ across conditions, so one number would mislabel the others).
+        "n_runs_by_condition": {
+            "cv_single": cv_n, "sgan_robust_eps0.0": sr_n,
+            "lstm_single": ls_n, "lstm_robust_eps0.0": lr_n},
     }
 
 
@@ -206,8 +292,24 @@ def rand_scenario_rows(master):
             klass = "mixed"
         else:
             klass = "GT-artifact"
+        # Run-level significance (M8): pool the single planners vs the robust
+        # planners and test whether single collides MORE at the run level. This
+        # is the per-scenario claim-(2) discriminator the review asks to front
+        # (e.g. S2 avec: single 9/60 vs robust 0/40 -> Fisher p~=0.008).
+        # CAVEAT (pseudo-replication): the 3 single planners on one seed share
+        # the scenario geometry and RNG init, so the pooled "runs" are not
+        # independent -- the run-level n is ~3x inflated and this Fisher p is
+        # anti-conservative (a lower bound on the true p). Read it as suggestive,
+        # not a calibrated significance level; the REPORT states this too.
+        s_c, s_n = _run_collided(g, SINGLE_CONDS)
+        rb_c, rb_n = _run_collided(g, ROBUST_CONDS)
+        fisher_p = _fisher_greater(s_c, s_n, rb_c, rb_n)
         rows.append({"gt_label": gt, "scenario": sc, **coll,
                      "single_total": single_tot, "robust_total": robust_tot,
+                     "single_collided_runs": s_c, "single_n": s_n,
+                     "robust_collided_runs": rb_c, "robust_n": rb_n,
+                     "fisher_p": (round(fisher_p, 4)
+                                  if np.isfinite(fisher_p) else float("nan")),
                      "class": klass})
     return pd.DataFrame(rows)
 
@@ -219,6 +321,11 @@ def build_verdicts(master, gt_labels):
         rdf = master[(master.campaign == "rand") & (master.gt_label == gt)]
         mv = margin_verdict(mdf) if not mdf.empty else None
         rv = rand_verdict(rdf) if not rdf.empty else None
+        def _p(rv_key):
+            if not rv:
+                return None
+            val = rv[rv_key]
+            return round(val, 4) if np.isfinite(val) else None
         rows.append({
             "gt_label": gt,
             "robust_gain_holds": (mv["robust_gain_holds"] if mv else None),
@@ -226,7 +333,11 @@ def build_verdicts(master, gt_labels):
                                       if mv else ""),
             "robust_collisions": (mv["robust_total_collisions"] if mv else None),
             "cv_danger_holds": (rv["cv_danger_holds"] if rv else None),
+            "cv_danger_undetermined": (rv["cv_danger_undetermined"] if rv else None),
+            "cv_fisher_p": _p("cv_fisher_p"),
             "lstm_danger_holds": (rv["lstm_danger_holds"] if rv else None),
+            "lstm_danger_undetermined": (rv["lstm_danger_undetermined"] if rv else None),
+            "lstm_fisher_p": _p("lstm_fisher_p"),
         })
     return pd.DataFrame(rows)
 
@@ -296,6 +407,115 @@ def _means_table(master):
     return pd.DataFrame(rows)
 
 
+_GT_ORDER = ["avec", "calib", "calib_lo", "calib_hi", "calib_s-v+", "calib_s+v-"]
+
+
+def _scenario_narrative(srows):
+    """Per-scenario claim-(2) reading generated FROM the data (review M9).
+
+    The previous reading was hand-written against an implicit 2-GT (avec/calib)
+    story and could contradict its own 4-GT table. This generates the reading
+    from ``srows`` for every GT actually present, so the prose can never disagree
+    with the table. A ``*`` marks cells where the per-scenario single-vs-robust
+    Fisher test is significant (p<0.05) -- those are the honest claim-(2) signal.
+    """
+    if srows.empty:
+        return ["（per-scenario データなし）"]
+    # Cover EVERY GT actually in the table, not just the ones hard-coded in
+    # _GT_ORDER: known GTs first (in canonical order), then any extra labels
+    # (e.g. a new GT_CORE/CORNER entry, or a custom --report-only CSV) sorted
+    # after. Otherwise the table keeps an unknown GT (it sorts last via fillna)
+    # while the narrative silently drops it -- the exact table/prose divergence
+    # this function (review M9) exists to prevent.
+    present = set(srows.gt_label)
+    gts_present = ([g for g in _GT_ORDER if g in present]
+                   + sorted(present - set(_GT_ORDER)))
+
+    def cell(sc, gt):
+        c = srows[(srows.scenario == sc) & (srows.gt_label == gt)]
+        return c.iloc[0] if not c.empty else None
+
+    def claim2_scenarios(gt):
+        sub = srows[srows.gt_label == gt]
+        return sorted(sub[sub["class"].isin(["single-danger", "mixed"])]
+                      .scenario.tolist())
+
+    L = ["**読み筋（per-scenario・全 GT をデータから自動生成）**:"]
+    for sc in sorted(srows.scenario.unique()):
+        parts = []
+        for gt in gts_present:
+            row = cell(sc, gt)
+            if row is None:
+                continue
+            tag = row["class"]
+            p = row.get("fisher_p", float("nan"))
+            if (isinstance(p, (int, float)) and p == p and p < DANGER_ALPHA
+                    and row["class"] in ("single-danger", "mixed")):
+                tag += f"*(p={p:.3f})"
+            parts.append(f"{gt}={tag}")
+        L.append(f"- **{sc}**: " + " / ".join(parts))
+    L.append("")
+    for gt in gts_present:
+        cs = claim2_scenarios(gt)
+        L.append(f"- **{gt}** で主張②（single-danger/mixed）が立つシナリオ: "
+                 f"{cs if cs else 'なし'}。")
+    L.append("")
+    L.append("**結論（データ駆動）**: 主張②（分布なし計画は危険）の成否は GT 反応モデルに"
+             "依存する（上表が一次情報・`*` は per-scenario の single-vs-robust run-level "
+             "Fisher が有意なセル）。集計 `cv_danger_holds` は単桁・不均等シードでノイズ"
+             "grade なので、主張②の主証拠はこの per-scenario 有意セル。robust 利得"
+             "（主張①）は別途 `robust_gain_holds` 参照（全 GT で頑健）。")
+    L.append("")
+    L.append("> **循環性 caveat（M7）**: RQ1b は較正済み反応モデル下での *感度分析* で"
+             "あり外的検証ではない。衝突相手の『GT 歩行者』は実歩行者ではなく較正済み "
+             "SFM（RQ2 で実 standoff を ~0.7m 過小再現）が生成する。よって主張②の所見は"
+             "『SFM family 内のパラメータ感度』であって、実歩行者下での安全結論ではない。"
+             "独立な実データ閉ループ検証は本研究の範囲外。")
+    return L
+
+
+def _sensitivity_status(verdicts, col, undet_col=None):
+    """Does verdict ``col`` flip across GT settings? Returns a status string.
+
+    A ``None`` entry means the verdict was not computed for that GT (missing/
+    empty arm); report that as undetermined rather than silently calling an
+    uncomputed verdict "robust".
+
+    The danger columns are now significance-gated (holds = direction AND Fisher
+    p<0.05), so a ``False`` can mean EITHER a real direction reversal OR merely a
+    loss of significance at a low-seed corner GT (same direction,
+    undetermined=True). Only the former is calibration sensitivity; the latter is
+    a detection-power artifact and must NOT read as a reversal. Pass the
+    ``undet_col`` companion to make that distinction.
+    """
+    raw = verdicts[col].tolist()
+    if not raw:  # empty verdicts frame: 0 GTs is NOT "invariant/robust"
+        return "GT なし（判定不能）"
+    vals = [v for v in raw if v is not None]
+    if len(vals) < len(raw):
+        return f"一部 GT 未計算（{len(vals)}/{len(raw)} GT のみ・判定不能）"
+    if len(set(vals)) <= 1:
+        return "全 GT で不変（頑健）"
+    if undet_col is not None and undet_col in verdicts:
+        undet = verdicts[undet_col].tolist()
+        # Coerce to plain bool before the boolean logic: None is already filtered
+        # by the early-return above, and a verdict is None-or-bool together with
+        # its undetermined companion, so undet has no None here either. Using
+        # bool() (not `is True`) is robust if a future edit ever stores a
+        # numpy.bool_ in a verdict column -- `np.True_ is True` is False, which
+        # would silently misread the sensitivity verdict.
+        rawb = [bool(v) for v in raw]
+        undetb = [bool(u) for u in undet]
+        has_pos = any(rawb)
+        # A genuine NEGATIVE GT: danger does not hold AND is not merely
+        # undetermined (i.e. the direction itself failed).
+        has_neg = any((not h) and (not u) for h, u in zip(rawb, undetb))
+        if has_pos and not has_neg:
+            return ("方向は全 GT で不変だが一部 GT で有意性が落ちる"
+                    "（少 seed corner の検出力差＝真の方向反転ではない）")
+    return "反転あり（較正に感度あり）"
+
+
 def write_report(root, master, verdicts, gts, cruise):
     root = Path(root)
     means = _means_table(master)
@@ -309,6 +529,12 @@ def write_report(root, master, verdicts, gts, cruise):
     L.append(f"全ラン cruise={cruise} m/s（RQ2 較正有効域 ~[0.4, 4.0] m/s 内"
              "＝5-6 m/s 外挿を回避。RQ2 limitation #2）。AVEC の 6/5/5 m/s 結果"
              "とは直接非比較で、同一 ~3 m/s の `avec` アームが域内再ベースライン。")
+    L.append("")
+    L.append("> M6 整合注記: GT の calib/±1SD は radius=0.35 較正値。"
+             "DEFAULT_AGENT_RADIUS を 0.30 に整合した再較正は LOCO 平均 (1.168, 1.712) "
+             "で、ここでスイープ済みの ±1SD box [1.040,1.272]×[1.542,1.820] 内に収まる"
+             "（~1-2% シフト）。よって本キャンペーン（1980 ラン）は再実行せず、結論は"
+             "補正後の点も感度範囲としてカバーする。")
     L.append("")
     L.append("## GT 反応モデル設定（σ/v0）")
     L.append("")
@@ -328,30 +554,33 @@ def write_report(root, master, verdicts, gts, cruise):
     L.append("")
     L.append("- robust_gain_holds: 全シナリオ同時に robust を支配する inflation が"
              "無い（＝主張①保持）")
-    L.append("- cv_danger_holds: CV single の衝突 > SGAN robust の衝突（＝主張②保持）")
-    L.append("- lstm_danger_holds: LSTM single の衝突 > LSTM robust の衝突")
+    L.append("- cv_danger_holds: CV single の collided-run > SGAN robust **かつ** "
+             "run-level 片側 Fisher p<0.05（有意な主張②保持）。方向はあるが非有意なら "
+             "`cv_danger_undetermined`＝判定保留（単桁差はノイズ grade）")
+    L.append("- lstm_danger_holds: LSTM single vs LSTM robust に同じ有意性ゲート")
     L.append("")
     L.append(_md_table(verdicts))
     L.append("")
     L.append("> 注意: 集計 `cv_danger_holds`/`lstm_danger_holds` は衝突をシナリオ"
-             "横断で合算するため、シナリオごとの内訳を隠す。主張②は必ず下記の "
-             "per-scenario 分類で読むこと。主張①（`robust_gain_holds`）は"
-             "シナリオ横断の集計でも頑健。")
+             "横断で合算し、かつ corner GT は seed 予算が少ない（avec/calib=20・"
+             "±1SD=10）ため、単桁カウントの flip は Monte-Carlo ノイズと区別できない。"
+             "有意性ゲート（Fisher p<0.05）を課しても集計はなお GT-artifact シナリオに"
+             "汚染されるため、**主張②は必ず下記の per-scenario 分類（有意セル `*`）で"
+             "読むこと**。主張①（`robust_gain_holds`）はシナリオ横断の集計でも頑健。")
     L.append("")
 
-    # Sensitivity: do verdicts flip across GT? A None means the verdict was not
-    # computed for that GT (missing/empty arm); report that as undetermined
-    # rather than silently calling an uncomputed verdict "robust".
-    def _sensitivity_status(col):
-        raw = verdicts[col].tolist()
-        vals = [v for v in raw if v is not None]
-        if len(vals) < len(raw):
-            return f"一部 GT 未計算（{len(vals)}/{len(raw)} GT のみ・判定不能）"
-        return "反転あり（較正に感度あり）" if len(set(vals)) > 1 else "全 GT で不変（頑健）"
+    # Sensitivity: do verdicts flip across GT? (see _sensitivity_status)
     L.append("## 感度（GT 間で判定が反転するか）")
     L.append("")
-    for col in ["robust_gain_holds", "cv_danger_holds", "lstm_danger_holds"]:
-        L.append(f"- **{col}**: {_sensitivity_status(col)}")
+    for col, undet in [("robust_gain_holds", None),
+                       ("cv_danger_holds", "cv_danger_undetermined"),
+                       ("lstm_danger_holds", "lstm_danger_undetermined")]:
+        L.append(f"- **{col}**: {_sensitivity_status(verdicts, col, undet)}")
+    L.append("")
+    L.append("> 注意: `cv_danger_holds`/`lstm_danger_holds` の反転は有意性ゲート後でも "
+             "corner GT の少 seed 予算（10）に左右されやすい。集計 danger の反転は "
+             "感度の *示唆* に留め、確定的な per-scenario 信号は下表の有意セル（`*`）で読む。"
+             "`robust_gain_holds`（主張①）の不変性が最も信頼できる結論。")
     L.append("")
 
     # Per-scenario claim-(2): the honest, uncontaminated view.
@@ -359,15 +588,24 @@ def write_report(root, master, verdicts, gts, cruise):
     srows.to_csv(root / "scenario_rand.csv", index=False)
     L.append("## 主張② シナリオ別（per-scenario・汚染なし）")
     L.append("")
-    L.append("各 (GT, シナリオ) の rand 衝突数と分類（single-danger=分布なし single "
-             "が衝突しつつ robust 2種は無衝突＝真の主張②信号／mixed=single≫robust>0"
-             "＝主張②方向は残るが robust も非ゼロ／GT-artifact=robust≧single＝弁別"
-             "でなく GT 自体の衝突／no-conflict=無衝突）:")
+    L.append("各 (GT, シナリオ) の rand 衝突数・run-level Fisher p と分類"
+             "（single-danger=分布なし single が衝突しつつ robust 2種は無衝突＝真の主張"
+             "②信号／mixed=single≫robust>0＝主張②方向は残るが robust も非ゼロ／"
+             "GT-artifact=robust≧single＝弁別でなく GT 自体の衝突／no-conflict=無衝突。"
+             "fisher_p=single 群 vs robust 群の run-level 片側 Fisher）:")
+    L.append("")
+    L.append("> **fisher_p の読み方（2つの caveat）**: (1) `class` は衝突 *カウント* から、"
+             "`fisher_p` は collided-run の有意性から独立に決まる。よって "
+             "`single-danger`（robust=0）でも `fisher_p` が非有意（少 run の偶然パターン）"
+             "なことがある＝class 名だけで主張②を確定せず必ず `fisher_p`/`*` を併読する。"
+             "(2) single 群は3計画器（cv/lstm/sgan）×seed を1 run 単位でプールするが、"
+             "同一 seed・同一シナリオの3計画器は初期条件と RNG を共有し独立でない"
+             "（pseudo-replication）。よって run-level n は約3倍に水増しされ、"
+             "Fisher p は反保守的（楽観的＝真の p の下界）。有意セルは『示唆』として読み、"
+             "確定的結論にはしない。")
     L.append("")
     if not srows.empty:
-        order = {g: i for i, g in enumerate(
-            ["avec", "calib", "calib_lo", "calib_hi",
-             "calib_s-v+", "calib_s+v-"])}
+        order = {g: i for i, g in enumerate(_GT_ORDER)}
         # Unknown GT labels sort last (fillna) instead of becoming NaN and
         # scattering unpredictably.
         srows = srows.sort_values(
@@ -375,38 +613,12 @@ def write_report(root, master, verdicts, gts, cruise):
             key=lambda s: (s.map(order).fillna(len(order))
                            if s.name == "gt_label" else s))
         L.append(_md_table(srows[["scenario", "gt_label"] + SINGLE_CONDS
-                                  + ROBUST_CONDS + ["class"]]))
+                                  + ROBUST_CONDS + ["fisher_p", "class"]]))
     L.append("")
-    # The reading-narrative below is hand-written against the standard 3-scenario
-    # / core-GT run. Emit it only when those three scenarios are actually present
-    # so a partial run (subset of --scenarios/--campaigns) cannot ship prose that
-    # contradicts its own tables. Re-run with the standard set to regenerate it.
-    have_scenarios = set(srows.scenario.unique()) if not srows.empty else set()
-    if {"scenario_01", "scenario_02", "scenario_03"} <= have_scenarios:
-        L.append("**読み筋（per-scenario・3シナリオとも干渉成立する修正シナリオ）**:")
-        L.append("- **S1（密交差）**: 両 GT で single-danger が残る（主に cv＝盲目予測"
-                 "の本質的危険。協調的な実較正歩行者でも、ego が誤った単一軌道に "
-                 "commit すると回避できない）。")
-        L.append("- **S2（狭路すれ違い）**: AVEC GT では single 衝突・robust 0"
-                 "（single-danger）→ **較正 GT では single も 0（no-conflict）＝主張②が"
-                 "消失**。狭路では協調的な実較正歩行者が single 計画の危険を解消する。")
-        L.append("- **S3（右折 yield）**: AVEC GT では single-danger（single 衝突・"
-                 "robust 0）→ **較正 GT（弱い v0≈1.68）では交錯が厳しくなり single が"
-                 "大幅悪化する一方 robust も完全には守れない（mixed: single≫robust>0）**。"
-                 "single≫robust の方向（主張②）は残るが、弱い斥力が右折交錯を困難化し "
-                 "robust の安全余裕も低下する。")
-        L.append("")
-        L.append("**主張②の結論（scenario-dependent）**: AVEC 反応モデルでは主張②"
-                 "（分布なし計画は危険）は3シナリオすべてで成立。**実較正（より協調的）"
-                 "反応モデル下では効果はシナリオ依存**＝狭路 S2 では消失（協調回避）、"
-                 "密交差 S1（盲目 cv）と右折 S3（弱斥力で交錯困難）では残る。"
-                 "「分布なし計画の危険度は反応モデルに依存する」が正直な結論で、"
-                 "AVEC sim の一律な危険性主張は手調整反応モデルに一部依存していた。"
-                 "robust 利得（主張①）は全 GT・全シナリオで頑健に生き残る。")
-    else:
-        L.append("（per-scenario 固定ナラティブは標準3シナリオ "
-                 "(scenario_01/02/03) を実行したときのみ生成。今回の対象シナリオ"
-                 "では省略。）")
+    # Reading-narrative generated FROM the per-scenario table for every GT
+    # present (review M9): never hand-written prose that can contradict the
+    # shipped table.
+    L.extend(_scenario_narrative(srows))
     L.append("")
 
     L.append("## 付録: 平均指標（means.csv 抜粋）")

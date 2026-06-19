@@ -183,17 +183,40 @@ def test_margin_verdict_fails_when_robust_itself_collides():
 
 
 def test_rand_verdict_detects_cv_and_lstm_danger():
+    # Strong, Fisher-significant danger signal: single collides on every run,
+    # the matched robust on none, over 8 seeds -> p well below 0.05.
     rows = []
-    coll = {"cv_single": 5, "lstm_single": 3, "lstm_robust_eps0.0": 1,
+    coll = {"cv_single": 8, "lstm_single": 7, "lstm_robust_eps0.0": 0,
             "sgan_single_inf1.00": 2, "sgan_robust_eps0.0": 0}
+    for cond, c in coll.items():
+        for s in range(8):
+            rows.append(dict(scenario="scenario_01", condition=cond,
+                             min_dist_m=1.0, time_s=20,
+                             collision_count=(1 if s < c else 0)))
+    v = rq1b.rand_verdict(pd.DataFrame(rows))
+    assert v["cv_danger_holds"] is True       # cv 8/8 > sgan robust 0/8, significant
+    assert v["cv_fisher_p"] < 0.05
+    assert v["cv_danger_undetermined"] is False
+    assert v["lstm_danger_holds"] is True      # lstm 7/8 > lstm robust 0/8, significant
+
+
+def test_rand_verdict_undetermined_when_subthreshold():
+    """A directional but non-significant margin (2-vs-0 over 5 seeds) must be
+    reported as undetermined, NOT as the danger claim holding (review M8: a
+    single-digit flip is indistinguishable from Monte-Carlo noise)."""
+    rows = []
+    coll = {"cv_single": 2, "lstm_single": 0, "lstm_robust_eps0.0": 0,
+            "sgan_single_inf1.00": 0, "sgan_robust_eps0.0": 0}
     for cond, c in coll.items():
         for s in range(5):
             rows.append(dict(scenario="scenario_01", condition=cond,
                              min_dist_m=1.0, time_s=20,
                              collision_count=(1 if s < c else 0)))
     v = rq1b.rand_verdict(pd.DataFrame(rows))
-    assert v["cv_danger_holds"] is True       # cv 5 > sgan robust 0
-    assert v["lstm_danger_holds"] is True      # lstm single 3 > lstm robust 1
+    assert v["cv_danger_direction"] is True    # cv 2 > robust 0 (direction holds)
+    assert v["cv_danger_holds"] is False        # ...but not significant
+    assert v["cv_danger_undetermined"] is True
+    assert v["cv_fisher_p"] > 0.05
 
 
 def test_rand_verdict_negative_when_robust_not_safer():
@@ -207,6 +230,8 @@ def test_rand_verdict_negative_when_robust_not_safer():
                              collision_count=(1 if s < c else 0)))
     v = rq1b.rand_verdict(pd.DataFrame(rows))
     assert v["cv_danger_holds"] is False       # cv 0 !> robust 1
+    assert v["cv_danger_direction"] is False
+    assert v["cv_danger_undetermined"] is False
     assert v["lstm_danger_holds"] is False      # lstm single 0 !> lstm robust 2
 
 
@@ -249,6 +274,115 @@ def test_rand_scenario_rows_classifies_per_scenario():
     assert klass["scenario_03"] == "mixed"
     assert klass["scenario_01"] == "no-conflict"
     assert klass["scenario_99"] == "GT-artifact"
+
+
+def test_rand_scenario_rows_reports_fisher_significance():
+    """Per-scenario single-vs-robust run-level Fisher (M8): an S2-like cell where
+    the single planners collide on several runs and both robust planners stay
+    clean must be flagged significant (p<0.05) and classed single-danger."""
+    rows = []
+    coll = {"cv_single": 3, "lstm_single": 3, "sgan_single_inf1.00": 3,
+            "lstm_robust_eps0.0": 0, "sgan_robust_eps0.0": 0}
+    for cond, c in coll.items():
+        for s in range(20):
+            rows.append(dict(campaign="rand", gt_label="avec",
+                             scenario="scenario_02", condition=cond,
+                             collision_count=(1 if s < c else 0)))
+    tbl = rq1b.rand_scenario_rows(pd.DataFrame(rows))
+    row = tbl.set_index("scenario").loc["scenario_02"]
+    assert row["single_collided_runs"] == 9 and row["single_n"] == 60
+    assert row["robust_collided_runs"] == 0 and row["robust_n"] == 40
+    assert row["fisher_p"] < 0.05           # 9/60 vs 0/40 ~ p=0.008
+    assert row["class"] == "single-danger"
+
+
+def test_scenario_narrative_is_data_driven_over_all_gts():
+    """The per-scenario reading must be generated from the table for every GT
+    present and must not ship the old hand-written 2-GT ("両 GT") prose that
+    could contradict a 4-GT table (review M9)."""
+    rows = []
+    for gt in ["avec", "calib", "calib_lo", "calib_hi"]:
+        for sc in ["scenario_01", "scenario_02"]:
+            coll = {"cv_single": 1, "lstm_single": 0, "sgan_single_inf1.00": 0,
+                    "lstm_robust_eps0.0": 0, "sgan_robust_eps0.0": 0}
+            for cond, c in coll.items():
+                for s in range(10):
+                    rows.append(dict(campaign="rand", gt_label=gt, scenario=sc,
+                                     condition=cond,
+                                     collision_count=(1 if s < c else 0)))
+    srows = rq1b.rand_scenario_rows(pd.DataFrame(rows))
+    text = "\n".join(rq1b._scenario_narrative(srows))
+    for gt in ["avec", "calib", "calib_lo", "calib_hi"]:
+        assert gt in text                   # every present GT is covered
+    assert "両 GT" not in text and "両GT" not in text
+    assert "感度分析" in text                # M7 circularity caveat present
+
+
+def test_scenario_narrative_covers_gt_outside_canonical_order():
+    """A GT label absent from _GT_ORDER (e.g. a new GT_CORE entry or a custom
+    --report-only CSV) must still appear in the narrative, not just the table:
+    otherwise the prose silently drops it while the table keeps it (fillna sort),
+    reintroducing the very table/narrative divergence M9 removed."""
+    rows = []
+    for gt in ["avec", "custom_gt_xyz"]:    # custom_gt_xyz is NOT in _GT_ORDER
+        coll = {"cv_single": 1, "lstm_single": 0, "sgan_single_inf1.00": 0,
+                "lstm_robust_eps0.0": 0, "sgan_robust_eps0.0": 0}
+        for cond, c in coll.items():
+            for s in range(10):
+                rows.append(dict(campaign="rand", gt_label=gt,
+                                 scenario="scenario_01", condition=cond,
+                                 collision_count=(1 if s < c else 0)))
+    srows = rq1b.rand_scenario_rows(pd.DataFrame(rows))
+    assert "custom_gt_xyz" in set(srows.gt_label)       # present in the table
+    text = "\n".join(rq1b._scenario_narrative(srows))
+    assert "custom_gt_xyz" in text                       # ...and in the prose
+
+
+def _verdicts_df(rows):
+    """Build a minimal verdicts-shaped frame for _sensitivity_status tests."""
+    return pd.DataFrame(rows)
+
+
+def test_sensitivity_status_power_limited_is_not_a_reversal():
+    """Review (M8 follow-up): a danger column that is significant for one GT but
+    merely *undetermined* (same direction, low-seed corner) for another must NOT
+    be reported as a calibration-sensitivity reversal -- that is a detection-power
+    artifact, not a direction flip."""
+    verdicts = _verdicts_df([
+        {"cv_danger_holds": True,  "cv_danger_undetermined": False},
+        {"cv_danger_holds": False, "cv_danger_undetermined": True},
+    ])
+    status = rq1b._sensitivity_status(verdicts, "cv_danger_holds",
+                                      "cv_danger_undetermined")
+    assert "有意性が落ちる" in status and "反転" not in status.replace("反転ではない", "")
+
+
+def test_sensitivity_status_genuine_reversal_and_invariant():
+    """A real direction flip (one GT holds, another is a true negative) reads as
+    a reversal; all-equal reads as robust; a None entry reads as undetermined."""
+    reversal = _verdicts_df([
+        {"cv_danger_holds": True,  "cv_danger_undetermined": False},
+        {"cv_danger_holds": False, "cv_danger_undetermined": False},  # true negative
+    ])
+    assert rq1b._sensitivity_status(
+        reversal, "cv_danger_holds", "cv_danger_undetermined") == "反転あり（較正に感度あり）"
+
+    invariant = _verdicts_df([
+        {"cv_danger_holds": True, "cv_danger_undetermined": False},
+        {"cv_danger_holds": True, "cv_danger_undetermined": False},
+    ])
+    assert rq1b._sensitivity_status(
+        invariant, "cv_danger_holds", "cv_danger_undetermined") == "全 GT で不変（頑健）"
+
+    uncomputed = _verdicts_df([
+        {"robust_gain_holds": True}, {"robust_gain_holds": None}])
+    assert "未計算" in rq1b._sensitivity_status(uncomputed, "robust_gain_holds")
+
+    # A 0-row frame must NOT read as "全 GT で不変（頑健）" (robustness over zero
+    # GTs); it is undetermined.
+    empty = pd.DataFrame({"robust_gain_holds": []})
+    status = rq1b._sensitivity_status(empty, "robust_gain_holds")
+    assert "判定不能" in status and "頑健" not in status
 
 
 def test_build_verdicts_detects_gt_flip():

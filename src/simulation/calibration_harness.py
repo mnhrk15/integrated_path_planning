@@ -59,7 +59,14 @@ from .integrated_simulator import PedestrianSimulator
 from ..datasets.vci_encounter import Encounter
 
 DEFAULT_EGO_RADIUS = 1.0  # AVEC ego footprint radius [m]; held fixed (confounds sigma)
-DEFAULT_AGENT_RADIUS = 0.35  # pysocialforce default pedestrian radius [m]
+# Pedestrian radius [m]. MUST match the AVEC/RQ1b scenarios' agent_radius (0.30):
+# the ego repulsion magnitude is v0*exp(-clearance/sigma) with
+# clearance = distance - (ego_radius + agent_radius), so calibrating at a
+# different agent_radius than the one RQ1b runs at shifts the clearance origin
+# and re-scales the fitted sigma when the calibrated (sigma, v0) is injected into
+# RQ1b (review M6: the old 0.35 vs scenario 0.30 mismatch was a +4-7% force bias,
+# the same order as the sigma fold spread). Held fixed (it confounds sigma).
+DEFAULT_AGENT_RADIUS = 0.30
 GOAL_DISTANCE = 50.0  # far-goal distance along recorded heading [m]
 
 
@@ -486,4 +493,13 @@ def fidelity_report(
         "n_onset_real": int(real_onset.size),
         "ks_onset": ks_onset,
         "p_onset": p_onset,
+        # Raw per-encounter closest-approach scalars and per-ped onset distances
+        # (review C1): with one held-out clip per LOCO fold the per-fold KS is a
+        # degenerate n=1 statistic (always 1.0). Exposing the raw values lets the
+        # evaluation POOL them across folds into a single, well-powered KS, and
+        # report the honest mean standoff gap, instead of averaging n=1 KS=1.0.
+        "closest_sim_raw": [float(x) for x in sim_closest],
+        "closest_real_raw": [float(x) for x in real_closest],
+        "onset_sim_raw": sim_onset.tolist(),
+        "onset_real_raw": real_onset.tolist(),
     }

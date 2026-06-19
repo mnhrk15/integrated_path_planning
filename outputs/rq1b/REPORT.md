@@ -3,6 +3,8 @@
 較正済み反応モデル下での robust/inflation/single 計画の再ベンチ（感度分析、外的検証ではない）。
 全ラン cruise=3.0 m/s（RQ2 較正有効域 ~[0.4, 4.0] m/s 内＝5-6 m/s 外挿を回避。RQ2 limitation #2）。AVEC の 6/5/5 m/s 結果とは直接非比較で、同一 ~3 m/s の `avec` アームが域内再ベースライン。
 
+> M6 整合注記: GT の calib/±1SD は radius=0.35 較正値。DEFAULT_AGENT_RADIUS を 0.30 に整合した再較正は LOCO 平均 (1.168, 1.712) で、ここでスイープ済みの ±1SD box [1.040,1.272]×[1.542,1.820] 内に収まる（~1-2% シフト）。よって本キャンペーン（1980 ラン）は再実行せず、結論は補正後の点も感度範囲としてカバーする。
+
 ## GT 反応モデル設定（σ/v0）
 
 | gt_label | sigma | v0 | meaning |
@@ -17,49 +19,60 @@
 ## 判定サマリ
 
 - robust_gain_holds: 全シナリオ同時に robust を支配する inflation が無い（＝主張①保持）
-- cv_danger_holds: CV single の衝突 > SGAN robust の衝突（＝主張②保持）
-- lstm_danger_holds: LSTM single の衝突 > LSTM robust の衝突
+- cv_danger_holds: CV single の collided-run > SGAN robust **かつ** run-level 片側 Fisher p<0.05（有意な主張②保持）。方向はあるが非有意なら `cv_danger_undetermined`＝判定保留（単桁差はノイズ grade）
+- lstm_danger_holds: LSTM single vs LSTM robust に同じ有意性ゲート
 
-| gt_label | robust_gain_holds | dominating_inflations | robust_collisions | cv_danger_holds | lstm_danger_holds |
-|---|---|---|---|---|---|
-| avec | True |  | 0 | True | True |
-| calib | True |  | 0 | True | True |
-| calib_lo | True |  | 0 | True | True |
-| calib_hi | True |  | 0 | False | True |
+| gt_label | robust_gain_holds | dominating_inflations | robust_collisions | cv_danger_holds | cv_danger_undetermined | cv_fisher_p | lstm_danger_holds | lstm_danger_undetermined | lstm_fisher_p |
+|---|---|---|---|---|---|---|---|---|---|
+| avec | True |  | 0 | False | True | 0.5 | True | False | 0.0287 |
+| calib | True |  | 0 | False | True | 0.5 | False | True | 0.1822 |
+| calib_lo | True |  | 0 | False | True | 0.2458 | False | True | 0.1186 |
+| calib_hi | True |  | 0 | False | False | 1.0 | False | True | 0.306 |
 
-> 注意: 集計 `cv_danger_holds`/`lstm_danger_holds` は衝突をシナリオ横断で合算するため、シナリオごとの内訳を隠す。主張②は必ず下記の per-scenario 分類で読むこと。主張①（`robust_gain_holds`）はシナリオ横断の集計でも頑健。
+> 注意: 集計 `cv_danger_holds`/`lstm_danger_holds` は衝突をシナリオ横断で合算し、かつ corner GT は seed 予算が少ない（avec/calib=20・±1SD=10）ため、単桁カウントの flip は Monte-Carlo ノイズと区別できない。有意性ゲート（Fisher p<0.05）を課しても集計はなお GT-artifact シナリオに汚染されるため、**主張②は必ず下記の per-scenario 分類（有意セル `*`）で読むこと**。主張①（`robust_gain_holds`）はシナリオ横断の集計でも頑健。
 
 ## 感度（GT 間で判定が反転するか）
 
 - **robust_gain_holds**: 全 GT で不変（頑健）
-- **cv_danger_holds**: 反転あり（較正に感度あり）
-- **lstm_danger_holds**: 全 GT で不変（頑健）
+- **cv_danger_holds**: 全 GT で不変（頑健）
+- **lstm_danger_holds**: 方向は全 GT で不変だが一部 GT で有意性が落ちる（少 seed corner の検出力差＝真の方向反転ではない）
+
+> 注意: `cv_danger_holds`/`lstm_danger_holds` の反転は有意性ゲート後でも corner GT の少 seed 予算（10）に左右されやすい。集計 danger の反転は 感度の *示唆* に留め、確定的な per-scenario 信号は下表の有意セル（`*`）で読む。`robust_gain_holds`（主張①）の不変性が最も信頼できる結論。
 
 ## 主張② シナリオ別（per-scenario・汚染なし）
 
-各 (GT, シナリオ) の rand 衝突数と分類（single-danger=分布なし single が衝突しつつ robust 2種は無衝突＝真の主張②信号／mixed=single≫robust>0＝主張②方向は残るが robust も非ゼロ／GT-artifact=robust≧single＝弁別でなく GT 自体の衝突／no-conflict=無衝突）:
+各 (GT, シナリオ) の rand 衝突数・run-level Fisher p と分類（single-danger=分布なし single が衝突しつつ robust 2種は無衝突＝真の主張②信号／mixed=single≫robust>0＝主張②方向は残るが robust も非ゼロ／GT-artifact=robust≧single＝弁別でなく GT 自体の衝突／no-conflict=無衝突。fisher_p=single 群 vs robust 群の run-level 片側 Fisher）:
 
-| scenario | gt_label | cv_single | lstm_single | sgan_single_inf1.00 | lstm_robust_eps0.0 | sgan_robust_eps0.0 | class |
-|---|---|---|---|---|---|---|---|
-| scenario_01 | avec | 1 | 0 | 0 | 0 | 0 | single-danger |
-| scenario_01 | calib | 1 | 1 | 0 | 0 | 0 | single-danger |
-| scenario_01 | calib_lo | 0 | 1 | 0 | 0 | 0 | single-danger |
-| scenario_01 | calib_hi | 0 | 1 | 1 | 0 | 0 | single-danger |
-| scenario_02 | avec | 0 | 3 | 6 | 0 | 0 | single-danger |
-| scenario_02 | calib | 0 | 0 | 0 | 0 | 0 | no-conflict |
-| scenario_02 | calib_lo | 0 | 0 | 1 | 0 | 0 | single-danger |
-| scenario_02 | calib_hi | 0 | 0 | 0 | 0 | 0 | no-conflict |
-| scenario_03 | avec | 0 | 2 | 1 | 0 | 0 | single-danger |
-| scenario_03 | calib | 1 | 3 | 3 | 1 | 1 | mixed |
-| scenario_03 | calib_lo | 2 | 2 | 1 | 0 | 0 | single-danger |
-| scenario_03 | calib_hi | 0 | 2 | 1 | 1 | 0 | mixed |
+> **fisher_p の読み方（2つの caveat）**: (1) `class` は衝突 *カウント* から、`fisher_p` は collided-run の有意性から独立に決まる。よって `single-danger`（robust=0）でも `fisher_p` が非有意（少 run の偶然パターン）なことがある＝class 名だけで主張②を確定せず必ず `fisher_p`/`*` を併読する。(2) single 群は3計画器（cv/lstm/sgan）×seed を1 run 単位でプールするが、同一 seed・同一シナリオの3計画器は初期条件と RNG を共有し独立でない（pseudo-replication）。よって run-level n は約3倍に水増しされ、Fisher p は反保守的（楽観的＝真の p の下界）。有意セルは『示唆』として読み、確定的結論にはしない。
 
-**読み筋（per-scenario・3シナリオとも干渉成立する修正シナリオ）**:
-- **S1（密交差）**: 両 GT で single-danger が残る（主に cv＝盲目予測の本質的危険。協調的な実較正歩行者でも、ego が誤った単一軌道に commit すると回避できない）。
-- **S2（狭路すれ違い）**: AVEC GT では single 衝突・robust 0（single-danger）→ **較正 GT では single も 0（no-conflict）＝主張②が消失**。狭路では協調的な実較正歩行者が single 計画の危険を解消する。
-- **S3（右折 yield）**: AVEC GT では single-danger（single 衝突・robust 0）→ **較正 GT（弱い v0≈1.68）では交錯が厳しくなり single が大幅悪化する一方 robust も完全には守れない（mixed: single≫robust>0）**。single≫robust の方向（主張②）は残るが、弱い斥力が右折交錯を困難化し robust の安全余裕も低下する。
+| scenario | gt_label | cv_single | lstm_single | sgan_single_inf1.00 | lstm_robust_eps0.0 | sgan_robust_eps0.0 | fisher_p | class |
+|---|---|---|---|---|---|---|---|---|
+| scenario_01 | avec | 1 | 0 | 0 | 0 | 0 | 0.6 | single-danger |
+| scenario_01 | calib | 1 | 1 | 0 | 0 | 0 | 0.3576 | single-danger |
+| scenario_01 | calib_lo | 0 | 1 | 0 | 0 | 0 | 0.6 | single-danger |
+| scenario_01 | calib_hi | 0 | 1 | 1 | 0 | 0 | 0.3551 | single-danger |
+| scenario_02 | avec | 0 | 3 | 6 | 0 | 0 | 0.0078 | single-danger |
+| scenario_02 | calib | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
+| scenario_02 | calib_lo | 0 | 0 | 1 | 0 | 0 | 0.6 | single-danger |
+| scenario_02 | calib_hi | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
+| scenario_03 | avec | 0 | 2 | 1 | 0 | 0 | 0.2116 | single-danger |
+| scenario_03 | calib | 1 | 3 | 3 | 1 | 1 | 0.2199 | mixed |
+| scenario_03 | calib_lo | 2 | 2 | 1 | 0 | 0 | 0.0673 | single-danger |
+| scenario_03 | calib_hi | 0 | 2 | 1 | 1 | 0 | 0.4716 | mixed |
 
-**主張②の結論（scenario-dependent）**: AVEC 反応モデルでは主張②（分布なし計画は危険）は3シナリオすべてで成立。**実較正（より協調的）反応モデル下では効果はシナリオ依存**＝狭路 S2 では消失（協調回避）、密交差 S1（盲目 cv）と右折 S3（弱斥力で交錯困難）では残る。「分布なし計画の危険度は反応モデルに依存する」が正直な結論で、AVEC sim の一律な危険性主張は手調整反応モデルに一部依存していた。robust 利得（主張①）は全 GT・全シナリオで頑健に生き残る。
+**読み筋（per-scenario・全 GT をデータから自動生成）**:
+- **scenario_01**: avec=single-danger / calib=single-danger / calib_lo=single-danger / calib_hi=single-danger
+- **scenario_02**: avec=single-danger*(p=0.008) / calib=no-conflict / calib_lo=single-danger / calib_hi=no-conflict
+- **scenario_03**: avec=single-danger / calib=mixed / calib_lo=single-danger / calib_hi=mixed
+
+- **avec** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_02', 'scenario_03']。
+- **calib** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_03']。
+- **calib_lo** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_02', 'scenario_03']。
+- **calib_hi** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_03']。
+
+**結論（データ駆動）**: 主張②（分布なし計画は危険）の成否は GT 反応モデルに依存する（上表が一次情報・`*` は per-scenario の single-vs-robust run-level Fisher が有意なセル）。集計 `cv_danger_holds` は単桁・不均等シードでノイズgrade なので、主張②の主証拠はこの per-scenario 有意セル。robust 利得（主張①）は別途 `robust_gain_holds` 参照（全 GT で頑健）。
+
+> **循環性 caveat（M7）**: RQ1b は較正済み反応モデル下での *感度分析* であり外的検証ではない。衝突相手の『GT 歩行者』は実歩行者ではなく較正済み SFM（RQ2 で実 standoff を ~0.7m 過小再現）が生成する。よって主張②の所見は『SFM family 内のパラメータ感度』であって、実歩行者下での安全結論ではない。独立な実データ閉ループ検証は本研究の範囲外。
 
 ## 付録: 平均指標（means.csv 抜粋）
 

@@ -52,6 +52,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 from loguru import logger  # noqa: E402
 
 from src.calibration import calibrate  # noqa: E402
+from src.core.metrics import compare_distributions_ks  # noqa: E402
 from src.datasets.vci_loader import (  # noqa: E402
     ClipTracks,
     load_vci_clips,
@@ -157,6 +158,16 @@ def _nan_row(fold_name: str, protocol: str, train_clips, test_clips,
     return row
 
 
+# The keys of the per-fold raw-scalar bundle pooled across folds for the
+# well-powered KS (review C1). Held flat so main() can extend pools by key.
+RAW_KEYS = ("real_closest", "calibrated_closest", "default_closest",
+            "norepulsion_closest", "real_onset", "calibrated_onset")
+
+
+def _empty_raw() -> Dict[str, list]:
+    return {k: [] for k in RAW_KEYS}
+
+
 def evaluate_fold(
     fold_name: str,
     protocol: str,
@@ -165,18 +176,25 @@ def evaluate_fold(
     train_encs: List[Encounter],
     test_encs: List[Encounter],
     args,
-) -> Dict[str, float]:
-    """Calibrate on train, validate on held-out test; one CSV row.
+) -> Tuple[Dict[str, float], Dict[str, list]]:
+    """Calibrate on train, validate on held-out test; (CSV row, raw-scalar pool).
 
     train_ade uses ``fidelity_report``'s rollout_ade (unfiltered, every ped) so
     it shares a scale with test_ade -- NOT the fitter loss, which the
     --interaction-distance filter would put on a different (non-comparable) scale.
+
+    The second return value carries this fold's held-out raw closest-approach /
+    onset scalars (calibrated, AVEC-default, no-repulsion, and the shared real
+    values) so main() can pool them across folds into a single KS (C1): the
+    per-fold ``test_ks_closest`` is a degenerate n=1 statistic and must not be
+    averaged as if it measured fidelity.
     """
     row = _nan_row(fold_name, protocol, train_clips, test_clips,
                    len(train_encs), len(test_encs))
+    raw = _empty_raw()
     if not train_encs:
         logger.warning(f"fold {fold_name!r}: no training encounters, skipping calibration")
-        return row
+        return row, raw
 
     def obj(s, v):
         return objective_rollout_ade(train_encs, s, v,
@@ -187,7 +205,7 @@ def evaluate_fold(
     except ValueError:
         logger.warning(f"fold {fold_name!r}: objective non-finite on the entire grid "
                        "(--interaction-distance too tight?); NaN row")
-        return row
+        return row, raw
 
     row["sigma"] = result.sigma
     row["v0"] = result.v0
@@ -211,16 +229,36 @@ def evaluate_fold(
             "base_norepulsion_test_ade": bn["rollout_ade"],
             "base_norepulsion_test_ks_closest": bn["ks_closest"],
         })
-    return row
+        # real_* is parameter-independent (same recorded closest/onset for all
+        # three arms), so take it once from the calibrated report.
+        raw["real_closest"] = te["closest_real_raw"]
+        raw["real_onset"] = te["onset_real_raw"]
+        raw["calibrated_closest"] = te["closest_sim_raw"]
+        raw["calibrated_onset"] = te["onset_sim_raw"]
+        raw["default_closest"] = bd["closest_sim_raw"]
+        raw["norepulsion_closest"] = bn["closest_sim_raw"]
+    return row, raw
 
 
 def _meanstd(series: pd.Series) -> str:
-    """'mean +/- std (n)' over finite entries, or 'n/a' when none are finite."""
+    """'mean +/- std [min, max] (n)' over finite entries; 'n/a' when none finite.
+
+    Uses the SAMPLE std (ddof=1), matching every other report in the repo
+    (run_da_poc, make_margin_report, run_statistical_benchmark); the previous
+    ddof=0 understated the spread by ~13-15% at the small LOSO n. The bracketed
+    [min, max] fold range is added because (review M3) the LOCO folds share ~96%
+    of their training data, so the ddof=1 std is still a DESCRIPTIVE fold-to-fold
+    spread, NOT a standard error -- the raw range makes the heterogeneity
+    visible rather than hiding it behind a deceptively tight +/- number.
+    """
     vals = series.to_numpy(dtype=float)
     vals = vals[np.isfinite(vals)]
     if vals.size == 0:
         return "n/a"
-    return f"{vals.mean():.3f} +/- {vals.std():.3f} (n={vals.size})"
+    if vals.size == 1:
+        return f"{vals[0]:.3f} (n=1)"
+    return (f"{vals.mean():.3f} +/- {vals.std(ddof=1):.3f} "
+            f"[{vals.min():.3f}, {vals.max():.3f}] (n={vals.size})")
 
 
 def speed_domain(clips: List[ClipTracks]) -> Dict[str, float]:
@@ -234,13 +272,55 @@ def speed_domain(clips: List[ClipTracks]) -> Dict[str, float]:
             "max": float(pooled.max()), "n": int(pooled.size)}
 
 
-def write_summary(path: Path, df: pd.DataFrame, protocol: str, speed: Dict[str, float]) -> str:
+def _pooled_ks(pools: Dict[str, list], sim_key: str, real_key: str) -> str:
+    """One KS over ALL folds' pooled raw scalars, or 'n/a' if a side is empty."""
+    sim = np.asarray(pools.get(sim_key, []), dtype=float)
+    real = np.asarray(pools.get(real_key, []), dtype=float)
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return "n/a (empty pool)"
+    ks, p = compare_distributions_ks(sim, real)
+    return f"{ks:.3f} (p={p:.3f}, n_sim={sim.size}, n_real={real.size})"
+
+
+def _standoff_gap(pools: Dict[str, list]) -> str:
+    """Honest pooled standoff gap (real - sim mean closest-approach), ADE-blind."""
+    sim = np.asarray(pools.get("calibrated_closest", []), dtype=float)
+    real = np.asarray(pools.get("real_closest", []), dtype=float)
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return "n/a"
+    return (f"real {real.mean():.3f} m vs calibrated sim {sim.mean():.3f} m  "
+            f"=> gap {real.mean() - sim.mean():+.3f} m (sim under-reproduces standoff)")
+
+
+def write_summary(path: Path, df: pd.DataFrame, protocol: str,
+                  speed: Dict[str, float], pools: Dict[str, list] = None) -> str:
     """Human-readable summary; returns the text (also printed to stdout)."""
+    pools = pools or _empty_raw()
+    # Honest framing of the stability claim (review M3): LOCO folds re-fit on
+    # 25 of 26 clips, so their fitted (sigma, v0) are near-replicates (~96% shared
+    # training) -- the +/- is a descriptive fold-to-fold spread, NOT a standard
+    # error, and the proper "unseen geometry" stability stress test is LOSO.
+    if protocol == "loco":
+        stability_note = (
+            "Calibrated (sigma, v0) fold-to-fold spread (LOCO):\n"
+            "  NOTE: each fold re-fits on 25/26 clips (~96% shared training), so\n"
+            "  the +/- is a DESCRIPTIVE spread, not a standard error. The proper\n"
+            "  unseen-geometry stability check is LOSO (run --protocol loso).")
+    else:
+        stability_note = (
+            "Calibrated (sigma, v0) across left-one-scenario-out folds (LOSO):\n"
+            "  geometry-holdout stress test (only ~4 folds); the [min, max] range\n"
+            "  shows how far (sigma, v0) moves when a whole interaction geometry is\n"
+            "  withheld -- the honest stability headline.")
     lines = [
         f"RQ2 cross-validated evaluation  protocol={protocol}  folds={len(df)}",
         "=" * 72,
         "",
-        "Calibrated (sigma, v0) stability across folds:",
+        stability_note,
         f"  sigma     : {_meanstd(df['sigma'])}",
         f"  v0        : {_meanstd(df['v0'])}",
         f"  AVEC default for reference: sigma={AVEC_DEFAULT[0]}, v0={AVEC_DEFAULT[1]}",
@@ -250,13 +330,26 @@ def write_summary(path: Path, df: pd.DataFrame, protocol: str, speed: Dict[str, 
         f"  AVEC default   ADE : {_meanstd(df['base_default_test_ade'])}",
         f"  no-repulsion   ADE : {_meanstd(df['base_norepulsion_test_ade'])}",
         "",
-        f"  calibrated     KS_closest : {_meanstd(df['test_ks_closest'])}",
-        f"  AVEC default   KS_closest : {_meanstd(df['base_default_test_ks_closest'])}",
-        f"  no-repulsion   KS_closest : {_meanstd(df['base_norepulsion_test_ks_closest'])}",
-        f"  calibrated     KS_onset   : {_meanstd(df['test_ks_onset'])}",
+        "Pooled held-out KS (review C1: ALL folds' raw closest-approach scalars",
+        "pooled into ONE n-sample KS -- a per-fold KS is degenerate (often n=1",
+        "per held-out clip, ~1.000 and uninformative), so it is NOT reported as",
+        "fidelity. NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN",
+        "(sigma, v0) -- a cross-validated mixture, not one fixed model -- while the",
+        "AVEC-default / no-repulsion pools use a single fixed parameter set:",
+        f"  calibrated     KS_closest : {_pooled_ks(pools, 'calibrated_closest', 'real_closest')}",
+        f"  AVEC default   KS_closest : {_pooled_ks(pools, 'default_closest', 'real_closest')}",
+        f"  no-repulsion   KS_closest : {_pooled_ks(pools, 'norepulsion_closest', 'real_closest')}",
+        "  (diagnostic only) calibrated KS_onset pools per-PED onset distances,",
+        "  which are autocorrelated within an encounter (shared ego trajectory),",
+        "  so its p-value is anti-conservative -- read the statistic, not the p:",
+        f"  calibrated     KS_onset   : {_pooled_ks(pools, 'calibrated_onset', 'real_onset')}",
         "",
-        f"  closest-approach sim/real (calibrated): "
-        f"{_meanstd(df['test_mean_closest_sim'])} / {_meanstd(df['test_mean_closest_real'])}",
+        "Honest standoff gap (pooled closest-approach; the metric ADE is blind to;",
+        "descriptive mean difference, no CI / significance test):",
+        f"  {_standoff_gap(pools)}",
+        "",
+        "(diagnostic) degenerate per-fold KS mean -- ~1.000, not fidelity:",
+        f"  calibrated per-fold KS_closest : {_meanstd(df['test_ks_closest'])}",
         "",
     ]
     if speed:
@@ -300,12 +393,15 @@ def main():
           f"clips={len(clips)}  encounters={total_encs}  folds={len(folds)}")
 
     rows: List[Dict[str, float]] = []
+    pools = _empty_raw()
     for fold_name, train_clips, test_clips in folds:
         train_encs = [e for c in train_clips for e in clip_encs[id(c)]]
         test_encs = [e for c in test_clips for e in clip_encs[id(c)]]
-        row = evaluate_fold(fold_name, args.protocol, train_clips, test_clips,
-                            train_encs, test_encs, args)
+        row, raw = evaluate_fold(fold_name, args.protocol, train_clips, test_clips,
+                                 train_encs, test_encs, args)
         rows.append(row)
+        for k in RAW_KEYS:  # pool held-out scalars across folds for the C1 KS
+            pools[k].extend(raw[k])
         print(f"  fold {fold_name:<22} train_encs={row['n_train_encs']:>3} "
               f"test_encs={row['n_test_encs']:>3} | sigma={row['sigma']:.3f} "
               f"v0={row['v0']:.3f} test_ade={row['test_ade']:.3f} "
@@ -319,7 +415,7 @@ def main():
 
     speed = speed_domain(clips)
     summary_path = out_dir / f"summary_{args.protocol}.txt"
-    text = write_summary(summary_path, df, args.protocol, speed)
+    text = write_summary(summary_path, df, args.protocol, speed, pools)
     print("\n" + text)
     print(f"saved per-fold CSV to {csv_path}")
     print(f"saved summary to {summary_path}")
