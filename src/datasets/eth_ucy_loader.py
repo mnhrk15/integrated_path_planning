@@ -2,17 +2,36 @@
 
 The ETH/UCY datasets (SGAN distribution, fetched by ``scripts/download_data.sh``
 into ``datasets/``) are tab/space-separated ``frame ped_id x y`` text files in
-world-frame metres, annotated on a fixed grid (the smallest frame gap == one
-0.4 s SGAN step; pedestrians enter/leave so larger gaps appear where a frame
-holds no one).
+world-frame metres, annotated on a grid whose frame ids step uniformly (every
+scene here steps by 10; pedestrians enter/leave so larger gaps appear where a
+frame holds no one).
+
+Two distinct time scales matter and must not be conflated (gap-b, see
+``docs/GAPB_eth_ucy_cadence_resolution.md``):
+
+* **Evaluation protocol dt (0.4 s, uniform).** The SGAN leave-one-out protocol
+  treats every annotation step as one 0.4 s step for *all* scenes (exactly as in
+  the original SGAN dataloader), and ``core.metrics`` ADE/FDE is a pure
+  positional difference -- ``stride == 1`` whenever ``prediction_dt == dt`` -- so
+  it is **independent of the dt value**. RQ1a numbers are therefore comparable to
+  the published SGAN line and do not change with the cadence below.
+* **Physical cadence per step (per-scene, :data:`SCENE_DT`).** The wall-clock
+  seconds one annotation step actually represents differs by scene. ``eth`` was
+  recorded from an *accelerated* video (Trajectron++ issue #67), so its step is
+  ~0.8 s -- raw walking speeds come out ~2x too fast under the 0.4 s assumption.
+  This only matters for the **walking-speed sanity check** (it does NOT affect
+  ADE), and is a known leave-one-out confound for the *learned* models (cv is
+  scale-free). ``univ`` (students) is a genuine 0.4 s scene whose low median
+  speed reflects a large loitering population, not a cadence artefact (its
+  moving-speed upper percentiles match zara -- see the doc).
 
 This module parses a scene file and extracts *fixed-population windows*:
 contiguous ``seq_len`` frames in which a set of pedestrians is present for the
 entire window. This matches SGAN's leave-one-out evaluation protocol and the
 fixed-N assumption of :class:`PedestrianObserver` and ``core.metrics`` (whose
 ADE/FDE requires ``gt.shape == (N, T, 2)``). Windows index the *sorted frame
-grid*, treating adjacent frames as one 0.4 s step (SGAN convention; the physical
-gap at a missing frame is ignored, exactly as in the original SGAN dataloader).
+grid*, treating adjacent frames as one 0.4 s protocol step (the physical gap at a
+missing frame is ignored, exactly as in the original SGAN dataloader).
 
 Full handling of pedestrians entering/leaving mid-window is deferred (the spike
 uses fixed windows). Raw data is gitignored and not redistributed.
@@ -33,6 +52,41 @@ SCENE_TEST_FILES: Dict[str, List[str]] = {
     "zara1": ["zara1/test/crowds_zara01.txt"],
     "zara2": ["zara2/test/crowds_zara02.txt"],
 }
+
+# Physical wall-clock seconds one annotation step represents, per scene. This is
+# the *cadence* for the walking-speed sanity check ONLY -- the ADE/FDE evaluation
+# protocol always uses the uniform 0.4 s step (see module docstring), and ADE is
+# dt-independent, so changing these values does not change any RQ1a metric.
+#
+# Basis (gap-b, docs/GAPB_eth_ucy_cadence_resolution.md):
+#   eth   = 0.8  -- accelerated source video (Trajectron++ issue #67); the whole
+#                   speed distribution is shifted ~2x and normalises at 0.8 s.
+#   univ  = 0.4  -- standard UCY cadence (OpenTraj: students sampled at 2.5 fps).
+#                   Its low *median* is a genuine loitering population; its
+#                   moving-speed (p90) already matches zara at 0.4 s, so it is NOT
+#                   a cadence artefact and must not be rescaled.
+#   others= 0.4  -- standard 0.4 s annotation step (hotel/zara1/zara2 normal).
+SCENE_DT: Dict[str, float] = {
+    "eth": 0.8,
+    "hotel": 0.4,
+    "univ": 0.4,
+    "zara1": 0.4,
+    "zara2": 0.4,
+}
+
+# The uniform step the SGAN leave-one-out evaluation protocol assigns to every
+# scene (and what ``core.metrics`` ADE/FDE uses). Kept distinct from SCENE_DT so
+# the two are never confused.
+SGAN_PROTOCOL_DT: float = 0.4
+
+
+def scene_dt(scene: str) -> float:
+    """Physical cadence [s] of one annotation step for ``scene`` (default 0.4).
+
+    Use this for the walking-speed sanity check, NOT for ADE/FDE evaluation
+    (which is dt-independent and uses :data:`SGAN_PROTOCOL_DT`).
+    """
+    return SCENE_DT.get(scene, SGAN_PROTOCOL_DT)
 
 @dataclass
 class SceneTrajectories:
@@ -134,6 +188,13 @@ def walking_speed_stats(scene: SceneTrajectories, dt: float = 0.4) -> np.ndarray
     Only adjacent-frame pairs are used (so transient gaps do not inflate the
     apparent speed), giving a sanity-check distribution that should peak near
     ~1.3 m/s for normal walking.
+
+    ``dt`` is the physical cadence of one annotation step; pass
+    :func:`scene_dt` ``(name)`` so per-scene cadences (e.g. ``eth`` ~0.8 s) yield
+    plausible speeds. The default 0.4 s is kept for back-compat and is only
+    correct for the standard-cadence scenes (hotel/univ/zara). This is a
+    sanity-check distribution only -- ADE/FDE never calls this and is
+    dt-independent.
     """
     speeds: List[float] = []
     step = scene.frame_step

@@ -2,16 +2,18 @@
 
 The diagnostics are pure functions over ``SceneTrajectories`` built in-process, so
 the suite never touches the (gitignored) real ETH/UCY files. They pin the four
-gap checks the tool reports: coordinate scale flag, missing-frame straddle, the
-univ two-file key reuse / coordinate divergence, and the open-loop anchor grid.
+gap checks the tool reports: annotation-cadence flag (on the moving-speed p90, not
+the median), missing-frame straddle, the univ two-file key reuse / coordinate
+divergence, and the open-loop anchor grid.
 """
 import numpy as np
 
 from src.datasets.eth_ucy_loader import SceneTrajectories
 from examples.inspect_eth_ucy_data import (
+    MOVING_SPEED_BAND,
     anchor_report,
     frame_gap_report,
-    scene_scale_report,
+    scene_cadence_report,
     univ_overlap_report,
     window_straddle_report,
 )
@@ -35,17 +37,53 @@ def _const_velocity_scene(speed_ms, n=10, frame_step=10, dt=0.4):
     return _scene(frames, peds)
 
 
-def test_scale_report_flags_only_implausible_median():
-    ok = scene_scale_report(_const_velocity_scene(1.3), dt=0.4)
-    assert np.isclose(ok["median"], 1.3, atol=1e-6)
-    assert ok["flagged"] is False
+def _loiter_scene(walk_speed=1.3, n_walk=3, n_stand=7, n=12, frame_step=10, dt=0.4):
+    """A loitering crowd: ``n_walk`` peds walk at ``walk_speed``, ``n_stand`` peds
+    stand still. Low MEDIAN speed (mostly standing) but a normal MOVING p90 -- the
+    univ students plaza signature that must NOT raise a cadence flag.
+    """
+    disp = walk_speed * dt
+    frames = [i * frame_step for i in range(n)]
+    peds = []
+    for i in range(n):
+        d = {}
+        for w in range(n_walk):                      # walkers move in +x
+            d[w] = (i * disp, float(w))
+        for s in range(n_stand):                     # standers fixed in place
+            d[100 + s] = (0.0, 10.0 + float(s))
+        peds.append(d)
+    return _scene(frames, peds)
 
-    fast = scene_scale_report(_const_velocity_scene(2.5), dt=0.4)  # eth-like
-    assert np.isclose(fast["median"], 2.5, atol=1e-6)
+
+def test_cadence_report_flags_on_moving_speed_not_median():
+    ok = scene_cadence_report(_const_velocity_scene(1.3), dt=0.4)
+    assert np.isclose(ok["median"], 1.3, atol=1e-6)
+    assert ok["flagged"] is False and ok["low_median"] is False
+
+    # eth-like: the WHOLE distribution is shifted ~2x -> p90 implausibly fast.
+    fast = scene_cadence_report(_const_velocity_scene(3.0), dt=0.4)
+    assert fast["p90"] > MOVING_SPEED_BAND[1]
     assert fast["flagged"] is True
 
-    slow = scene_scale_report(_const_velocity_scene(0.5), dt=0.4)  # univ-like
+    # Correcting the cadence (here, halving the implied speed via dt=0.8) brings a
+    # uniformly-fast scene back into the band -- the eth=0.8 s fix in miniature.
+    corrected = scene_cadence_report(_const_velocity_scene(3.0), dt=0.8)
+    assert corrected["flagged"] is False
+
+    # Uniformly slow (no normal walkers at all) -> p90 too low -> still a flag.
+    slow = scene_cadence_report(_const_velocity_scene(0.5), dt=0.4)
+    assert slow["p90"] < MOVING_SPEED_BAND[0]
     assert slow["flagged"] is True
+
+
+def test_cadence_report_does_not_flag_genuine_loitering_crowd():
+    """univ signature: low median (standing crowd) but normal moving p90. Must be
+    reported as an informational low_median note, NEVER a cadence flag."""
+    rep = scene_cadence_report(_loiter_scene(walk_speed=1.3), dt=0.4)
+    assert rep["median"] < MOVING_SPEED_BAND[0]      # dragged down by standers
+    assert MOVING_SPEED_BAND[0] <= rep["p90"] <= MOVING_SPEED_BAND[1]  # walkers OK
+    assert rep["flagged"] is False
+    assert rep["low_median"] is True
 
 
 def test_frame_gap_report_counts_holes():
@@ -87,14 +125,16 @@ def test_univ_overlap_not_applicable_for_single_file():
     assert univ_overlap_report([_const_velocity_scene(1.3)])["applicable"] is False
 
 
-def test_scale_report_does_not_scale_flag_empty_speed_scene():
+def test_cadence_report_does_not_flag_empty_speed_scene():
     """Zero adjacent-step pairs (a <2-frame file, or one whose only gaps are
-    holes) is a missing-DATA condition, not a coordinate-scale mismatch, so it
-    must NOT raise the SCALE flag (which would misattribute missing data)."""
+    holes) is a missing-DATA condition, not a cadence/scale mismatch, so it must
+    NOT raise the flag (nor the low_median note) -- that would misattribute
+    missing data."""
     one_frame = _scene([0], [{1: (0.0, 0.0)}])
-    rep = scene_scale_report(one_frame, dt=0.4)
+    rep = scene_cadence_report(one_frame, dt=0.4)
     assert rep["n_speeds"] == 0
     assert rep["flagged"] is False
+    assert rep["low_median"] is False
 
 
 def test_anchor_report_no_phase_when_dts_equal_and_phase_when_not():
