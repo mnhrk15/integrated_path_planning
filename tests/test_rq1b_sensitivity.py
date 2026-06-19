@@ -153,6 +153,35 @@ def test_margin_verdict_fails_when_an_inflation_dominates_everywhere():
     assert "sgan_single_inf1.50" in v["dominating_inflations"]
 
 
+def test_margin_verdict_fails_when_robust_itself_collides():
+    """A robust planner that collides cannot carry the robust-gain claim, even
+    when no inflation dominates it. In a scenario where robust collides on every
+    seed, its collision-free time mean is NaN, which vacuously blocks every
+    inflation from dominating -> dominating_inflations is empty, yet the verdict
+    must be False via the robust-collision safety guard, NOT via domination."""
+    # robust wins the MinDist/Time trade-off (highest dist, lowest time) so no
+    # inflation dominates -- but robust collides on every seed of scenario_01.
+    spec = {
+        "sgan_single_inf1.00": (1.0, 20), "sgan_single_inf1.10": (1.1, 21),
+        "sgan_single_inf1.20": (1.2, 22), "sgan_single_inf1.35": (1.3, 24),
+        "sgan_single_inf1.50": (1.4, 26), "sgan_robust_eps0.0": (1.8, 19),
+    }
+    rows = []
+    for sc in ("scenario_01", "scenario_02"):
+        for cond, (md, t) in spec.items():
+            for s in range(3):
+                coll = int(cond == "sgan_robust_eps0.0" and sc == "scenario_01")
+                rows.append(dict(scenario=sc, condition=cond, min_dist_m=md,
+                                 time_s=t, collision_count=coll,
+                                 rms_jerk=0.1, mean_accel=0.5))
+    v = rq1b.margin_verdict(pd.DataFrame(rows))
+    assert v["robust_total_collisions"] == 3
+    # No inflation dominates robust (robust is Pareto-best on the trade-off)...
+    assert v["dominating_inflations"] == []
+    # ...so robust_gain_holds is False ONLY because robust itself is unsafe.
+    assert v["robust_gain_holds"] is False
+
+
 def test_rand_verdict_detects_cv_and_lstm_danger():
     rows = []
     coll = {"cv_single": 5, "lstm_single": 3, "lstm_robust_eps0.0": 1,
