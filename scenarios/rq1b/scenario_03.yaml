@@ -1,0 +1,134 @@
+dt: 0.1
+total_time: 30.0
+social_force_params:
+  ego_repulsion.sigma: 0.7
+  ego_repulsion.v0: 3.5
+  agent_radius: 0.3
+obs_len: 8
+pred_len: 12
+num_samples: 20
+ego_initial_state:
+- -30.0
+- 2.5
+- 0.0
+- 5.0
+- 0.0
+ego_target_speed: 5.0
+ego_max_speed: 8.0
+ego_max_accel: 2.0
+ego_emergency_decel: 4.0
+ego_max_curvature: 0.2
+ego_radius: 1.0
+d_road_w: 0.3
+max_road_width: 1.2
+state_machine_trigger_clearance_caution: 1.0
+state_machine_trigger_time_headway: 0.8
+state_machine_recover_clearance_caution: 3.5
+state_machine_recover_clearance_emergency: 3.5
+state_machine_caution_speed_multiplier: 0.6
+state_machine_envelope_decel: 1.2
+state_machine_envelope_standoff: 1.0
+ped_radius: 0.2
+obstacle_radius: 0.2
+reference_waypoints_x:
+- -30.0
+- -8.0
+- -0.4
+- 2.0
+- 2.0
+reference_waypoints_y:
+- 2.5
+- 2.5
+- -0.4
+- -8.0
+- -30.0
+ped_initial_states:
+- - 25.0
+  - -12.0
+  - -1.2
+  - 0.0
+  - -40.0
+  - -12.0
+- - 27.0
+  - -11.0
+  - -1.3
+  - 0.0
+  - -40.0
+  - -11.0
+- - 29.0
+  - -13.0
+  - -1.1
+  - 0.0
+  - -40.0
+  - -13.0
+- - -24.0
+  - -14.0
+  - 1.2
+  - 0.0
+  - 40.0
+  - -14.0
+- - -21.0
+  - -15.0
+  - 1.0
+  - 0.0
+  - 40.0
+  - -15.0
+ped_groups:
+- - 0
+  - 1
+  - 2
+- - 3
+  - 4
+map_config:
+  road_borders:
+  - - -50.0
+    - 5.0
+    - 50.0
+    - 5.0
+  - - -50.0
+    - -5.0
+    - -5.0
+    - -5.0
+  - - 5.0
+    - -5.0
+    - 50.0
+    - -5.0
+  - - -5.0
+    - 50.0
+    - -5.0
+    - 5.0
+  - - -5.0
+    - -5.0
+    - -5.0
+    - -50.0
+  - - 5.0
+    - 50.0
+    - 5.0
+    - 5.0
+  - - 5.0
+    - -5.0
+    - 5.0
+    - -50.0
+  lanes:
+  - - -50.0
+    - 0.0
+    - 50.0
+    - 0.0
+  - - 0.0
+    - 50.0
+    - 0.0
+    - -50.0
+  crosswalks:
+  - - -5.0
+    - -15.0
+    - 10.0
+    - 4.0
+  - - -15.0
+    - -5.0
+    - 4.0
+    - 10.0
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt
+prediction_method: sgan
+device: cpu
+visualization_enabled: true
+output_path: output/scenario_03
