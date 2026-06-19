@@ -1,0 +1,5 @@
+gt_label,robust_gain_holds,dominating_inflations,robust_collisions,cv_danger_holds,lstm_danger_holds
+avec,True,,0,True,True
+calib,True,,0,True,True
+calib_lo,True,,0,True,True
+calib_hi,True,,0,False,True

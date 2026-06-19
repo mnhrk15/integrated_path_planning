@@ -66,9 +66,35 @@ CONDITIONS = [
 BASELINE_LABEL = "sgan_single_inf1.00"
 
 
+def apply_sfm_and_cruise_overrides(config, ego_repulsion_sigma=None,
+                                   ego_repulsion_v0=None, ego_target_speed=None):
+    """Merge RQ1b GT / cruise overrides into a loaded config, in place.
+
+    sigma/v0 are merged into ``social_force_params`` so scenario-level keys
+    (e.g. agent_radius, and the other of sigma/v0) survive instead of being
+    dropped by a wholesale assignment. A cruise override also clamps the initial
+    speed so the ego does not start above the new target. Returns ``config``.
+    """
+    if ego_repulsion_sigma is not None or ego_repulsion_v0 is not None:
+        sfp = dict(getattr(config, "social_force_params", None) or {})
+        if ego_repulsion_sigma is not None:
+            sfp["ego_repulsion.sigma"] = float(ego_repulsion_sigma)
+        if ego_repulsion_v0 is not None:
+            sfp["ego_repulsion.v0"] = float(ego_repulsion_v0)
+        config.social_force_params = sfp
+    if ego_target_speed is not None:
+        config.ego_target_speed = float(ego_target_speed)
+        st = list(config.ego_initial_state)
+        if len(st) > 3:
+            st[3] = min(st[3], float(ego_target_speed))
+        config.ego_initial_state = st
+    return config
+
+
 def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
             ego_footprint=None, n_circles=None, total_time=None,
-            v0_randomization=False):
+            v0_randomization=False, ego_repulsion_sigma=None,
+            ego_repulsion_v0=None, ego_target_speed=None):
     set_seed(seed)
     config = load_config(scenario)
     config.prediction_method = method
@@ -84,6 +110,10 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
         config.ego_footprint_n_circles = n_circles
     if total_time is not None:
         config.total_time = total_time
+    # RQ1b: inject calibrated pedestrian SFM ego-repulsion and restrict cruise
+    # to the RQ2 calibration-valid speed domain (see helper).
+    apply_sfm_and_cruise_overrides(config, ego_repulsion_sigma,
+                                   ego_repulsion_v0, ego_target_speed)
     resolve_model_path(config, method)
 
     sim = IntegratedSimulator(config)
@@ -94,6 +124,17 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
         prediction_steps=config.pred_len,
     )
     end_time = float(history[-1].time)
+    # Provenance: the SFM ego-repulsion actually used. Read it off the
+    # pedestrian simulator (authoritative after normalization); fall back to
+    # the config dict when a scenario has no pedestrians (pedestrian_sim None).
+    ped_sim = getattr(sim, "pedestrian_sim", None)
+    if ped_sim is not None:
+        eff_sigma = float(ped_sim.ego_repulsion_sigma)
+        eff_v0 = float(ped_sim.ego_repulsion_v0)
+    else:
+        sfp = getattr(config, "social_force_params", None) or {}
+        eff_sigma = float(sfp.get("ego_repulsion.sigma", float("nan")))
+        eff_v0 = float(sfp.get("ego_repulsion.v0", float("nan")))
     return {
         "ego_footprint": config.ego_footprint,
         "n_circles": int(config.ego_footprint_n_circles),
@@ -107,6 +148,11 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
         "collision_count": int(m["collision_count"]),
         "ade": float(m["ade"]),
         "fde": float(m["fde"]),
+        "rms_jerk": float(m["rms_jerk"]),
+        "mean_accel": float(m["mean_accel"]),
+        "ego_repulsion_sigma": eff_sigma,
+        "ego_repulsion_v0": eff_v0,
+        "ego_target_speed": float(config.ego_target_speed),
     }
 
 
@@ -130,42 +176,16 @@ def collect_rows(outdir: Path) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--seeds", type=int, default=20)
-    ap.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIOS),
-                    help="Comma-separated scenario YAML paths")
-    ap.add_argument("--conditions", default="",
-                    help="Comma-separated condition labels (default: all)")
-    ap.add_argument("--outdir", default="output/exp_margin_control")
-    ap.add_argument("--ego-footprint", choices=["circle", "multi_circle"], default=None,
-                    help="Override ego_footprint for all runs (use a separate "
-                         "--outdir: cached runs do not key on this)")
-    ap.add_argument("--ego-footprint-n-circles", type=int, default=None,
-                    help="Override ego_footprint_n_circles (multi_circle only)")
-    ap.add_argument("--total-time", type=float, default=None,
-                    help="Override total_time [s] for all scenarios (use a "
-                         "separate --outdir: cached runs do not key on this)")
-    ap.add_argument("--v0-randomization", action="store_true",
-                    help="Per-agent desired-speed randomization "
-                         "(sfm_v0_randomization=true, as in the rand benchmark; "
-                         "use a separate --outdir: cached runs do not key on this)")
-    args = ap.parse_args()
+def run_campaign(scenarios, conditions, seeds, outdir, overrides=None):
+    """Run every (scenario, condition, seed) cell into ``outdir/runs/``.
 
-    if ((args.ego_footprint or args.total_time or args.v0_randomization) and
-            args.outdir == "output/exp_margin_control"):
-        ap.error("--ego-footprint/--total-time/--v0-randomization change run "
-                 "semantics but are not part of the cache key; use a separate "
-                 "--outdir")
-
-    scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
-    wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
-    conditions = [c for c in CONDITIONS if not wanted or c[0] in wanted]
-    unknown = wanted - {c[0] for c in CONDITIONS}
-    if unknown:
-        ap.error(f"Unknown condition labels: {sorted(unknown)}")
-    seeds = list(range(args.seeds))
-    outdir = Path(args.outdir)
+    Runs are cached per cell (resumable); returns ``(df, n_failed)`` where df is
+    rebuilt from the cache on every call. ``overrides`` is forwarded verbatim as
+    keyword arguments to :func:`run_one` (ego_footprint, n_circles, total_time,
+    v0_randomization, ego_repulsion_sigma, ego_repulsion_v0, ego_target_speed).
+    """
+    overrides = overrides or {}
+    outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
     total = len(scenarios) * len(conditions) * len(seeds)
@@ -180,10 +200,7 @@ def main():
                     continue
                 try:
                     r = run_one(scenario, method, da, eps, inflation, seed,
-                                ego_footprint=args.ego_footprint,
-                                n_circles=args.ego_footprint_n_circles,
-                                total_time=args.total_time,
-                                v0_randomization=args.v0_randomization)
+                                **overrides)
                 except Exception:
                     failed += 1
                     print(f"[{done}/{total}] FAILED {Path(scenario).stem} "
@@ -205,20 +222,33 @@ def main():
                       f"t={r['time_s']:.1f} coll={r['collision_count']} ade={r['ade']:.3f}",
                       flush=True)
 
-    df = collect_rows(outdir)
-    if df.empty:
-        print("No cached runs found; nothing to aggregate.", file=sys.stderr)
-        sys.exit(1)
+    return collect_rows(outdir), failed
+
+
+def aggregate_and_write(df, outdir, conditions, baseline_label=BASELINE_LABEL,
+                        n_seeds=None):
+    """Write all_runs.csv / summary.csv / welch_vs_baseline.csv for one arm.
+
+    ``conditions`` is the ordered condition tuple list (only its labels are
+    used). Returns ``(summary_df, stat_df)``.
+    """
+    outdir = Path(outdir)
+    cond_labels = [c[0] for c in conditions]
+
     column_order = ["scenario", "condition", "method", "distribution_aware",
                     "epsilon", "inflation", "seed", "time_s", "speed_ms",
                     "min_dist_m", "min_ttc_s", "collision_count", "ade", "fde"]
-    # Footprint/cap fields only exist in caches written by newer code
-    column_order += [c for c in ["ego_footprint", "n_circles", "time_cap",
-                                 "termination", "goal_reached"] if c in df.columns]
+    # These fields only exist in caches written by newer code.
+    column_order += [c for c in ["rms_jerk", "mean_accel", "ego_footprint",
+                                 "n_circles", "time_cap", "termination",
+                                 "goal_reached", "ego_repulsion_sigma",
+                                 "ego_repulsion_v0", "ego_target_speed"]
+                     if c in df.columns]
     df = df[column_order].sort_values(["scenario", "condition", "seed"])
     df.to_csv(outdir / "all_runs.csv", index=False)
 
     # inf = "no TTC event in the run"; keep it out of means and t-tests.
+    df = df.copy()
     df["min_ttc_s"] = df["min_ttc_s"].replace([np.inf, -np.inf], np.nan)
 
     def fmt(g, col, p=3):
@@ -226,7 +256,7 @@ def main():
 
     summary_rows = []
     for scenario, sdf in df.groupby("scenario"):
-        for label, *_ in CONDITIONS:
+        for label in cond_labels:
             g = sdf[sdf.condition == label]
             if g.empty:
                 continue
@@ -246,19 +276,20 @@ def main():
                 "ade": fmt(g, "ade"),
             })
     summary = pd.DataFrame(summary_rows)
-    print(f"\n=== Summary (n={len(seeds)} seeds per condition) ===")
+    hdr = f" (n={n_seeds} seeds per condition)" if n_seeds else ""
+    print(f"\n=== Summary{hdr} ===")
     print(summary.to_string(index=False))
     summary.to_csv(outdir / "summary.csv", index=False)
 
-    # Welch t-tests: each condition vs the single-sample SGAN baseline, per scenario
+    # Welch t-tests: each condition vs the single-sample baseline, per scenario
     stat_rows = []
-    print(f"\n=== Welch t-test vs {BASELINE_LABEL} ===")
+    print(f"\n=== Welch t-test vs {baseline_label} ===")
     for scenario, sdf in df.groupby("scenario"):
-        base = sdf[sdf.condition == BASELINE_LABEL]
+        base = sdf[sdf.condition == baseline_label]
         if base.empty:
             continue
-        for label, *_ in CONDITIONS:
-            if label == BASELINE_LABEL:
+        for label in cond_labels:
+            if label == baseline_label:
                 continue
             g = sdf[sdf.condition == label]
             if g.empty:
@@ -277,7 +308,79 @@ def main():
                 print(f"{scenario} {label:20s} {col:11s} delta={d_mean:+.3f}  p={p:.3e}")
                 stat_rows.append({"scenario": scenario, "condition": label,
                                   "metric": col, "delta_vs_base": d_mean, "p": p})
-    pd.DataFrame(stat_rows).to_csv(outdir / "welch_vs_baseline.csv", index=False)
+    stat_df = pd.DataFrame(stat_rows)
+    stat_df.to_csv(outdir / "welch_vs_baseline.csv", index=False)
+    return summary, stat_df
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seeds", type=int, default=20)
+    ap.add_argument("--scenarios", default=",".join(DEFAULT_SCENARIOS),
+                    help="Comma-separated scenario YAML paths")
+    ap.add_argument("--conditions", default="",
+                    help="Comma-separated condition labels (default: all)")
+    ap.add_argument("--outdir", default="output/exp_margin_control")
+    ap.add_argument("--ego-footprint", choices=["circle", "multi_circle"], default=None,
+                    help="Override ego_footprint for all runs (use a separate "
+                         "--outdir: cached runs do not key on this)")
+    ap.add_argument("--ego-footprint-n-circles", type=int, default=None,
+                    help="Override ego_footprint_n_circles (multi_circle only)")
+    ap.add_argument("--total-time", type=float, default=None,
+                    help="Override total_time [s] for all scenarios (use a "
+                         "separate --outdir: cached runs do not key on this)")
+    ap.add_argument("--v0-randomization", action="store_true",
+                    help="Per-agent desired-speed randomization "
+                         "(sfm_v0_randomization=true, as in the rand benchmark; "
+                         "use a separate --outdir: cached runs do not key on this)")
+    ap.add_argument("--ego-repulsion-sigma", type=float, default=None,
+                    help="Override pedestrian SFM ego-repulsion sigma (RQ1b; "
+                         "use a separate --outdir: not part of the cache key)")
+    ap.add_argument("--ego-repulsion-v0", type=float, default=None,
+                    help="Override pedestrian SFM ego-repulsion v0 (RQ1b; "
+                         "use a separate --outdir: not part of the cache key)")
+    ap.add_argument("--ego-target-speed", type=float, default=None,
+                    help="Override ego cruise target speed [m/s] for all "
+                         "scenarios (RQ1b calibration-domain speed; use a "
+                         "separate --outdir: not part of the cache key)")
+    args = ap.parse_args()
+
+    non_cache_overrides = (args.ego_footprint or
+                           args.ego_footprint_n_circles is not None or
+                           args.total_time or
+                           args.v0_randomization or
+                           args.ego_repulsion_sigma is not None or
+                           args.ego_repulsion_v0 is not None or
+                           args.ego_target_speed is not None)
+    if non_cache_overrides and args.outdir == "output/exp_margin_control":
+        ap.error("--ego-footprint/--ego-footprint-n-circles/--total-time/"
+                 "--v0-randomization/--ego-repulsion-sigma/--ego-repulsion-v0/"
+                 "--ego-target-speed change run semantics but are not part of "
+                 "the cache key; use a separate --outdir")
+
+    scenarios = [s.strip() for s in args.scenarios.split(",") if s.strip()]
+    wanted = {c.strip() for c in args.conditions.split(",") if c.strip()}
+    conditions = [c for c in CONDITIONS if not wanted or c[0] in wanted]
+    unknown = wanted - {c[0] for c in CONDITIONS}
+    if unknown:
+        ap.error(f"Unknown condition labels: {sorted(unknown)}")
+    seeds = list(range(args.seeds))
+
+    overrides = {
+        "ego_footprint": args.ego_footprint,
+        "n_circles": args.ego_footprint_n_circles,
+        "total_time": args.total_time,
+        "v0_randomization": args.v0_randomization,
+        "ego_repulsion_sigma": args.ego_repulsion_sigma,
+        "ego_repulsion_v0": args.ego_repulsion_v0,
+        "ego_target_speed": args.ego_target_speed,
+    }
+    df, failed = run_campaign(scenarios, conditions, seeds, args.outdir, overrides)
+    if df.empty:
+        print("No cached runs found; nothing to aggregate.", file=sys.stderr)
+        sys.exit(1)
+    aggregate_and_write(df, args.outdir, conditions, BASELINE_LABEL,
+                        n_seeds=len(seeds))
 
     if failed:
         print(f"\nWARNING: {failed} run(s) failed and were not cached "
