@@ -8,11 +8,17 @@ checked; this tool quantifies each from the real files (read-only; it changes no
 results). It is the ETH/UCY analogue of ``inspect_vci_data.py``.
 
 Gaps diagnosed (one report block each):
-  1. Coordinate scale -- the loader treats every scene as world-frame metres with
-     NO coordinate transform. If a scene is in a different unit/scale (the ``eth``
-     scene is widely reported to differ), its walking-speed median departs from
-     the ~1.3 m/s human norm and its ADE absolute scale is not comparable to the
-     other scenes. Flags any scene whose median speed leaves a plausible band.
+  1. Annotation cadence -- the loader treats every scene as world-frame metres
+     (verified correct: the UCY scenes share one spatial span) but the wall-clock
+     seconds one annotation step represents differs by scene. ``eth`` was recorded
+     from an accelerated video (Trajectron++ issue #67), so its whole speed
+     distribution is ~2x too fast under the uniform 0.4 s assumption and normalises
+     at ~0.8 s; ``univ`` is a genuine 0.4 s scene whose LOW MEDIAN is a loitering
+     crowd, not a cadence error. This tool therefore evaluates each scene at its
+     per-scene cadence (:func:`scene_dt`) and flags on the MOVING speed (p90, robust
+     to loiterers), NOT the median -- so a slow-but-correct crowd is not mislabelled.
+     The 0.4 s SGAN evaluation protocol (and ADE/FDE, which is dt-independent) is
+     unaffected; see ``docs/GAPB_eth_ucy_cadence_resolution.md``.
   2. ``univ`` two-file concatenation -- ``univ`` ships students001/003 as two
      recordings with OVERLAPPING frame ids and ped ids. The loader returns them as
      separate SceneTrajectories (no cross-file window), but reused frame/ped ids
@@ -45,35 +51,57 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.core.metrics import _steps_for_interval  # noqa: E402
 from src.datasets.eth_ucy_loader import (  # noqa: E402
     SCENE_TEST_FILES,
+    SGAN_PROTOCOL_DT,
     SceneTrajectories,
     extract_fixed_windows,
     load_scene,
     load_scene_file,
+    scene_dt,
     walking_speed_stats,
 )
 
-# Plausible human walking-speed median band [m/s]. A scene median outside this is
-# strong evidence its coordinates are not in the same metre scale as the others.
-WALK_SPEED_BAND = (0.8, 2.0)
+# Plausible band for the MOVING walking speed (p90 of per-step speeds) [m/s].
+# p90 isolates the actively-walking pedestrians, so it is robust to a loitering
+# population that only drags the MEDIAN down (e.g. the univ students plaza). A
+# scene whose p90 leaves this band -- evaluated at its per-scene cadence -- has a
+# cadence/scale problem, not merely a slow crowd.
+MOVING_SPEED_BAND = (0.8, 2.0)
+# A median below this floor WITH a plausible p90 just means a slow/loitering
+# population; reported as an informational note, never a cadence flag.
+LOITER_MEDIAN_FLOOR = 0.8
 
 
-def scene_scale_report(scene: SceneTrajectories, dt: float = 0.4) -> Dict[str, float]:
-    """Gap 1: walking-speed stats + a coordinate-scale flag for one scene file."""
+def scene_cadence_report(scene: SceneTrajectories, dt: float = 0.4) -> Dict[str, float]:
+    """Gap 1: walking-speed stats + a cadence-plausibility flag for one file.
+
+    Flags on the MOVING speed (p90), not the median, so a genuine loitering
+    population (low median but normal walkers -- the univ students plaza) is NOT
+    mislabelled as a coordinate/cadence error. A flag means even the active
+    walkers are implausible under ``dt``: evidence the annotation cadence (or, in
+    principle, the coordinate scale) does not match the 0.4 s SGAN assumption.
+    ``dt`` should be the scene's physical cadence (:func:`scene_dt`).
+    """
     speeds = walking_speed_stats(scene, dt=dt)
     if speeds.size == 0:
         # No adjacent-step pairs (e.g. a <2-frame file or one whose only gaps
-        # are holes) -> cannot assess scale. This is a missing-DATA condition,
-        # NOT evidence of a coordinate-scale mismatch, so it must not raise the
-        # SCALE flag (n_speeds==0 is already visible in the printout).
-        return {"n_speeds": 0, "median": float("nan"), "p95": float("nan"),
-                "frame_step": scene.frame_step, "flagged": False}
+        # are holes) -> cannot assess cadence. This is a missing-DATA condition,
+        # NOT a cadence/scale mismatch, so it must not raise the flag (n_speeds==0
+        # is already visible in the printout).
+        return {"n_speeds": 0, "median": float("nan"), "p90": float("nan"),
+                "p95": float("nan"), "frame_step": scene.frame_step,
+                "flagged": False, "low_median": False}
     median = float(np.median(speeds))
+    p90 = float(np.percentile(speeds, 90))
+    flagged = not (MOVING_SPEED_BAND[0] <= p90 <= MOVING_SPEED_BAND[1])
     return {
         "n_speeds": int(speeds.size),
         "median": median,
+        "p90": p90,
         "p95": float(np.percentile(speeds, 95)),
         "frame_step": scene.frame_step,
-        "flagged": not (WALK_SPEED_BAND[0] <= median <= WALK_SPEED_BAND[1]),
+        "flagged": flagged,
+        # Genuinely slow crowd (not a cadence error): low median, plausible p90.
+        "low_median": (not flagged) and (median < LOITER_MEDIAN_FLOOR),
     }
 
 
@@ -201,14 +229,21 @@ def main():
     ap.add_argument("--seq-len", type=int, default=20, help="obs_len+pred_len")
     ap.add_argument("--obs-len", type=int, default=8)
     ap.add_argument("--pred-len", type=int, default=12)
-    ap.add_argument("--dt", type=float, default=0.4)
+    ap.add_argument("--dt", type=float, default=None,
+                    help="override the physical cadence [s] uniformly for all "
+                         "scenes (diagnostic); default uses the per-scene "
+                         "scene_dt (eth=0.8, others=0.4)")
     args = ap.parse_args()
 
     scenes = (list(SCENE_TEST_FILES) if args.scene == "all" else [args.scene])
     root = Path(args.root)
 
+    mode = (f"uniform dt={args.dt}s (override)" if args.dt is not None
+            else "per-scene cadence (scene_dt)")
     print("=" * 78)
     print(f"ETH/UCY pre-processing validation  root={root}  seq_len={args.seq_len}")
+    print(f"cadence mode: {mode};  ADE/FDE protocol dt={SGAN_PROTOCOL_DT}s "
+          "(uniform, dt-independent -- unaffected)")
     print("=" * 78)
 
     any_flag = False
@@ -219,20 +254,28 @@ def main():
             print(f"\n[{name}] SKIP: {e}")
             continue
 
-        print(f"\n### scene={name}  ({len(objs)} file(s))")
+        dt_used = args.dt if args.dt is not None else scene_dt(name)
+        print(f"\n### scene={name}  ({len(objs)} file(s))  "
+              f"cadence dt={dt_used}s (x{dt_used / SGAN_PROTOCOL_DT:.2g} of "
+              f"{SGAN_PROTOCOL_DT}s protocol step)")
         for i, sc in enumerate(objs):
-            sr = scene_scale_report(sc, dt=args.dt)
+            sr = scene_cadence_report(sc, dt=dt_used)
             gr = frame_gap_report(sc)
             wr = window_straddle_report(sc, args.seq_len)
-            flag = sr["flagged"]
-            any_flag = any_flag or flag
-            tag = "  <<< SCALE-FLAG (median outside %.1f-%.1f m/s)" % WALK_SPEED_BAND \
-                if flag else ""
+            any_flag = any_flag or sr["flagged"]
+            if sr["flagged"]:
+                tag = ("  <<< CADENCE-FLAG (p90 moving speed outside "
+                       "%.1f-%.1f m/s)" % MOVING_SPEED_BAND)
+            elif sr["low_median"]:
+                tag = "  (note: low median -- loitering/slow crowd; walkers normal)"
+            else:
+                tag = ""
             print(f"  file[{i}] {Path(sc.source).name}: "
                   f"frames={sc.n_frames} peds={len(sc.ped_ids)} "
                   f"frame_step={_fmt(sr['frame_step'],1)}")
-            print(f"    [1 scale ] walk median={_fmt(sr['median'])} m/s "
-                  f"p95={_fmt(sr['p95'])} (n={sr['n_speeds']}){tag}")
+            print(f"    [1 cadence] walk median={_fmt(sr['median'])} "
+                  f"p90={_fmt(sr['p90'])} p95={_fmt(sr['p95'])} m/s "
+                  f"(n={sr['n_speeds']}){tag}")
             print(f"    [3 holes ] gaps={gr['gaps']} n_holes={gr['n_holes']}; "
                   f"emitted_windows={wr['emitted_windows']} "
                   f"straddling={wr['straddling_windows']} "
@@ -246,7 +289,9 @@ def main():
                   f"diverging>1m={ur['n_diverging_gt1m']} "
                   f"({_fmt(100*ur['diverge_frac'],1)}%)")
 
-    ar = anchor_report(args.obs_len, args.pred_len, args.dt, args.dt)
+    # The anchor check is about the EVALUATION PROTOCOL dt (sim_dt vs sgan_dt),
+    # not the physical cadence above, so it always uses SGAN_PROTOCOL_DT.
+    ar = anchor_report(args.obs_len, args.pred_len, SGAN_PROTOCOL_DT, SGAN_PROTOCOL_DT)
     print(f"\n[4 anchor] sim_dt={ar['sim_dt']} sgan_dt={ar['sgan_dt']} "
           f"stride={ar['stride']} phase_mismatch={ar['phase_mismatch']}")
     print(f"    pred_indices={ar['pred_indices']}")
@@ -255,11 +300,14 @@ def main():
           "downsampling exists only in the closed-loop sim.)")
 
     print("\n" + "=" * 78)
-    print("SUMMARY: " + ("SCALE FLAG raised -- a scene's walking-speed median is "
-                         "outside the plausible band; its coordinates may not be "
-                         "in the same metre scale (investigate before comparing "
-                         "its ADE absolute values)." if any_flag
-                         else "no scale flags; all scenes within plausible band."))
+    print("SUMMARY: " + ("CADENCE FLAG raised -- a scene's MOVING speed (p90) is "
+                         "outside the plausible band at its per-scene cadence; its "
+                         "annotation cadence (or, in principle, coordinate scale) "
+                         "may not match the 0.4 s SGAN step. NOTE: ADE/FDE is "
+                         "dt-independent and unaffected." if any_flag
+                         else "no cadence flags; every scene's moving speed (p90) "
+                         "is plausible at its per-scene cadence. A 'low median' "
+                         "note marks a genuine loitering crowd, not an error."))
 
 
 if __name__ == "__main__":

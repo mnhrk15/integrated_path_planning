@@ -2,8 +2,11 @@ import numpy as np
 import pytest
 
 from src.datasets.eth_ucy_loader import (
+    SCENE_DT,
+    SGAN_PROTOCOL_DT,
     extract_fixed_windows,
     load_scene_file,
+    scene_dt,
     walking_speed_stats,
 )
 
@@ -62,3 +65,18 @@ def test_load_scene_file_rejects_too_few_columns(tmp_path):
     p.write_text("0 1 5.0\n")  # only 3 columns
     with pytest.raises(ValueError):
         load_scene_file(p)
+
+
+def test_scene_dt_per_scene_cadence():
+    """gap-b: only eth deviates from the 0.4 s step (accelerated source video);
+    univ stays 0.4 s (its low speed is a loitering crowd, not a cadence error)."""
+    assert scene_dt("eth") == 0.8
+    assert scene_dt("hotel") == 0.4
+    assert scene_dt("univ") == 0.4
+    assert scene_dt("zara1") == 0.4
+    assert scene_dt("zara2") == 0.4
+    # Unknown scenes fall back to the standard protocol step, never crash.
+    assert scene_dt("unknown") == SGAN_PROTOCOL_DT == 0.4
+    # SCENE_DT must cover exactly the known scenes (so the inspector/diagnostic
+    # never silently treats a real scene at the wrong default).
+    assert set(SCENE_DT) == {"eth", "hotel", "univ", "zara1", "zara2"}

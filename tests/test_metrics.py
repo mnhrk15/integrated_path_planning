@@ -26,6 +26,39 @@ def _result(positions, predictions=None, distribution=None):
     )
 
 
+def test_ade_fde_independent_of_dt_value_when_prediction_dt_equals_dt():
+    """gap-b pin: ADE/FDE does NOT change with the dt VALUE when prediction_dt==dt.
+
+    The cadence dt enters the metric only through
+    ``stride = _steps_for_interval(prediction_dt, dt)``; with ``prediction_dt == dt``
+    the stride is always 1, so the GT indexing and the (purely positional)
+    displacement are identical at any dt. This is why the per-scene physical
+    cadence (eth=0.8 s etc.) requires NO RQ1a regeneration -- evaluating eth at
+    0.8 s or the nominal 0.4 s yields byte-identical ADE/FDE.
+    """
+    # Imperfect prediction (off by 0.5 m in y each step) so the metric is nonzero.
+    pred = np.array([[[1.0, 0.5], [2.0, 0.5]]])  # (n_peds=1, steps=2, xy)
+    history = [
+        _result([[0.0, 0.0]], predictions=pred),
+        _result([[1.0, 0.0]]),
+        _result([[2.0, 0.0]]),
+    ]
+    a04, f04, n04 = calculate_standard_ade_fde(
+        history, dt=0.4, prediction_dt=0.4, prediction_steps=2)
+    a08, f08, n08 = calculate_standard_ade_fde(
+        history, dt=0.8, prediction_dt=0.8, prediction_steps=2)
+
+    assert a04 == pytest.approx(0.5) and f04 == pytest.approx(0.5)
+    assert a04 == pytest.approx(a08) and f04 == pytest.approx(f08)
+    assert n04 == n08 == 1
+
+    # Same invariance through the public aggregator run_openloop actually calls.
+    m04 = calculate_aggregate_metrics(history, 0.4, 0.4, 2)
+    m08 = calculate_aggregate_metrics(history, 0.8, 0.8, 2)
+    assert m04["ade"] == pytest.approx(m08["ade"])
+    assert m04["fde"] == pytest.approx(m08["fde"])
+
+
 def test_standard_ade_fde_uses_complete_fixed_horizon_only():
     """Standard ADE/FDE should exclude truncated predictions near the run end."""
     perfect = np.array([[[1.0, 0.0], [2.0, 0.0]]])
