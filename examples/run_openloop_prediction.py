@@ -111,6 +111,7 @@ def evaluate_window(window, predictor, obs_len, dt):
 def evaluate_scene(scenes, predictor, obs_len, pred_len, dt, stride, max_windows):
     seq_len = obs_len + pred_len
     sum_ade = sum_fde = traj_count = 0.0
+    sum_ade_pa = sum_fde_pa = 0.0  # per-agent best-of-N (review M1)
     sum_nll = 0.0
     nll_count = 0
     n_windows = 0
@@ -128,6 +129,11 @@ def evaluate_scene(scenes, predictor, obs_len, pred_len, dt, stride, max_windows
             if ade_count > 0 and not np.isnan(m["ade"]):
                 sum_ade += m["ade"] * ade_count
                 sum_fde += m["fde"] * ade_count
+                # Per-agent best-of-N reported alongside scene-level so RQ1a can
+                # show whether the cv/lstm/sgan ordering is invariant to the
+                # (non-canonical) scene-level joint best-of-N selection.
+                sum_ade_pa += m["ade_per_agent"] * ade_count
+                sum_fde_pa += m["fde_per_agent"] * ade_count
                 traj_count += ade_count
             nll_n = m["nll_eval_count"]
             if nll_n > 0 and not np.isnan(m["nll"]):
@@ -139,6 +145,8 @@ def evaluate_scene(scenes, predictor, obs_len, pred_len, dt, stride, max_windows
         "n_trajectories": int(traj_count),
         "ade": sum_ade / traj_count if traj_count else float("nan"),
         "fde": sum_fde / traj_count if traj_count else float("nan"),
+        "ade_per_agent": sum_ade_pa / traj_count if traj_count else float("nan"),
+        "fde_per_agent": sum_fde_pa / traj_count if traj_count else float("nan"),
         "nll": sum_nll / nll_count if nll_count else float("nan"),
     }
 
@@ -158,6 +166,8 @@ def main():
                         help="cap windows per file (quick smoke); default all")
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--csv", default=None,
+                        help="append a result row to this CSV (header written if new)")
     parser.add_argument("--quiet", action="store_true", help="suppress info logs")
     args = parser.parse_args()
 
@@ -194,9 +204,30 @@ def main():
         f"\nscene={args.scene} method={args.method} samples={num_samples} "
         f"seed={args.seed}\n"
         f"  windows={result['n_windows']} trajectories={result['n_trajectories']}\n"
-        f"  ADE={result['ade']:.3f} m  FDE={result['fde']:.3f} m  "
-        f"NLL={result['nll']:.3f}"
+        f"  ADE(scene)={result['ade']:.3f} m  FDE(scene)={result['fde']:.3f} m  "
+        f"NLL={result['nll']:.3f}\n"
+        f"  ADE(per-agent)={result['ade_per_agent']:.3f} m  "
+        f"FDE(per-agent)={result['fde_per_agent']:.3f} m  (canonical SGAN minADE/minFDE)"
     )
+
+    if args.csv:
+        csv_path = Path(args.csv)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        header = ("scene,method,seed,num_samples,n_windows,n_trajectories,"
+                  "ade,fde,ade_per_agent,fde_per_agent,nll\n")
+        # Header when the file is absent OR empty: a pre-touched / truncated
+        # 0-byte file would otherwise receive a header-less, unparseable append.
+        need_header = (not csv_path.exists()) or csv_path.stat().st_size == 0
+        with open(csv_path, "a") as f:
+            if need_header:
+                f.write(header)
+            f.write(
+                f"{args.scene},{args.method},{args.seed},{num_samples},"
+                f"{result['n_windows']},{result['n_trajectories']},"
+                f"{result['ade']},{result['fde']},"
+                f"{result['ade_per_agent']},{result['fde_per_agent']},{result['nll']}\n"
+            )
+        print(f"  appended row to {csv_path}")
 
 
 if __name__ == "__main__":

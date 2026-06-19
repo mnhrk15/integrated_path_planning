@@ -15,6 +15,7 @@ from tests.test_calibration_harness import make_clip
 
 from examples.run_rq2_evaluation import (
     COLUMNS,
+    RAW_KEYS,
     evaluate_fold,
     make_folds,
 )
@@ -91,27 +92,33 @@ def test_evaluate_fold_returns_documented_keys():
     train_encs = encounters_from_clips(train, 8.0, 5)
     test_encs = encounters_from_clips(test, 8.0, 5)
     assert train_encs and test_encs  # the synthetic geometry must interact
-    row = evaluate_fold("test0", "loco", train, test, train_encs, test_encs, _args())
+    row, raw = evaluate_fold("test0", "loco", train, test, train_encs, test_encs, _args())
     assert set(row.keys()) == set(COLUMNS)
     assert np.isfinite(row["sigma"]) and np.isfinite(row["v0"])
     assert np.isfinite(row["test_ade"])
     assert np.isfinite(row["train_ade"])
+    # The raw-scalar pool (review C1) carries the held-out closest-approach
+    # values so main() can pool them across folds into ONE KS.
+    assert set(raw.keys()) == set(RAW_KEYS)
+    assert len(raw["calibrated_closest"]) == len(raw["real_closest"]) == len(test_encs)
 
 
 def test_evaluate_fold_empty_test_is_nan():
     train = [_real_clip("train0")]
     train_encs = encounters_from_clips(train, 8.0, 5)
     # calibration still runs (train non-empty), but every test metric is NaN.
-    row = evaluate_fold("empty", "loco", train, [], train_encs, [], _args())
+    row, raw = evaluate_fold("empty", "loco", train, [], train_encs, [], _args())
     assert np.isfinite(row["sigma"])  # fit succeeded
     assert row["n_test_encs"] == 0
     assert np.isnan(row["test_ade"])
     assert np.isnan(row["test_ks_closest"])
+    assert all(raw[k] == [] for k in RAW_KEYS)  # empty test -> empty pools
 
 
 def test_evaluate_fold_empty_train_skips_calibration():
     test = [_real_clip("test0")]
     test_encs = encounters_from_clips(test, 8.0, 5)
-    row = evaluate_fold("notrain", "loco", [], test, [], test_encs, _args())
+    row, raw = evaluate_fold("notrain", "loco", [], test, [], test_encs, _args())
     assert np.isnan(row["sigma"])  # no calibration possible
     assert row["n_test_encs"] == len(test_encs)
+    assert all(raw[k] == [] for k in RAW_KEYS)  # no fit -> no pooled scalars

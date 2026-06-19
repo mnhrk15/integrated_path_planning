@@ -102,6 +102,43 @@ def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False):
     return mesh
 
 
+def plot_v0_profile(ax, surf: Dict[str, object]) -> None:
+    """1-D ADE-vs-v0 profile at the grid sigma nearest the fitted optimum.
+
+    Makes the review-C2 identifiability explicit: along the ridge the rollout ADE
+    is nearly flat between the calibrated v0 (~1.7) and the AVEC hand-tuned v0=3.5,
+    so the data CANNOT distinguish them (the '<2% ADE' band). Shades the v0 span
+    whose ADE is within 2% of the profile minimum.
+    """
+    gs, gv = surf["grid_sigma"], surf["grid_v0"]
+    loss = surf["loss"]  # masked [S, V]
+    si = int(np.argmin(np.abs(gs - surf["sigma"])))
+    prof = loss[si]  # masked [V]
+    finite = ~np.ma.getmaskarray(prof)
+    if finite.sum() < 2:
+        ax.text(0.5, 0.5, "profile degenerate", ha="center", va="center",
+                transform=ax.transAxes)
+        return
+    v = gv[finite]
+    a = np.asarray(prof[finite])
+    amin = float(a.min())
+    band = a <= amin * 1.02  # within 2% of the minimum -> indistinguishable
+    ax.plot(v, a, "-o", color="#1f77b4", ms=4)
+    if band.any():
+        ax.axhspan(amin, amin * 1.02, color="orange", alpha=0.18,
+                   label="within 2% of min (indistinguishable)")
+        ax.axvspan(float(v[band].min()), float(v[band].max()),
+                   color="orange", alpha=0.10)
+    ax.axvline(surf["v0"], color="black", ls="--", lw=1.2,
+               label=f"calibrated v0={surf['v0']:.2f}")
+    ax.axvline(AVEC_DEFAULT[1], color="red", ls=":", lw=1.5,
+               label=f"AVEC v0={AVEC_DEFAULT[1]}")
+    ax.set_xlabel(r"$v_0$ [m/s$^2$]")
+    ax.set_ylabel("rollout ADE [m]")
+    ax.set_title(rf"RQ2 ADE vs $v_0$ at $\sigma$={gs[si]:.2f} (identifiability)")
+    ax.legend(fontsize=8, framealpha=0.85)
+
+
 def _find_npz(input_dir: Path, scenario: str) -> Optional[Path]:
     p = input_dir / f"loss_surface_{scenario}.npz"
     return p if p.exists() else None
@@ -138,6 +175,14 @@ def main():
         fig.savefig(out, dpi=200, bbox_inches="tight")
         plt.close(fig)
         print(f"saved {out}")
+
+        # --- (a2) v0 identifiability profile (review C2) ---
+        fig2, ax2 = plt.subplots(figsize=(6.0, 4.0))
+        plot_v0_profile(ax2, surf)
+        out2 = out_dir / "rq2_v0_profile_all.png"
+        fig2.savefig(out2, dpi=200, bbox_inches="tight")
+        plt.close(fig2)
+        print(f"saved {out2}")
 
     # --- (b) per-scenario 2x2 grid (appendix) ---
     present = [(s, _find_npz(input_dir, s)) for s in SCENARIO_TITLES]

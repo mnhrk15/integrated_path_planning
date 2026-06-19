@@ -1,22 +1,39 @@
 RQ2 cross-validated evaluation  protocol=loso  folds=4
 ========================================================================
 
-Calibrated (sigma, v0) stability across folds:
-  sigma     : 0.985 +/- 0.171 (n=4)
-  v0        : 1.996 +/- 0.331 (n=4)
+Calibrated (sigma, v0) across left-one-scenario-out folds (LOSO):
+  geometry-holdout stress test (only ~4 folds); the [min, max] range
+  shows how far (sigma, v0) moves when a whole interaction geometry is
+  withheld -- the honest stability headline.
+  sigma     : 1.030 +/- 0.193 [0.743, 1.159] (n=4)
+  v0        : 2.044 +/- 0.390 [1.762, 2.617] (n=4)
   AVEC default for reference: sigma=0.7, v0=3.5
 
 Held-out test metrics (mean +/- std over folds), 3 groups:
-  calibrated     ADE : 0.644 +/- 0.093 (n=4)
-  AVEC default   ADE : 0.645 +/- 0.079 (n=4)
-  no-repulsion   ADE : 0.671 +/- 0.094 (n=4)
+  calibrated     ADE : 0.645 +/- 0.107 [0.501, 0.729] (n=4)
+  AVEC default   ADE : 0.643 +/- 0.092 [0.519, 0.716] (n=4)
+  no-repulsion   ADE : 0.671 +/- 0.109 [0.532, 0.759] (n=4)
 
-  calibrated     KS_closest : 0.725 +/- 0.277 (n=4)
-  AVEC default   KS_closest : 0.725 +/- 0.277 (n=4)
-  no-repulsion   KS_closest : 0.725 +/- 0.277 (n=4)
-  calibrated     KS_onset   : 0.963 +/- 0.052 (n=3)
+Pooled held-out KS (review C1: ALL folds' raw closest-approach scalars
+pooled into ONE n-sample KS -- a per-fold KS is degenerate (often n=1
+per held-out clip, ~1.000 and uninformative), so it is NOT reported as
+fidelity. NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN
+(sigma, v0) -- a cross-validated mixture, not one fixed model -- while the
+AVEC-default / no-repulsion pools use a single fixed parameter set:
+  calibrated     KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)
+  AVEC default   KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)
+  no-repulsion   KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)
+  (diagnostic only) calibrated KS_onset pools per-PED onset distances,
+  which are autocorrelated within an encounter (shared ego trajectory),
+  so its p-value is anti-conservative -- read the statistic, not the p:
+  calibrated     KS_onset   : 0.709 (p=0.000, n_sim=35, n_real=16)
 
-  closest-approach sim/real (calibrated): 1.470 +/- 0.918 (n=4) / 2.274 +/- 0.590 (n=4)
+Honest standoff gap (pooled closest-approach; the metric ADE is blind to;
+descriptive mean difference, no CI / significance test):
+  real 2.502 m vs calibrated sim 1.810 m  => gap +0.691 m (sim under-reproduces standoff)
+
+(diagnostic) degenerate per-fold KS mean -- ~1.000, not fidelity:
+  calibrated per-fold KS_closest : 0.725 +/- 0.320 [0.400, 1.000] (n=4)
 
 CITR vehicle speed domain (calibration is valid only here; AVEC ego runs at 5-6 m/s = extrapolation, RQ2 limitation #2):
   p5=0.39  p50=2.38  p90=3.65  p95=3.99  max=4.79 m/s  (n=621 samples)

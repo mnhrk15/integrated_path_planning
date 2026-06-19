@@ -3,6 +3,7 @@ import pytest
 
 from src.core.data_structures import EgoVehicleState, PedestrianState, SimulationResult
 from src.core.metrics import (
+    _standard_ade_fde_details,
     calculate_aggregate_metrics,
     calculate_planning_ade_fde,
     calculate_standard_ade_fde,
@@ -96,6 +97,45 @@ def test_standard_minade_and_minfde_select_samples_independently():
     assert ade == pytest.approx(5.0)
     assert fde == pytest.approx(6.0)
     assert samples == 2
+
+
+def test_per_agent_best_of_n_diverges_from_scene_level():
+    """Review M1: with N>1 the per-agent best-of-N (canonical SGAN minADE) lets
+    each ped pick its own best sample, so it can be far smaller than the
+    scene-level joint min. Same 2-ped/2-sample crossing as the scene-level test:
+    scene-level=1.0 (no single sample is best for both peds) but per-agent=0.0
+    (each ped's own best sample is perfect)."""
+    distribution = np.array(
+        [
+            [[[1.0, 0.0]], [[3.0, 0.0]]],
+            [[[3.0, 0.0]], [[1.0, 0.0]]],
+        ]
+    )
+    history = [
+        _result([[0.0, 0.0], [0.0, 0.0]], distribution=distribution),
+        _result([[1.0, 0.0], [1.0, 0.0]]),
+    ]
+    ade, fde, ade_pa, fde_pa, samples, count = _standard_ade_fde_details(
+        history, dt=0.1, prediction_dt=0.1, prediction_steps=1)
+    assert ade == pytest.approx(1.0) and fde == pytest.approx(1.0)       # scene-level
+    assert ade_pa == pytest.approx(0.0) and fde_pa == pytest.approx(0.0)  # per-agent
+    assert count == 2
+
+
+def test_per_agent_equals_scene_level_for_single_sample():
+    """A deterministic (N=1) predictor: the per-ped min over one sample is the
+    identity, so per-agent == scene-level. The two metrics only diverge for N>1,
+    which is exactly why reporting both isolates the best-of-N inflation."""
+    predictions = np.array([[[1.5, 0.0], [2.5, 0.0]]])  # 1 ped, 2 steps, slight error
+    history = [
+        _result([[0.0, 0.0]], predictions=predictions),
+        _result([[1.0, 0.0]]),
+        _result([[2.0, 0.0]]),
+    ]
+    ade, fde, ade_pa, fde_pa, _s, _c = _standard_ade_fde_details(
+        history, dt=0.1, prediction_dt=0.1, prediction_steps=2)
+    assert ade == pytest.approx(0.5)
+    assert ade_pa == pytest.approx(ade) and fde_pa == pytest.approx(fde)
 
 
 def test_standard_ade_fde_returns_nan_when_no_complete_horizon():

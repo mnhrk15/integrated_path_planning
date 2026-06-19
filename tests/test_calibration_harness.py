@@ -20,7 +20,9 @@ from src.datasets.vci_encounter import (
     _split_clip_per_vehicle,
 )
 from src.calibration import calibrate
+from src.config import load_config
 from src.simulation.calibration_harness import (
+    DEFAULT_AGENT_RADIUS,
     _cruise_speeds,
     _far_goals,
     cruise_freewalk,
@@ -30,6 +32,19 @@ from src.simulation.calibration_harness import (
     objective_rollout_ade,
     simulate_encounter,
 )
+
+
+def test_default_agent_radius_matches_rq1b_scenarios():
+    """The calibration agent_radius MUST equal the AVEC/RQ1b scenarios' radius
+    (review M6): the ego-repulsion clearance origin = distance-(ego+agent_radius),
+    so a mismatch re-scales the fitted sigma when (sigma, v0) is injected into
+    RQ1b. Pin them equal so the two never silently drift apart again."""
+    for scenario in ("scenarios/scenario_01.yaml",
+                     "scenarios/rq1b/scenario_01.yaml",
+                     "scenarios/rq1b/scenario_02.yaml"):
+        cfg = load_config(scenario)
+        assert cfg.social_force_params["agent_radius"] == pytest.approx(
+            DEFAULT_AGENT_RADIUS), f"{scenario} agent_radius != DEFAULT_AGENT_RADIUS"
 
 DT = 0.4
 
