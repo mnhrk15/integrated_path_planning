@@ -34,6 +34,7 @@ Usage:
     .venv/bin/python examples/run_rq2_evaluation.py --protocol loco --scenario vci_front --no-refine
 """
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -52,7 +53,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 from loguru import logger  # noqa: E402
 
 from src.calibration import calibrate  # noqa: E402
-from src.core.metrics import compare_distributions_ks  # noqa: E402
+from src.core.metrics import compare_distributions_ks, ks_sample_imbalance  # noqa: E402
 from src.datasets.vci_loader import (  # noqa: E402
     ClipTracks,
     load_vci_clips,
@@ -161,7 +162,10 @@ def _nan_row(fold_name: str, protocol: str, train_clips, test_clips,
 # The keys of the per-fold raw-scalar bundle pooled across folds for the
 # well-powered KS (review C1). Held flat so main() can extend pools by key.
 RAW_KEYS = ("real_closest", "calibrated_closest", "default_closest",
-            "norepulsion_closest", "real_onset", "calibrated_onset")
+            "norepulsion_closest", "real_onset", "calibrated_onset",
+            # per-encounter (independent) onset scalars for the VALID onset KS
+            # alongside the per-ped diagnostic (review m3/point5)
+            "real_onset_per_enc", "calibrated_onset_per_enc")
 
 
 def _empty_raw() -> Dict[str, list]:
@@ -237,6 +241,8 @@ def evaluate_fold(
         raw["calibrated_onset"] = te["onset_sim_raw"]
         raw["default_closest"] = bd["closest_sim_raw"]
         raw["norepulsion_closest"] = bn["closest_sim_raw"]
+        raw["real_onset_per_enc"] = te["onset_per_enc_real_raw"]
+        raw["calibrated_onset_per_enc"] = te["onset_per_enc_sim_raw"]
     return row, raw
 
 
@@ -272,16 +278,107 @@ def speed_domain(clips: List[ClipTracks]) -> Dict[str, float]:
             "max": float(pooled.max()), "n": int(pooled.size)}
 
 
-def _pooled_ks(pools: Dict[str, list], sim_key: str, real_key: str) -> str:
-    """One KS over ALL folds' pooled raw scalars, or 'n/a' if a side is empty."""
+def _pooled_ks_stat(pools: Dict[str, list], sim_key: str,
+                    real_key: str) -> Dict[str, float]:
+    """One KS over ALL folds' pooled raw scalars; None if either side is empty.
+
+    Returns {ks, p, n_sim, n_real}. Shared by the human summary (_pooled_ks) and
+    the machine-readable headline-test sidecar so both report the same numbers.
+    """
     sim = np.asarray(pools.get(sim_key, []), dtype=float)
     real = np.asarray(pools.get(real_key, []), dtype=float)
     sim = sim[np.isfinite(sim)]
     real = real[np.isfinite(real)]
     if sim.size == 0 or real.size == 0:
-        return "n/a (empty pool)"
+        return None
     ks, p = compare_distributions_ks(sim, real)
-    return f"{ks:.3f} (p={p:.3f}, n_sim={sim.size}, n_real={real.size})"
+    return {"ks": float(ks), "p": float(p),
+            "n_sim": int(sim.size), "n_real": int(real.size)}
+
+
+def _pooled_ks(pools: Dict[str, list], sim_key: str, real_key: str) -> str:
+    """One KS over ALL folds' pooled raw scalars, or 'n/a' if a side is empty."""
+    s = _pooled_ks_stat(pools, sim_key, real_key)
+    if s is None:
+        return "n/a (empty pool)"
+    imbalance = ks_sample_imbalance(s["n_sim"], s["n_real"])
+    flag = f"  [{imbalance}]" if imbalance else ""
+    return (f"{s['ks']:.3f} (p={s['p']:.3f}, "
+            f"n_sim={s['n_sim']}, n_real={s['n_real']}){flag}")
+
+
+def headline_tests(pools: Dict[str, list], protocol: str) -> List[Dict]:
+    """RQ2 fidelity KS record for the multiplicity ledger (closest-approach).
+
+    The ONE headline fidelity hypothesis is "the calibrated sim's pooled held-out
+    closest-approach distribution != real". A small p means the model does NOT
+    perfectly reproduce real avoidance -- the honest ~0.68 m standoff gap is
+    statistically real, not Monte-Carlo noise. Emitting it lets the ledger apply
+    BH/Holm so this limitation-strengthening result is corrected like every other
+    RQ test.
+
+    The AVEC-default and no-repulsion arms are usually CONTROLS, not separate
+    hypotheses: at n=26 their pooled KS SATURATES at the identical statistic
+    (0.462, p=0.0071) as the calibrated arm even though the underlying closest
+    arrays differ -- i.e. the closest-approach KS does not discriminate repulsion
+    strength (a direct echo of review C2: v0 is weakly identifiable). Filing three
+    numerically identical p-values would just inflate the family size (and the
+    cross-RQ m) for one distinct comparison, so a control whose (ks, p) matches the
+    calibrated arm is recorded in ``controls`` instead. But this saturation is an
+    EMPIRICAL property of this dataset, not a hardcoded assumption: if a re-run
+    ever DE-saturates an arm (its (ks, p) diverges from calibrated -- e.g. more
+    clips, looser min-sep), that arm becomes a genuinely distinct fidelity
+    hypothesis and IS emitted as a family member, so the family size stays correct.
+    (onset KS is autocorrelated/diagnostic and is handled separately as a
+    per-encounter VALID statistic, not here.)
+    """
+    cal = _pooled_ks_stat(pools, "calibrated_closest", "real_closest")
+    if cal is None:
+        return []
+    fam = f"rq2_fidelity_ks_{protocol}"
+    saturated = {}      # control arms numerically identical to calibrated
+    extra_family = []   # de-saturated arms = distinct hypotheses
+    for name, key in (("avec_default", "default_closest"),
+                      ("no_repulsion", "norepulsion_closest")):
+        s = _pooled_ks_stat(pools, key, "real_closest")
+        if s is None:
+            continue
+        if abs(s["p"] - cal["p"]) <= 1e-12 and abs(s["ks"] - cal["ks"]) <= 1e-12:
+            saturated[name] = {"ks": s["ks"], "p": s["p"]}
+        else:
+            extra_family.append({
+                "test_id": f"rq2.{protocol}.closest_ks.{name}",
+                "description": (f"Pooled held-out closest-approach KS: {name} sim "
+                                f"vs real ({protocol})"),
+                "family": fam, "protocol": protocol,
+                "p_value": s["p"], "statistic": s["ks"], "sidedness": "two-sided",
+                "n_sim": s["n_sim"], "n_real": s["n_real"], "headline": False,
+                "note": ("de-saturated (distinct from calibrated) => a separate "
+                         "fidelity hypothesis, counted in the family"),
+            })
+    calibrated = {
+        "test_id": f"rq2.{protocol}.closest_ks.calibrated",
+        "description": (f"Pooled held-out closest-approach KS: calibrated sim vs "
+                        f"real ({protocol})"),
+        "family": fam,
+        "protocol": protocol,
+        "p_value": cal["p"],
+        "statistic": cal["ks"],
+        "sidedness": "two-sided",
+        "n_sim": cal["n_sim"],
+        "n_real": cal["n_real"],
+        "headline": True,
+        "note": ("small p => the calibrated sim's standoff distribution differs "
+                 "from real (the ~0.68 m fidelity gap is statistically real)"),
+        "controls": saturated,
+        "controls_note": ("listed control arms SATURATE at the same statistic as "
+                          "calibrated despite different arrays => closest-approach "
+                          "KS does not discriminate repulsion strength (review C2: "
+                          "weak identifiability); these are controls, excluded from "
+                          "the multiplicity family. A de-saturated arm would instead "
+                          "appear as its own family test."),
+    }
+    return [calibrated] + extra_family
 
 
 def _standoff_gap(pools: Dict[str, list]) -> str:
@@ -343,6 +440,15 @@ def write_summary(path: Path, df: pd.DataFrame, protocol: str,
         "  which are autocorrelated within an encounter (shared ego trajectory),",
         "  so its p-value is anti-conservative -- read the statistic, not the p:",
         f"  calibrated     KS_onset   : {_pooled_ks(pools, 'calibrated_onset', 'real_onset')}",
+        "  (valid) per-encounter onset KS uses ONE median onset per encounter =",
+        "  an independent unit (clip-independent across folds), so its p IS a",
+        "  usable two-sample p (review m3/point5) -- prefer this over the per-PED:",
+        f"  calibrated     KS_onset_per_enc : "
+        f"{_pooled_ks(pools, 'calibrated_onset_per_enc', 'real_onset_per_enc')}",
+        "  NOTE: at this small n a KS near 1.0 means the two pools simply do not "
+        "overlap",
+        "  (complete separation), NOT infinitely-precise distinguishability -- read "
+        "with n.",
         "",
         "Honest standoff gap (pooled closest-approach; the metric ADE is blind to;",
         "descriptive mean difference, no CI / significance test):",
@@ -419,6 +525,18 @@ def main():
     print("\n" + text)
     print(f"saved per-fold CSV to {csv_path}")
     print(f"saved summary to {summary_path}")
+
+    # Machine-readable headline-test sidecar for the cross-RQ multiplicity ledger
+    # (make_multiplicity_ledger.py). Deterministic: the p-values come from the
+    # pooled-KS over fixed held-out scalars, so re-running this script overwrites
+    # the file byte-for-byte.
+    sidecar = out_dir / f"headline_tests_{args.protocol}.json"
+    sidecar.write_text(json.dumps({
+        "source": f"RQ2-{args.protocol}",
+        "generated_by": "run_rq2_evaluation.py",
+        "tests": headline_tests(pools, args.protocol),
+    }, indent=2) + "\n")
+    print(f"saved headline-test sidecar to {sidecar}")
 
 
 if __name__ == "__main__":

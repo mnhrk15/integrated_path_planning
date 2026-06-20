@@ -445,6 +445,29 @@ def compare_distributions_ks(
     return float(result.statistic), float(result.pvalue)
 
 
+def ks_sample_imbalance(
+    n_sim: int, n_real: int, ratio_warn: float = 2.0
+) -> Optional[str]:
+    """Warn when a two-sample KS compares pools of very different effective n.
+
+    A KS statistic between sim and real samples reads as a "distribution
+    difference" only when both pools have comparable size. If one arm's effective
+    n collapses -- review point 9: ``avoidance_onset_distance`` returns ``[]``
+    when a pedestrian overlaps the ego, at a frequency that varies with the GT
+    parameters -- the KS starts reflecting a SAMPLE-COUNT difference instead of a
+    shape difference. Returns a short warning string when one side is empty or
+    ``max(n)/min(n) > ratio_warn``, else ``None`` (no imbalance to flag).
+    """
+    a, b = int(n_sim), int(n_real)
+    lo, hi = (a, b) if a <= b else (b, a)
+    if lo == 0:
+        return f"effective-n WARNING: one side empty (n_sim={a}, n_real={b})"
+    if hi / lo > ratio_warn:
+        return (f"effective-n imbalance {hi / lo:.1f}x (n_sim={a}, n_real={b}); "
+                "KS may reflect sample-count, not distribution, difference")
+    return None
+
+
 def calculate_min_separation(
     history: List[SimulationResult],
 ) -> Tuple[np.ndarray, float]:

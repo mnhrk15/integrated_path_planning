@@ -25,6 +25,7 @@ Usage:
         [--total-time 60] [--root outputs/rq1b] [--report-only]
 """
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -312,6 +313,61 @@ def rand_scenario_rows(master):
                                   if np.isfinite(fisher_p) else float("nan")),
                      "class": klass})
     return pd.DataFrame(rows)
+
+
+def rq1b_headline_tests(srows):
+    """Claim-(2) per-scenario single-vs-robust Fisher tests for the multiplicity
+    ledger (make_multiplicity_ledger.py).
+
+    These per-scenario cells -- NOT the aggregate cv/lstm danger (declared noise,
+    M8) -- are the honest claim-(2) evidence unit. Every (gt, scenario) cell with
+    an evaluable (finite) Fisher p is one hypothesis in the family. That family is
+    exactly what the review (point 8) asks to multiplicity-correct: the headline
+    'S2/avec is significant (p~=0.008)' must survive BH/Holm over ALL the cells we
+    scanned, not be cherry-picked from them.
+
+    Each record carries the pseudo-replication caveat verbatim: the 3 single
+    planners on one seed share geometry + RNG init, so the run-level n is ~3x
+    inflated and the Fisher p is anti-conservative (a lower bound on the true p).
+    A finding that survives correction even at this optimistic p is the honest
+    floor; the ledger states the caveat so the survival is not over-read.
+    """
+    if srows.empty:
+        return []
+    tests = []
+    for _, r in srows.iterrows():
+        p = r.get("fisher_p", float("nan"))
+        if not (isinstance(p, (int, float, np.floating)) and np.isfinite(p)):
+            continue
+        gt, sc = str(r["gt_label"]), str(r["scenario"])
+        # power_tier: avec/calib carry the full seed budget (seeds_main); the
+        # +/-1SD corners (calib_lo/hi) run at half budget (seeds_corner) as a
+        # robustness check, NOT a headline number. The ledger uses this to show a
+        # family-definition sensitivity (the headline S2/avec signal survives BH
+        # within the avec-only and headline-GT families but not over the full
+        # 12-cell scan that includes the underpowered corners).
+        tier = "headline" if gt in ("avec", "calib") else "corner"
+        tests.append({
+            "test_id": f"rq1b.rand.fisher.{gt}.{sc}",
+            "description": (f"Per-scenario single-vs-robust collision Fisher "
+                            f"(GT={gt}, {sc}, class={r['class']})"),
+            "family": "rq1b_claim2_fisher",
+            "gt": gt,
+            "scenario": sc,
+            "power_tier": tier,
+            "p_value": float(p),
+            "sidedness": "one-sided",
+            "single_collided": int(r["single_collided_runs"]),
+            "single_n": int(r["single_n"]),
+            "robust_collided": int(r["robust_collided_runs"]),
+            "robust_n": int(r["robust_n"]),
+            "klass": str(r["class"]),
+            "headline": bool(r["class"] in ("single-danger", "mixed")),
+            "caveat": ("pseudo-replication: 3 single planners share seed/geometry, "
+                       "run-level n ~3x inflated, Fisher p anti-conservative "
+                       "(lower bound on true p)"),
+        })
+    return tests
 
 
 def build_verdicts(master, gt_labels):
@@ -711,6 +767,18 @@ def main():
 
     write_report(root, master, verdicts, gts, args.cruise)
     print(f"\nWrote {root}/REPORT.md, verdicts.csv, master_runs.csv, means.csv")
+
+    # Machine-readable headline-test sidecar for the cross-RQ multiplicity ledger
+    # (make_multiplicity_ledger.py). Deterministic: rand_scenario_rows groups by
+    # sorted (gt, scenario) and rounds fisher_p, so re-running (incl. report-only)
+    # overwrites this file byte-for-byte from the same cached runs.
+    sidecar = root / "headline_tests.json"
+    sidecar.write_text(json.dumps({
+        "source": "RQ1b-rand",
+        "generated_by": "run_rq1b_sensitivity.py",
+        "tests": rq1b_headline_tests(rand_scenario_rows(master)),
+    }, indent=2) + "\n")
+    print(f"Wrote {sidecar}")
 
     if total_failed:
         print(f"\nWARNING: {total_failed} run(s) failed and were not cached "

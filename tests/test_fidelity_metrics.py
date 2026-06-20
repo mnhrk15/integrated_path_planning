@@ -96,3 +96,23 @@ def test_calculate_min_separation_from_history():
     series, overall = calculate_min_separation(history)
     np.testing.assert_allclose(series, [2.0, 1.0])
     assert overall == pytest.approx(1.0)
+
+
+def test_per_encounter_onset_collapses_to_one_independent_scalar():
+    from src.simulation.calibration_harness import _per_encounter_onset
+
+    # Three encounters: the first has two per-ped onsets (median collapses them
+    # to ONE independent scalar), the second one, the third NONE -> NaN. The
+    # per-ped pool would be length 3 (autocorrelated within encounter 1); the
+    # per-encounter view is length 3 with one independent unit per encounter.
+    onset_arrays = [np.array([2.0, 4.0]), np.array([3.0]), np.array([])]
+    got = _per_encounter_onset(onset_arrays)
+    assert len(got) == 3
+    assert got[0] == pytest.approx(3.0)  # median([2,4])
+    assert got[1] == pytest.approx(3.0)
+    assert np.isnan(got[2])  # no onset triggered -> NaN, dropped by the KS filter
+
+    # A non-empty array with a stray NaN must NOT collapse the encounter to NaN
+    # (nanmedian over the finite values) -- it DID trigger avoidance.
+    got_nan = _per_encounter_onset([np.array([2.0, np.nan, 4.0])])
+    assert got_nan[0] == pytest.approx(3.0)

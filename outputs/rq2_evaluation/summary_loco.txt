@@ -27,6 +27,12 @@ AVEC-default / no-repulsion pools use a single fixed parameter set:
   which are autocorrelated within an encounter (shared ego trajectory),
   so its p-value is anti-conservative -- read the statistic, not the p:
   calibrated     KS_onset   : 0.798 (p=0.000, n_sim=26, n_real=16)
+  (valid) per-encounter onset KS uses ONE median onset per encounter =
+  an independent unit (clip-independent across folds), so its p IS a
+  usable two-sample p (review m3/point5) -- prefer this over the per-PED:
+  calibrated     KS_onset_per_enc : 1.000 (p=0.000, n_sim=12, n_real=9)
+  NOTE: at this small n a KS near 1.0 means the two pools simply do not overlap
+  (complete separation), NOT infinitely-precise distinguishability -- read with n.
 
 Honest standoff gap (pooled closest-approach; the metric ADE is blind to;
 descriptive mean difference, no CI / significance test):
