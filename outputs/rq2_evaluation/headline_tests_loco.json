@@ -1,0 +1,30 @@
+{
+  "source": "RQ2-loco",
+  "generated_by": "run_rq2_evaluation.py",
+  "tests": [
+    {
+      "test_id": "rq2.loco.closest_ks.calibrated",
+      "description": "Pooled held-out closest-approach KS: calibrated sim vs real (loco)",
+      "family": "rq2_fidelity_ks_loco",
+      "protocol": "loco",
+      "p_value": 0.007134100565905311,
+      "statistic": 0.46153846153846156,
+      "sidedness": "two-sided",
+      "n_sim": 26,
+      "n_real": 26,
+      "headline": true,
+      "note": "small p => the calibrated sim's standoff distribution differs from real (the ~0.68 m fidelity gap is statistically real)",
+      "controls": {
+        "avec_default": {
+          "ks": 0.46153846153846156,
+          "p": 0.007134100565905311
+        },
+        "no_repulsion": {
+          "ks": 0.46153846153846156,
+          "p": 0.007134100565905311
+        }
+      },
+      "controls_note": "listed control arms SATURATE at the same statistic as calibrated despite different arrays => closest-approach KS does not discriminate repulsion strength (review C2: weak identifiability); these are controls, excluded from the multiplicity family. A de-saturated arm would instead appear as its own family test."
+    }
+  ]
+}

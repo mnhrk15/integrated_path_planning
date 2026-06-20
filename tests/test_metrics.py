@@ -347,3 +347,18 @@ def test_kde_nll_skips_replicated_deterministic_samples():
 
     assert count == 0
     assert np.isnan(nll)
+
+
+def test_ks_sample_imbalance_flags_collapse_and_skew():
+    from src.core.metrics import ks_sample_imbalance
+
+    # Balanced pools: no warning.
+    assert ks_sample_imbalance(26, 26) is None
+    assert ks_sample_imbalance(26, 16) is None  # 1.6x, under the 2.0 threshold
+    # One side empty: explicit collapse warning (review point 9).
+    assert "empty" in ks_sample_imbalance(26, 0)
+    # >2x imbalance: KS may reflect sample count, not distribution shape.
+    msg = ks_sample_imbalance(30, 10)
+    assert msg is not None and "3.0x" in msg
+    # Symmetric in its arguments' magnitudes.
+    assert ks_sample_imbalance(10, 30) is not None

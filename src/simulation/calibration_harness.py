@@ -434,6 +434,24 @@ def objective_one_step(
     return total / count
 
 
+def _per_encounter_onset(onset_arrays: List[np.ndarray]) -> List[float]:
+    """One scalar per encounter: the median onset distance, NaN if the encounter
+    triggered no avoidance onset.
+
+    Collapsing each encounter's per-ped onsets to a single median gives an
+    INDEPENDENT unit per encounter (and, pooled across LOCO folds, per clip),
+    which is what a two-sample KS assumes -- in contrast to concatenating every
+    ped's onset, whose within-encounter samples react to the same ego trajectory
+    and are autocorrelated (review m3/point5: that pooled KS p is anti-conservative).
+
+    Uses nanmedian to honour this function's own NaN-means-no-onset contract: a
+    non-empty array carrying a stray NaN (avoidance_onset_distance only emits
+    finite distances, so this is defensive) must NOT collapse the whole encounter
+    to NaN and be silently dropped from the KS as if it triggered no avoidance.
+    """
+    return [float(np.nanmedian(a)) if len(a) else float("nan") for a in onset_arrays]
+
+
 def fidelity_report(
     encounters: List[Encounter],
     sigma: float,
@@ -482,6 +500,14 @@ def fidelity_report(
     real_onset = np.concatenate(real_onsets) if real_onsets else np.array([])
     ks_closest, p_closest = compare_distributions_ks(np.array(sim_closest), np.array(real_closest))
     ks_onset, p_onset = compare_distributions_ks(sim_onset, real_onset)
+    # Per-encounter onset: ONE median onset per encounter (NaN when that encounter
+    # triggered no avoidance). Unlike the per-ped pool -- whose within-encounter
+    # samples share a single ego trajectory and are autocorrelated, making the
+    # pooled KS p anti-conservative (review m3/point5) -- this is an independent
+    # unit per encounter (clip-independent once pooled across LOCO folds), so its
+    # KS is a VALID two-sample test rather than a diagnostic-only one.
+    onset_per_enc_sim = _per_encounter_onset(sim_onsets)
+    onset_per_enc_real = _per_encounter_onset(real_onsets)
     return {
         "n_encounters": len(encounters),
         "rollout_ade": ade_sum / ade_count if ade_count else float("nan"),
@@ -502,4 +528,7 @@ def fidelity_report(
         "closest_real_raw": [float(x) for x in real_closest],
         "onset_sim_raw": sim_onset.tolist(),
         "onset_real_raw": real_onset.tolist(),
+        # Per-encounter (independent) onset scalars for the VALID onset KS.
+        "onset_per_enc_sim_raw": onset_per_enc_sim,
+        "onset_per_enc_real_raw": onset_per_enc_real,
     }
