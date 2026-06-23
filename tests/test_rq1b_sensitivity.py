@@ -5,6 +5,8 @@ ego-repulsion injection + cruise clamp, without dropping scenario-level keys),
 (b) a minimal run_campaign integration round-trip, and (c) the RQ1b verdict
 logic (robust-gain / CV-danger and GT-sensitivity flip detection).
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -407,3 +409,32 @@ def test_build_verdicts_detects_gt_flip():
     assert by_gt["calib"] is False
     # The conclusion is sensitive to the GT reaction model (a flip exists).
     assert len(set(verdicts["robust_gain_holds"])) > 1
+
+
+# --------------------------------------------------------------------------- #
+# (d) DEFAULT_SCENARIOS reproducibility guard (review I1)
+# --------------------------------------------------------------------------- #
+def test_default_scenarios_point_at_rq1b_variants():
+    """Pin DEFAULT_SCENARIOS to the calibrated-domain rq1b/ variants.
+
+    Commit 8524708 documented a silent-wrong-experiment bug where the default
+    pointed at the base scenarios/scenario_0X.yaml instead of scenarios/rq1b/.
+    A one-line revert would re-introduce it with every other test still green;
+    this is the cheap guard that catches it.
+    """
+    import yaml
+
+    expected = [
+        "scenarios/rq1b/scenario_01.yaml",
+        "scenarios/rq1b/scenario_02.yaml",
+        "scenarios/rq1b/scenario_03.yaml",
+    ]
+    assert list(rq1b.DEFAULT_SCENARIOS) == expected
+    for path in rq1b.DEFAULT_SCENARIOS:
+        assert path.startswith("scenarios/rq1b/")
+        p = Path(path)
+        assert p.exists(), f"{path} missing"
+        # Parseable YAML (a renamed/empty variant would corrupt the campaign).
+        assert isinstance(yaml.safe_load(p.read_text()), dict)
+    # Must NOT silently fall back to the base AVEC scenarios.
+    assert not any(s.startswith("scenarios/scenario_") for s in rq1b.DEFAULT_SCENARIOS)
