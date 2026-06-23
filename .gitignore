@@ -49,6 +49,21 @@ output/
 logs/
 *.log
 
+# outputs/ — axis-A research result-of-record. Keep the small aggregate
+# CSV/JSON/MD/TXT tracked, but exclude heavy intermediates & animation renders
+# that bloat git, so a stray `git add -A` cannot bulk-commit them (which has
+# happened before: ~2000 such files swept in by a single careless add).
+outputs/**/*.mp4
+outputs/**/*.npz
+outputs/**/*.png
+outputs/**/master_runs.csv
+outputs/rq1b/_v1_unfixed/
+outputs/rq1b/margin/
+outputs/rq1b/rand/
+outputs/rq1b_anim/
+outputs/rq1b_anim2/
+outputs/rq2_calibration/
+
 # Jupyter
 .ipynb_checkpoints/
 *.ipynb
