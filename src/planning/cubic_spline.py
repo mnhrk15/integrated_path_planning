@@ -266,7 +266,11 @@ class CubicSpline2D:
         b = dx * dddy - dy * dddx
         c = dx * ddx + dy * ddy
         d = dx * dx + dy * dy
-        return (b * d - 3.0 * a * c) / (d * d * d)
+        # dk/ds = (b*d - 3*a*c) / d**2.5 (denominator is d**(5/2), not d**3):
+        # k = a / d**1.5, and the quotient rule gives d**(5/2) after cancelling a
+        # d**0.5 factor. The earlier d**3 was off by sqrt(d) (the speed) on curved
+        # paths; see tests/test_cubic_spline_curvature.py.
+        return b / d ** 1.5 - 3.0 * a * c / d ** 2.5
     
     def calc_yaw(self, s: float) -> np.ndarray:
         """Calculate heading angle at given arc length.
