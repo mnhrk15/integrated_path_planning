@@ -24,16 +24,27 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import math
+import sys
 from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
-# Scenes whose cadence differs from the 0.4 s UCY standard. eth is excluded in
-# the "no-eth" variants because its accelerated cadence makes its absolute ADE
-# incommensurable with the others under an equal-weighted cross-scene mean.
-CONFOUNDED_SCENES = ("eth",)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.datasets.eth_ucy_loader import SCENE_DT, SGAN_PROTOCOL_DT  # noqa: E402
+
+# Scenes whose physical cadence differs from the uniform SGAN evaluation step
+# (SGAN_PROTOCOL_DT). Such a scene's 12-step horizon spans a different real-time
+# window, so its absolute ADE is incommensurable with the others under an
+# equal-weighted cross-scene mean and is excluded in the "no-eth" variants.
+# Derived from the single source of truth (eth_ucy_loader.SCENE_DT) rather than
+# re-stated as a literal, so a future cadence change cannot make the loader and
+# this aggregator silently disagree.
+CONFOUNDED_SCENES = tuple(sorted(
+    s for s, dt in SCENE_DT.items() if not math.isclose(dt, SGAN_PROTOCOL_DT)
+))
 
 # Metrics carried through aggregation. ade = scene-level joint best-of-N;
 # ade_per_agent = canonical SGAN per-agent minADE (each agent picks its own best
@@ -95,9 +106,29 @@ def cross_scene(df: pd.DataFrame, metric: str, *,
     return out
 
 
+def _require_columns(df: pd.DataFrame, metrics) -> None:
+    """Fail loudly with an actionable message if the CSV lacks expected columns
+    (e.g. a stale CSV written before ade_per_agent/nll existed) instead of
+    surfacing a bare pandas KeyError deep inside a groupby."""
+    required = {"method", "scene", "n_trajectories", *metrics}
+    missing = sorted(required - set(df.columns))
+    if missing:
+        raise ValueError(
+            f"input CSV is missing required column(s) {missing}; "
+            f"found columns {list(df.columns)}")
+
+
 def aggregate_all(df: pd.DataFrame, metrics=METRICS) -> pd.DataFrame:
     """Tidy table of every (metric, aggregation, method) cross-scene value plus
-    the per-scene breakdown."""
+    the per-scene breakdown.
+
+    ``n_scenes`` records how many scenes were actually averaged into each
+    cross-scene value. A row labelled ``*_5scene`` / ``*_no_eth`` whose
+    ``n_scenes`` is below the nominal count means a per-scene value was NaN and
+    silently dropped -- so the count travels with the number and the label can
+    never claim more scenes than were used.
+    """
+    _require_columns(df, metrics)
     variants = [
         ("unweighted_5scene", dict(drop_eth=False, weighted=False)),
         ("weighted_5scene", dict(drop_eth=False, weighted=True)),
@@ -106,14 +137,20 @@ def aggregate_all(df: pd.DataFrame, metrics=METRICS) -> pd.DataFrame:
     ]
     rows: List[dict] = []
     for metric in metrics:
+        ps = per_scene_means(df, metric)
         for name, kw in variants:
-            for method, value in cross_scene(df, metric, **kw).items():
+            psv = ps if not kw["drop_eth"] else ps[~ps["scene"].isin(CONFOUNDED_SCENES)]
+            values = cross_scene(df, metric, **kw)
+            for method, value in values.items():
+                n_used = int(np.isfinite(
+                    psv.loc[psv["method"] == method, "value"].to_numpy(dtype=float)
+                ).sum())
                 rows.append(dict(metric=metric, aggregation=name,
-                                 method=method, value=value))
-        for _, r in per_scene_means(df, metric).iterrows():
+                                 method=method, value=value, n_scenes=n_used))
+        for _, r in ps.iterrows():
             rows.append(dict(metric=metric, aggregation=f"scene:{r['scene']}",
-                             method=r["method"], value=r["value"]))
-    return pd.DataFrame(rows, columns=["metric", "aggregation", "method", "value"])
+                             method=r["method"], value=r["value"], n_scenes=1))
+    return pd.DataFrame(rows, columns=["metric", "aggregation", "method", "value", "n_scenes"])
 
 
 # --------------------------------------------------------------------------- #
@@ -185,6 +222,10 @@ def build_markdown(df: pd.DataFrame, tidy: pd.DataFrame, csv_path: Path) -> str:
         "  the learned models clearly ahead of CV in every aggregation.",
         "- The **per-scene orderings are invariant** to aggregation -- they are the",
         "  actual basis for H1 (the cross-scene ordering being a sim artifact).",
+        "- The CSV carries an **`n_scenes`** column = how many scenes each",
+        "  cross-scene value actually averaged; a `*_5scene`/`*_no_eth` value with",
+        "  `n_scenes` below 5/4 means a per-scene value was NaN and dropped, so a",
+        "  label can never silently overstate the scene count.",
         "",
     ]
     return "\n".join(out)

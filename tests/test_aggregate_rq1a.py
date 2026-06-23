@@ -8,7 +8,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from examples.aggregate_rq1a import per_scene_means, cross_scene, aggregate_all
+from examples.aggregate_rq1a import (
+    CONFOUNDED_SCENES,
+    per_scene_means,
+    cross_scene,
+    aggregate_all,
+)
+from src.datasets.eth_ucy_loader import SCENE_DT, SGAN_PROTOCOL_DT
 
 
 def _df() -> pd.DataFrame:
@@ -68,7 +74,42 @@ def test_all_nan_metric_aggregates_to_nan_not_error():
 
 def test_aggregate_all_tidy_schema_and_membership():
     tidy = aggregate_all(_df(), metrics=("ade",))
-    assert set(tidy.columns) == {"metric", "aggregation", "method", "value"}
+    assert set(tidy.columns) == {"metric", "aggregation", "method", "value", "n_scenes"}
     aggs = set(tidy["aggregation"])
     assert {"unweighted_5scene", "weighted_5scene", "unweighted_no_eth",
             "weighted_no_eth", "scene:eth", "scene:zara1"} <= aggs
+
+
+def test_confounded_scenes_derived_from_scene_dt():
+    """CONFOUNDED_SCENES must be derived from the loader's SCENE_DT, not a
+    hardcoded literal that could drift from the cadence model."""
+    expected = {s for s, dt in SCENE_DT.items() if dt != SGAN_PROTOCOL_DT}
+    assert set(CONFOUNDED_SCENES) == expected
+    assert "eth" in CONFOUNDED_SCENES  # current data point: eth is the 0.8 s scene
+
+
+def test_missing_column_raises_actionable_error():
+    df = _df().drop(columns=["ade_per_agent"])
+    with pytest.raises(ValueError, match="ade_per_agent"):
+        aggregate_all(df, metrics=("ade", "ade_per_agent"))
+
+
+def test_n_scenes_reflects_dropped_nan_scene():
+    """An unweighted mean over a metric that is NaN in one scene must report the
+    real scene count, so a value can never be silently labelled a full mean."""
+    df = _df().copy()
+    # Make lstm's ade NaN in the eth scene (both seeds).
+    mask = (df["method"] == "lstm") & (df["scene"] == "eth")
+    df.loc[mask, "ade"] = np.nan
+
+    tidy = aggregate_all(df, metrics=("ade",))
+    row = tidy[(tidy["metric"] == "ade") &
+               (tidy["aggregation"] == "unweighted_5scene") &
+               (tidy["method"] == "lstm")].iloc[0]
+    assert row["n_scenes"] == 1                 # only zara1 survived for lstm
+    assert row["value"] == pytest.approx(0.4)   # averaged over the finite scene only
+    # cv still has both scenes.
+    cv_row = tidy[(tidy["metric"] == "ade") &
+                  (tidy["aggregation"] == "unweighted_5scene") &
+                  (tidy["method"] == "cv")].iloc[0]
+    assert cv_row["n_scenes"] == 2

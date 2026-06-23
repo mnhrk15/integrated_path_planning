@@ -76,6 +76,35 @@ def test_headline_desaturated_control_becomes_family_member():
     assert set(head["controls"].keys()) == {"no_repulsion"}
 
 
+def test_saturation_is_value_equality_not_array_identity():
+    """A control that is a DIFFERENT array but yields the identical (ks, p) -- a
+    reordering has the same ECDF -- must still saturate. Guards against the
+    1e-12 tolerance being mistaken for a byte-identical-array check."""
+    real = np.linspace(0.0, 2.0, 30)
+    cal = np.linspace(0.6, 2.6, 30)
+    pools = _pools(cal, real, default=cal[::-1], norep=cal.copy())  # reversed != identical array
+    out = headline_tests(pools, protocol="loco")
+    assert len(out) == 1
+    assert set(out[0]["controls"].keys()) == {"avec_default", "no_repulsion"}
+
+
+def test_near_but_distinct_control_de_saturates():
+    """A control whose distribution is only slightly perturbed (one point moved)
+    diverges from calibrated by more than 1e-12 and must become a family member,
+    exercising the tolerance's discriminating edge rather than only wildly
+    different inputs."""
+    real = np.linspace(0.0, 2.0, 30)
+    cal = np.linspace(0.6, 2.6, 30)
+    nudged = cal.copy()
+    nudged[0] = nudged[0] + 0.5  # small but well beyond the 1e-12 tolerance
+    pools = _pools(cal, real, default=nudged, norep=cal.copy())
+    out = headline_tests(pools, protocol="loco")
+    assert len(out) == 2
+    member = next(t for t in out if not t["headline"])
+    assert member["test_id"].endswith("avec_default")
+    assert set(out[0]["controls"].keys()) == {"no_repulsion"}  # norep still saturates
+
+
 def test_headline_empty_when_calibrated_pool_missing():
     real = np.linspace(0.0, 2.0, 30)
     assert headline_tests({"real_closest": list(real)}, protocol="loco") == []

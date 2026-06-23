@@ -62,3 +62,7 @@ evidence) are invariant to these choices.
   the learned models clearly ahead of CV in every aggregation.
 - The **per-scene orderings are invariant** to aggregation -- they are the
   actual basis for H1 (the cross-scene ordering being a sim artifact).
+- The CSV carries an **`n_scenes`** column = how many scenes each
+  cross-scene value actually averaged; a `*_5scene`/`*_no_eth` value with
+  `n_scenes` below 5/4 means a per-scene value was NaN and dropped, so a
+  label can never silently overstate the scene count.
