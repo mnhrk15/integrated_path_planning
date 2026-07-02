@@ -122,3 +122,68 @@ def test_evaluate_fold_empty_train_skips_calibration():
     assert np.isnan(row["sigma"])  # no calibration possible
     assert row["n_test_encs"] == len(test_encs)
     assert all(raw[k] == [] for k in RAW_KEYS)  # no fit -> no pooled scalars
+
+
+def _rows_equal(a: dict, b: dict) -> bool:
+    """Bit-level row equality with NaN==NaN (rows carry NaN for empty metrics)."""
+    if set(a.keys()) != set(b.keys()):
+        return False
+    for k in a:
+        va, vb = a[k], b[k]
+        if isinstance(va, float) and isinstance(vb, float):
+            if not (va == vb or (np.isnan(va) and np.isnan(vb))):
+                return False
+        elif va != vb:
+            return False
+    return True
+
+
+def _raws_equal(a: dict, b: dict) -> bool:
+    if set(a.keys()) != set(b.keys()):
+        return False
+    return all(np.array_equal(np.asarray(a[k], dtype=float),
+                              np.asarray(b[k], dtype=float), equal_nan=True)
+               for k in a)
+
+
+def test_evaluate_fold_custom_objective_and_fidelity_kwargs():
+    """The objective_fn / fidelity_kwargs hooks (cap-policy audit) must leave the
+    default path bit-identical when omitted or passed explicitly as None, and
+    must actually reach the fitter / fidelity calls when provided."""
+    from src.simulation.calibration_harness import objective_rollout_ade
+
+    train = [_real_clip("train0")]
+    test = [_real_clip("test0")]
+    train_encs = encounters_from_clips(train, 8.0, 5)
+    test_encs = encounters_from_clips(test, 8.0, 5)
+
+    base_row, base_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, _args())
+    none_row, none_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, _args(),
+        objective_fn=None, fidelity_kwargs=None)
+    assert _rows_equal(base_row, none_row)
+    assert _raws_equal(base_raw, none_raw)
+
+    # A pass-through objective_fn equal to the default must also be identical.
+    def default_obj(encs, s, v):
+        return objective_rollout_ade(encs, s, v, interaction_distance=None)
+
+    same_row, same_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, _args(),
+        objective_fn=default_obj)
+    assert _rows_equal(base_row, same_row)
+    assert _raws_equal(base_raw, same_raw)
+
+    # A cap-policy override must reach BOTH the fitter and every fidelity arm
+    # (within-regime controls) -- the uncapped regime changes the held-out
+    # closest-approach scalars of the strongly-repelled AVEC-default arm.
+    def uncapped_obj(encs, s, v):
+        return objective_rollout_ade(encs, s, v, cap_policy="uncapped")
+
+    cap_row, cap_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, _args(),
+        objective_fn=uncapped_obj, fidelity_kwargs={"cap_policy": "uncapped"})
+    assert set(cap_row.keys()) == set(COLUMNS)
+    assert np.isfinite(cap_row["test_ade"])
+    assert cap_raw["default_closest"] != base_raw["default_closest"]

@@ -1,0 +1,21 @@
+RQ2 distribution-matching calibration  config=w1_id8  dist_metric=emd  cap_policy=median  protocol=loco  folds=26
+========================================================================
+
+objective: 1*ADE + 1*EMD(closest_sim, closest_real), ADE term restricted to peds within 8 m of the ego (non-diluted arm)
+
+  sigma     : 0.761 +/- 0.290 [0.418, 1.289] (n=26)
+  v0        : 21.697 +/- 14.602 [3.319, 55.696] (n=26)
+
+Held-out test metrics (mean +/- std over folds; the ADE sacrifice of
+the distribution term is read against the canonical w0/median row):
+  calibrated     ADE : 0.735 +/- 0.276 [0.235, 1.299] (n=26)
+  AVEC default   ADE : 0.639 +/- 0.207 [0.237, 1.159] (n=26)
+  no-repulsion   ADE : 0.672 +/- 0.210 [0.238, 1.165] (n=26)
+
+Paired per-encounter fidelity tests (the valid RQ2 unit, review F5):
+  calibrated     paired : real>sim 21/26  sign p=2.49e-03  Wilcoxon p=9.45e-05  mean gap +0.509 m
+  AVEC default   paired : real>sim 24/26  sign p=1.05e-05  Wilcoxon p=1.49e-07  mean gap +0.683 m
+  no-repulsion   paired : real>sim 25/26  sign p=8.05e-07  Wilcoxon p=5.96e-08  mean gap +0.794 m
+
+Honest standoff gap (pooled closest-approach, descriptive):
+  real 2.502 m vs calibrated sim 1.993 m  => gap +0.509 m (sim under-reproduces standoff)

@@ -11,6 +11,13 @@ family-wise / FDR 補正（alpha=0.05）。BH-FDR を primary、Holm-Bonferroni 
 - `outputs/rq2_dut_validation/headline_tests_dut_single.json` — source=RQ2-DUT-single, tests=3
 - `outputs/rq2_evaluation/headline_tests_loco.json` — source=RQ2-loco, tests=6
 - `outputs/rq2_evaluation/headline_tests_loso.json` — source=RQ2-loso, tests=6
+- `outputs/rq2_instrument_audit/cap/headline_tests_cap_closedloop_loco.json` — source=RQ2-cap-closedloop-loco, tests=3
+- `outputs/rq2_instrument_audit/cap/headline_tests_cap_median_loco.json` — source=RQ2-cap-median-loco, tests=3
+- `outputs/rq2_instrument_audit/cap/headline_tests_cap_uncapped_loco.json` — source=RQ2-cap-uncapped-loco, tests=3
+- `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_pure_loco.json` — source=RQ2-distmatch-pure-loco, tests=3
+- `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w0.5_loco.json` — source=RQ2-distmatch-w0.5-loco, tests=3
+- `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_id8_loco.json` — source=RQ2-distmatch-w1_id8-loco, tests=3
+- `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_loco.json` — source=RQ2-distmatch-w1-loco, tests=3
 
 ## 補正結果（canonical 研究横断 family）
 
@@ -76,6 +83,27 @@ LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、�
 | rq2.loso.closest_ks.calibrated | rq2_fidelity_ks_loso_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
 | rq2.loso.closest_ks.avec_default | rq2_fidelity_ks_loso_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
 | rq2.loso.closest_ks.no_repulsion | rq2_fidelity_ks_loso_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
+| rq2cap.loco.closedloop.closest_sign.calibrated | rq2_cap_sensitivity_loco | 0.1686 | 9 | 0.1686 | 0.1686 |
+| rq2cap.loco.closedloop.closest_sign.avec_default | rq2_cap_sensitivity_loco | 0.0755 | 9 | 0.0850 | 0.1510 |
+| rq2cap.loco.closedloop.closest_sign.no_repulsion | rq2_cap_sensitivity_loco | 0.0290 | 9 | 0.0372 | 0.0869 |
+| rq2cap.loco.median.closest_sign.calibrated | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0001 |
+| rq2cap.loco.median.closest_sign.avec_default | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0001 |
+| rq2cap.loco.median.closest_sign.no_repulsion | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0000 |
+| rq2cap.loco.uncapped.closest_sign.calibrated | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0000 |
+| rq2cap.loco.uncapped.closest_sign.avec_default | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0001 |
+| rq2cap.loco.uncapped.closest_sign.no_repulsion | rq2_cap_sensitivity_loco | 0.0000 | 9 | 0.0000 | 0.0000 |
+| rq2dm.loco.pure.closest_sign.calibrated | rq2_distmatch_loco | 0.0094 | 12 | 0.0094 | 0.0100 |
+| rq2dm.loco.pure.closest_sign.avec_default | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0001 |
+| rq2dm.loco.pure.closest_sign.no_repulsion | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0000 |
+| rq2dm.loco.w0.5.closest_sign.calibrated | rq2_distmatch_loco | 0.0025 | 12 | 0.0027 | 0.0100 |
+| rq2dm.loco.w0.5.closest_sign.avec_default | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0001 |
+| rq2dm.loco.w0.5.closest_sign.no_repulsion | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0000 |
+| rq2dm.loco.w1_id8.closest_sign.calibrated | rq2_distmatch_loco | 0.0025 | 12 | 0.0027 | 0.0100 |
+| rq2dm.loco.w1_id8.closest_sign.avec_default | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0001 |
+| rq2dm.loco.w1_id8.closest_sign.no_repulsion | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0000 |
+| rq2dm.loco.w1.closest_sign.calibrated | rq2_distmatch_loco | 0.0025 | 12 | 0.0027 | 0.0100 |
+| rq2dm.loco.w1.closest_sign.avec_default | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0001 |
+| rq2dm.loco.w1.closest_sign.no_repulsion | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0000 |
 
 ## RQ1b claim-(2) family 定義感度
 

@@ -181,6 +181,8 @@ def evaluate_fold(
     train_encs: List[Encounter],
     test_encs: List[Encounter],
     args,
+    objective_fn=None,
+    fidelity_kwargs=None,
 ) -> Tuple[Dict[str, float], Dict[str, list]]:
     """Calibrate on train, validate on held-out test; (CSV row, raw-scalar pool).
 
@@ -193,17 +195,31 @@ def evaluate_fold(
     values) so main() can pool them across folds into a single KS (C1): the
     per-fold ``test_ks_closest`` is a degenerate n=1 statistic and must not be
     averaged as if it measured fidelity.
+
+    ``objective_fn`` (optional) replaces the fitter objective: a callable
+    ``(train_encs, sigma, v0) -> float``. ``fidelity_kwargs`` (optional) is
+    passed through to every ``fidelity_report`` call -- the calibrated arm AND
+    both baseline arms, so a cap-policy / cruise-fn override keeps the three
+    arms within the same regime (within-regime controls). The defaults (None)
+    reproduce the historical behaviour exactly; both hooks exist for the
+    cap-policy / distribution-matching audits (run_rq2_cap_sensitivity.py,
+    run_rq2_distmatch.py), which reuse this fold loop instead of forking it.
     """
     row = _nan_row(fold_name, protocol, train_clips, test_clips,
                    len(train_encs), len(test_encs))
     raw = _empty_raw()
+    fidelity_kwargs = fidelity_kwargs or {}
     if not train_encs:
         logger.warning(f"fold {fold_name!r}: no training encounters, skipping calibration")
         return row, raw
 
-    def obj(s, v):
-        return objective_rollout_ade(train_encs, s, v,
-                                     interaction_distance=args.interaction_distance)
+    if objective_fn is None:
+        def obj(s, v):
+            return objective_rollout_ade(train_encs, s, v,
+                                         interaction_distance=args.interaction_distance)
+    else:
+        def obj(s, v):
+            return objective_fn(train_encs, s, v)
 
     try:
         result = calibrate(obj, args.sigma_grid, args.v0_grid, refine=not args.no_refine)
@@ -215,12 +231,13 @@ def evaluate_fold(
     row["sigma"] = result.sigma
     row["v0"] = result.v0
     row["refined"] = result.refined
-    row["train_ade"] = fidelity_report(train_encs, result.sigma, result.v0)["rollout_ade"]
+    row["train_ade"] = fidelity_report(
+        train_encs, result.sigma, result.v0, **fidelity_kwargs)["rollout_ade"]
 
     if test_encs:
-        te = fidelity_report(test_encs, result.sigma, result.v0)
-        bd = fidelity_report(test_encs, *AVEC_DEFAULT)
-        bn = fidelity_report(test_encs, *NO_REPULSION)
+        te = fidelity_report(test_encs, result.sigma, result.v0, **fidelity_kwargs)
+        bd = fidelity_report(test_encs, *AVEC_DEFAULT, **fidelity_kwargs)
+        bn = fidelity_report(test_encs, *NO_REPULSION, **fidelity_kwargs)
         row.update({
             "test_ade": te["rollout_ade"],
             "test_ks_closest": te["ks_closest"],

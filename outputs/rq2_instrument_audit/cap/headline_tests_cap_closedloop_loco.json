@@ -1,0 +1,60 @@
+{
+  "source": "RQ2-cap-closedloop-loco",
+  "generated_by": "run_rq2_cap_sensitivity.py",
+  "tests": [
+    {
+      "test_id": "rq2cap.loco.closedloop.closest_sign.calibrated",
+      "description": "(diagnostic) paired per-encounter sign test: real vs calibrated sim closest-approach (loco)",
+      "family": "rq2_cap_sensitivity_loco",
+      "protocol": "loco",
+      "auxiliary": true,
+      "p_value": 0.16863754391670227,
+      "statistic": 17.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_real_gt_sim": 17,
+      "mean_gap_m": 0.3465387393610491,
+      "wilcoxon_p": 0.031220704317092896,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
+      "cap_policy": "closedloop",
+      "cap_multiplier": 1.3
+    },
+    {
+      "test_id": "rq2cap.loco.closedloop.closest_sign.avec_default",
+      "description": "(diagnostic) paired per-encounter sign test: real vs avec_default sim closest-approach (loco)",
+      "family": "rq2_cap_sensitivity_loco",
+      "protocol": "loco",
+      "auxiliary": true,
+      "p_value": 0.07551869750022888,
+      "statistic": 18.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_real_gt_sim": 18,
+      "mean_gap_m": 0.6799900734280994,
+      "wilcoxon_p": 0.002181529998779297,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
+      "cap_policy": "closedloop",
+      "cap_multiplier": 1.3
+    },
+    {
+      "test_id": "rq2cap.loco.closedloop.closest_sign.no_repulsion",
+      "description": "(diagnostic) paired per-encounter sign test: real vs no_repulsion sim closest-approach (loco)",
+      "family": "rq2_cap_sensitivity_loco",
+      "protocol": "loco",
+      "auxiliary": true,
+      "p_value": 0.028959274291992188,
+      "statistic": 19.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_real_gt_sim": 19,
+      "mean_gap_m": 0.7724148583231749,
+      "wilcoxon_p": 0.00032070279121398926,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
+      "cap_policy": "closedloop",
+      "cap_multiplier": 1.3
+    }
+  ]
+}
