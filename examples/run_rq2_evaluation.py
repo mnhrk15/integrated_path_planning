@@ -42,6 +42,7 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
+from scipy.stats import binomtest, wilcoxon
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -307,78 +308,194 @@ def _pooled_ks(pools: Dict[str, list], sim_key: str, real_key: str) -> str:
             f"n_sim={s['n_sim']}, n_real={s['n_real']}){flag}")
 
 
-def headline_tests(pools: Dict[str, list], protocol: str) -> List[Dict]:
-    """RQ2 fidelity KS record for the multiplicity ledger (closest-approach).
+def _paired_stats(pools: Dict[str, list], sim_key: str,
+                  real_key: str) -> Dict[str, float]:
+    """Per-encounter PAIRED tests over the pooled held-out scalars (review F5).
 
-    The ONE headline fidelity hypothesis is "the calibrated sim's pooled held-out
-    closest-approach distribution != real". A small p means the model does NOT
-    perfectly reproduce real avoidance -- the honest ~0.68 m standoff gap is
-    statistically real, not Monte-Carlo noise. Emitting it lets the ledger apply
-    BH/Holm so this limitation-strengthening result is corrected like every other
-    RQ test.
+    ``pools[sim_key][i]`` and ``pools[real_key][i]`` come from the SAME
+    encounter i (evaluate_fold copies both sides of one encounter list, main()
+    extends the pools in fold order), so the valid unit is the per-encounter
+    difference d_i = real_i - sim_i -- NOT two independent samples. Returns the
+    sign test (direction only, distribution-free) and the Wilcoxon signed-rank
+    test (magnitude-aware) over the paired differences, plus the mean gap.
+
+    Non-finite values are dropped PAIRWISE (a one-sided isfinite filter would
+    silently break the pairing). A length mismatch between the pools means the
+    pairing was already broken upstream; refuse to fake a paired test (None).
+    Zero differences carry no direction: the sign test drops them (n shrinks),
+    and an all-zero d skips Wilcoxon (its zero_method cannot handle that case).
+    """
+    sim = np.asarray(pools.get(sim_key, []), dtype=float)
+    real = np.asarray(pools.get(real_key, []), dtype=float)
+    if sim.size == 0 or real.size == 0 or sim.size != real.size:
+        return None
+    keep = np.isfinite(sim) & np.isfinite(real)
+    sim, real = sim[keep], real[keep]
+    if sim.size == 0:
+        return None
+    d = real - sim
+    n_gt = int(np.sum(d > 0))
+    n_lt = int(np.sum(d < 0))
+    n_eff = n_gt + n_lt
+    sign_p = float(binomtest(n_gt, n_eff, 0.5).pvalue) if n_eff else float("nan")
+    if np.any(d != 0.0):
+        # Two-sided; exact for n<=50 without rank ties (deterministic either way).
+        w = wilcoxon(d)
+        w_stat, w_p = float(w.statistic), float(w.pvalue)
+    else:
+        w_stat, w_p = float("nan"), float("nan")
+    return {"n_pairs": int(d.size), "n_real_gt_sim": n_gt,
+            "n_real_lt_sim": n_lt, "sign_p": sign_p,
+            "wilcoxon_stat": w_stat, "wilcoxon_p": w_p,
+            "mean_gap": float(d.mean())}
+
+
+def _paired_line(pools: Dict[str, list], sim_key: str, real_key: str) -> str:
+    """Human-readable one-liner for the paired per-encounter tests."""
+    s = _paired_stats(pools, sim_key, real_key)
+    if s is None:
+        return "n/a (empty or unpaired pool)"
+    return (f"real>sim {s['n_real_gt_sim']}/{s['n_pairs']}  "
+            f"sign p={s['sign_p']:.2e}  Wilcoxon p={s['wilcoxon_p']:.2e}  "
+            f"mean gap {s['mean_gap']:+.3f} m")
+
+
+def headline_tests(pools: Dict[str, list], protocol: str) -> List[Dict]:
+    """RQ2 fidelity records for the multiplicity ledger (closest-approach).
+
+    The ONE headline fidelity hypothesis is "the calibrated sim does not
+    reproduce the real held-out closest-approach". Review F5: sim_i and real_i
+    come from the SAME encounter i (shared geometry, strongly dependent), so an
+    independent two-sample KS is MISSPECIFIED here -- the valid unit is the
+    per-encounter paired difference d_i = real_i - sim_i. The headline is
+    therefore the paired SIGN test (24/26 real>sim under LOCO), with the
+    Wilcoxon signed-rank over the same differences filed as a second family
+    member (family ``rq2_fidelity_paired_{protocol}`` -- two readings of one
+    dataset counted honestly, both survive trivially at p<<0.001). A small
+    p means the ~0.68 m standoff gap is statistically real, not Monte-Carlo
+    noise; the ledger applies BH/Holm like for every other RQ test.
 
     The AVEC-default and no-repulsion arms are usually CONTROLS, not separate
-    hypotheses: at n=26 their pooled KS SATURATES at the identical statistic
-    (0.462, p=0.0071) as the calibrated arm even though the underlying closest
-    arrays differ -- i.e. the closest-approach KS does not discriminate repulsion
-    strength (a direct echo of review C2: v0 is weakly identifiable). Filing three
-    numerically identical p-values would just inflate the family size (and the
-    cross-RQ m) for one distinct comparison, so a control whose (ks, p) matches the
-    calibrated arm is recorded in ``controls`` instead. But this saturation is an
-    EMPIRICAL property of this dataset, not a hardcoded assumption: if a re-run
-    ever DE-saturates an arm (its (ks, p) diverges from calibrated -- e.g. more
-    clips, looser min-sep), that arm becomes a genuinely distinct fidelity
-    hypothesis and IS emitted as a family member, so the family size stays correct.
-    (onset KS is autocorrelated/diagnostic and is handled separately as a
-    per-encounter VALID statistic, not here.)
+    hypotheses. Saturation is judged on the HEADLINE sign statistic: a control
+    whose (n_real_gt_sim, sign_p) is numerically identical to the calibrated
+    arm's adds no distinct directional evidence, so it is recorded in
+    ``controls`` instead (its Wilcoxon/mean-gap values are kept there for
+    transparency -- they can differ, the demotion is deliberately based on the
+    headline statistic alone, mirroring the KS headline's saturation logic).
+    A DE-saturated control (different sign statistic or p) is a genuinely
+    distinct fidelity hypothesis and IS emitted as a family member. The family
+    size is therefore DATA-DEPENDENT (2 + the de-saturated controls; e.g. 3 on
+    the current pools, where no_repulsion de-saturates at 25/26) -- read m from
+    the ledger's family_size, not from this docstring.
+
+    The former pooled-KS headline is retained as an AUXILIARY diagnostic family
+    (``rq2_fidelity_ks_{protocol}_diagnostic``, excluded from the canonical
+    study-wide correction): its statistic is still a useful shape summary and
+    keeps the record comparable with the earlier C1 headline, but its p is not
+    to be read. (onset KS is autocorrelated/diagnostic and is handled separately
+    in the summary, not here.)
     """
-    cal = _pooled_ks_stat(pools, "calibrated_closest", "real_closest")
+    cal = _paired_stats(pools, "calibrated_closest", "real_closest")
     if cal is None:
         return []
-    fam = f"rq2_fidelity_ks_{protocol}"
+    fam = f"rq2_fidelity_paired_{protocol}"
     saturated = {}      # control arms numerically identical to calibrated
     extra_family = []   # de-saturated arms = distinct hypotheses
     for name, key in (("avec_default", "default_closest"),
                       ("no_repulsion", "norepulsion_closest")):
-        s = _pooled_ks_stat(pools, key, "real_closest")
+        s = _paired_stats(pools, key, "real_closest")
         if s is None:
             continue
-        if abs(s["p"] - cal["p"]) <= 1e-12 and abs(s["ks"] - cal["ks"]) <= 1e-12:
-            saturated[name] = {"ks": s["ks"], "p": s["p"]}
+        if (s["n_real_gt_sim"] == cal["n_real_gt_sim"]
+                and abs(s["sign_p"] - cal["sign_p"]) <= 1e-12):
+            saturated[name] = {"n_real_gt_sim": s["n_real_gt_sim"],
+                               "n_pairs": s["n_pairs"], "sign_p": s["sign_p"],
+                               "wilcoxon_p": s["wilcoxon_p"],
+                               "mean_gap_m": s["mean_gap"]}
         else:
             extra_family.append({
-                "test_id": f"rq2.{protocol}.closest_ks.{name}",
-                "description": (f"Pooled held-out closest-approach KS: {name} sim "
-                                f"vs real ({protocol})"),
+                "test_id": f"rq2.{protocol}.closest_sign.{name}",
+                "description": (f"Paired per-encounter sign test: real vs {name} "
+                                f"sim closest-approach ({protocol})"),
                 "family": fam, "protocol": protocol,
-                "p_value": s["p"], "statistic": s["ks"], "sidedness": "two-sided",
-                "n_sim": s["n_sim"], "n_real": s["n_real"], "headline": False,
+                "p_value": s["sign_p"],
+                "statistic": float(s["n_real_gt_sim"]),
+                "sidedness": "two-sided",
+                "n_pairs": s["n_pairs"],
+                "n_real_gt_sim": s["n_real_gt_sim"],
+                "mean_gap_m": s["mean_gap"],
+                "headline": False,
                 "note": ("de-saturated (distinct from calibrated) => a separate "
                          "fidelity hypothesis, counted in the family"),
             })
-    calibrated = {
-        "test_id": f"rq2.{protocol}.closest_ks.calibrated",
-        "description": (f"Pooled held-out closest-approach KS: calibrated sim vs "
-                        f"real ({protocol})"),
+    sign_rec = {
+        "test_id": f"rq2.{protocol}.closest_sign.calibrated",
+        "description": (f"Paired per-encounter sign test: real vs calibrated sim "
+                        f"closest-approach ({protocol})"),
         "family": fam,
         "protocol": protocol,
-        "p_value": cal["p"],
-        "statistic": cal["ks"],
+        "p_value": cal["sign_p"],
+        "statistic": float(cal["n_real_gt_sim"]),
         "sidedness": "two-sided",
-        "n_sim": cal["n_sim"],
-        "n_real": cal["n_real"],
+        "n_pairs": cal["n_pairs"],
+        "n_real_gt_sim": cal["n_real_gt_sim"],
+        "n_real_lt_sim": cal["n_real_lt_sim"],
+        "mean_gap_m": cal["mean_gap"],
         "headline": True,
-        "note": ("small p => the calibrated sim's standoff distribution differs "
-                 "from real (the ~0.68 m fidelity gap is statistically real)"),
+        "note": ("small p => real standoff exceeds the calibrated sim's in "
+                 "nearly every encounter (the ~0.68 m fidelity gap is "
+                 "statistically real). Paired replacement of the misspecified "
+                 "independent-sample pooled KS (review F5)."),
         "controls": saturated,
-        "controls_note": ("listed control arms SATURATE at the same statistic as "
-                          "calibrated despite different arrays => closest-approach "
-                          "KS does not discriminate repulsion strength (review C2: "
-                          "weak identifiability); these are controls, excluded from "
-                          "the multiplicity family. A de-saturated arm would instead "
-                          "appear as its own family test."),
+        "controls_note": ("listed control arms SATURATE at the same paired "
+                          "statistic as calibrated despite different sim arrays "
+                          "=> the per-encounter direction does not discriminate "
+                          "repulsion strength (review C2 echo: weak "
+                          "identifiability); these are controls, excluded from "
+                          "the multiplicity family. A de-saturated arm would "
+                          "instead appear as its own family test."),
     }
-    return [calibrated] + extra_family
+    wilcoxon_rec = {
+        "test_id": f"rq2.{protocol}.closest_wilcoxon.calibrated",
+        "description": (f"Paired per-encounter Wilcoxon signed-rank: real vs "
+                        f"calibrated sim closest-approach ({protocol})"),
+        "family": fam,
+        "protocol": protocol,
+        "p_value": cal["wilcoxon_p"],
+        "statistic": cal["wilcoxon_stat"],
+        "sidedness": "two-sided",
+        "n_pairs": cal["n_pairs"],
+        "mean_gap_m": cal["mean_gap"],
+        "headline": False,
+        "note": ("magnitude-aware robustness companion to the sign test over "
+                 "the SAME paired differences; counted in the family as honest "
+                 "accounting of two readings of one dataset (family size is "
+                 "data-dependent: de-saturated control arms join the family -- "
+                 "read m from the ledger's family_size)"),
+    }
+    ks_diags = []
+    for name, key in (("calibrated", "calibrated_closest"),
+                      ("avec_default", "default_closest"),
+                      ("no_repulsion", "norepulsion_closest")):
+        s = _pooled_ks_stat(pools, key, "real_closest")
+        if s is None:
+            continue
+        ks_diags.append({
+            "test_id": f"rq2.{protocol}.closest_ks.{name}",
+            "description": (f"(diagnostic) pooled closest-approach KS: {name} "
+                            f"sim vs real ({protocol})"),
+            "family": f"rq2_fidelity_ks_{protocol}_diagnostic",
+            "protocol": protocol,
+            "auxiliary": True,
+            "p_value": s["p"], "statistic": s["ks"], "sidedness": "two-sided",
+            "n_sim": s["n_sim"], "n_real": s["n_real"], "headline": False,
+            "note": ("DIAGNOSTIC ONLY (review F5): sim_i and real_i share "
+                     "encounter i, so an independent two-sample KS is "
+                     "misspecified on these paired pools -- read the statistic "
+                     "as a shape summary, not the p. The valid headline is the "
+                     "paired sign/Wilcoxon family."),
+        })
+    return [sign_rec, wilcoxon_rec] + extra_family + ks_diags
 
 
 def _standoff_gap(pools: Dict[str, list]) -> str:
@@ -427,12 +544,21 @@ def write_summary(path: Path, df: pd.DataFrame, protocol: str,
         f"  AVEC default   ADE : {_meanstd(df['base_default_test_ade'])}",
         f"  no-repulsion   ADE : {_meanstd(df['base_norepulsion_test_ade'])}",
         "",
-        "Pooled held-out KS (review C1: ALL folds' raw closest-approach scalars",
-        "pooled into ONE n-sample KS -- a per-fold KS is degenerate (often n=1",
-        "per held-out clip, ~1.000 and uninformative), so it is NOT reported as",
-        "fidelity. NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN",
+        "Paired per-encounter fidelity test (review F5: sim_i and real_i come from",
+        "the SAME held-out encounter i, so the valid unit is the per-encounter",
+        "difference d_i = real_i - sim_i -- sign test + Wilcoxon signed-rank over",
+        "all folds' pooled held-out encounters. This replaces the former pooled",
+        "independent-sample KS headline, which is misspecified on paired pools.",
+        "NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN",
         "(sigma, v0) -- a cross-validated mixture, not one fixed model -- while the",
         "AVEC-default / no-repulsion pools use a single fixed parameter set:",
+        f"  calibrated     paired : {_paired_line(pools, 'calibrated_closest', 'real_closest')}",
+        f"  AVEC default   paired : {_paired_line(pools, 'default_closest', 'real_closest')}",
+        f"  no-repulsion   paired : {_paired_line(pools, 'norepulsion_closest', 'real_closest')}",
+        "",
+        "(diagnostic only) pooled independent-two-sample KS over the same pools --",
+        "kept for comparability with the earlier C1 headline; its p is NOT valid",
+        "on paired data (read the statistic as a shape summary only):",
         f"  calibrated     KS_closest : {_pooled_ks(pools, 'calibrated_closest', 'real_closest')}",
         f"  AVEC default   KS_closest : {_pooled_ks(pools, 'default_closest', 'real_closest')}",
         f"  no-repulsion   KS_closest : {_pooled_ks(pools, 'norepulsion_closest', 'real_closest')}",
@@ -528,8 +654,9 @@ def main():
 
     # Machine-readable headline-test sidecar for the cross-RQ multiplicity ledger
     # (make_multiplicity_ledger.py). Deterministic: the p-values come from the
-    # pooled-KS over fixed held-out scalars, so re-running this script overwrites
-    # the file byte-for-byte.
+    # paired sign/Wilcoxon tests (and the diagnostic pooled KS) over fixed
+    # held-out scalars, so re-running this script overwrites the file
+    # byte-for-byte.
     sidecar = out_dir / f"headline_tests_{args.protocol}.json"
     sidecar.write_text(json.dumps({
         "source": f"RQ2-{args.protocol}",

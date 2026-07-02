@@ -23,6 +23,10 @@ Usage:
         [--campaigns margin,rand] [--scenarios A.yaml,B.yaml]
         [--seeds-main 20] [--seeds-corner 10] [--cruise 3.0]
         [--total-time 60] [--root outputs/rq1b] [--report-only]
+        [--no-include-loso]
+
+The committed outputs/rq1b artifacts cover GT_CORE + GT_LOSO (2640 runs); the
+default invocation (and a plain --report-only) reproduces them byte-for-byte.
 """
 import argparse
 import json
@@ -37,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from examples.run_da_poc import (CONDITIONS, aggregate_and_write, collect_rows,
                                   run_campaign)
+from src.core.multiplicity import adjust
 
 # The RQ1b experiment runs on the dedicated within-domain variants under
 # scenarios/rq1b/ (S1 path shortened to remove dead-running, S3 crossing
@@ -79,6 +84,22 @@ GT_OFFDIAG = [
      "meaning": "off-diagonal corner (wide field, strong)"},
     {"label": "calib_s+v-", "sigma": 1.272, "v0": 1.542,
      "meaning": "off-diagonal corner (narrow field, weak)"},
+]
+# F3 (novelty-reinforcement review): the LOSO calibration folds land OUTSIDE
+# the +/-1SD box swept above -- outputs/rq2_evaluation/folds_loso.csv has
+# v0 up to 2.617 (vci_back) and sigma down to 0.743 (vci_lat_bi) vs the box
+# [1.040,1.272] x [1.542,1.820]. Since the repo's own honest stability headline
+# is LOSO (summary_loso.txt), the sweep needs envelope arms at the REAL fold
+# points (not a synthetic corner no fold actually reached). These arms are part
+# of the DEFAULT campaign (the committed outputs/rq1b artifacts include them;
+# a plain --report-only must reproduce those byte-for-byte, the same
+# reproducibility contract as DEFAULT_SCENARIOS/review I1). --no-include-loso
+# opts out for pre-F3 comparisons only.
+GT_LOSO = [
+    {"label": "calib_loso_vmax", "sigma": 1.085, "v0": 2.617,
+     "meaning": "LOSO fold vci_back (real point; v0 above +1SD box)"},
+    {"label": "calib_loso_smin", "sigma": 0.743, "v0": 1.849,
+     "meaning": "LOSO fold vci_lat_bi (real point; sigma below -1SD box)"},
 ]
 
 # Conditions per campaign (label, method, distribution_aware, epsilon, inflation).
@@ -341,11 +362,11 @@ def rq1b_headline_tests(srows):
             continue
         gt, sc = str(r["gt_label"]), str(r["scenario"])
         # power_tier: avec/calib carry the full seed budget (seeds_main); the
-        # +/-1SD corners (calib_lo/hi) run at half budget (seeds_corner) as a
-        # robustness check, NOT a headline number. The ledger uses this to show a
+        # +/-1SD and LOSO envelope corners run at half budget (seeds_corner) as
+        # robustness checks, NOT headline numbers. The ledger uses this to show a
         # family-definition sensitivity (the headline S2/avec signal survives BH
         # within the avec-only and headline-GT families but not over the full
-        # 12-cell scan that includes the underpowered corners).
+        # GT x scenario scan that includes the underpowered corners).
         tier = "headline" if gt in ("avec", "calib") else "corner"
         tests.append({
             "test_id": f"rq1b.rand.fisher.{gt}.{sc}",
@@ -367,6 +388,49 @@ def rq1b_headline_tests(srows):
                        "run-level n ~3x inflated, Fisher p anti-conservative "
                        "(lower bound on true p)"),
         })
+    return tests
+
+
+def rq1b_aggregate_tests(verdicts):
+    """Aggregate cv/lstm danger Fisher tests as AUXILIARY ledger entries (1.2-3).
+
+    The aggregate cross-scenario cv/lstm danger verdicts are declared
+    noise-grade (M8): they sum collisions across GT-artifact-contaminated
+    scenarios with unequal seed budgets, and their run-level Fisher p inherits
+    the pseudo-replication anti-conservatism. They are NOT canonical
+    hypotheses -- but their raw p-values surface in verdicts.csv / REPORT.md
+    (e.g. avec lstm p=0.0287 rendered next to ``lstm_danger_holds=True``), and
+    an uncorrected p<0.05 must not bypass the multiplicity ledger. Emitting
+    them with ``auxiliary: true`` lists them in the ledger's auxiliary appendix
+    (with within-family BH/Holm) while keeping them out of the canonical
+    study-wide family, mirroring how the diagnostic pooled KS is filed.
+    """
+    if verdicts is None or verdicts.empty:
+        return []
+    tests = []
+    for _, r in verdicts.iterrows():
+        for planner in ("cv", "lstm"):
+            p = r.get(f"{planner}_fisher_p")
+            if p is None or not isinstance(p, (int, float, np.floating)) \
+                    or not np.isfinite(p):
+                continue
+            tests.append({
+                "test_id": f"rq1b.rand.fisher_aggregate.{r['gt_label']}.{planner}",
+                "description": (f"Aggregate cross-scenario {planner}-single vs "
+                                f"robust collision Fisher (GT={r['gt_label']})"),
+                "family": "rq1b_claim2_fisher_aggregate",
+                "auxiliary": True,
+                "gt": str(r["gt_label"]),
+                "p_value": float(p),
+                "sidedness": "one-sided",
+                "headline": False,
+                "caveat": ("noise-grade aggregate (M8): cross-scenario collision "
+                           "sum is contaminated by GT-artifact scenarios, the "
+                           "run-level n is ~3x pseudo-replicated, and corner GTs "
+                           "run half the seed budget; disclosed for ledger "
+                           "completeness, NOT a canonical hypothesis -- read "
+                           "claim-(2) from the per-scenario cells"),
+            })
     return tests
 
 
@@ -463,7 +527,8 @@ def _means_table(master):
     return pd.DataFrame(rows)
 
 
-_GT_ORDER = ["avec", "calib", "calib_lo", "calib_hi", "calib_s-v+", "calib_s+v-"]
+_GT_ORDER = ["avec", "calib", "calib_lo", "calib_hi", "calib_s-v+", "calib_s+v-",
+             "calib_loso_vmax", "calib_loso_smin"]
 
 
 def _scenario_narrative(srows):
@@ -615,6 +680,13 @@ def write_report(root, master, verdicts, gts, cruise):
              "`cv_danger_undetermined`＝判定保留（単桁差はノイズ grade）")
     L.append("- lstm_danger_holds: LSTM single vs LSTM robust に同じ有意性ゲート")
     L.append("")
+    L.append("> 注記（F4）: `*_single` 条件の「単一」は予測器の1描画ではなく "
+             "medoid-of-20（20 サンプル生成→サンプル平均に最も近い1本＝分散抑制済み・"
+             "モード探索的な代表値。CV は決定論のため縮退）。robust 利得は medoid "
+             "相手でも成立している＝主張①には保守的方向。手法間では CV（決定論）と "
+             "SGAN/LSTM（medoid）で代表値の性質が非対称な点に注意。provenance は "
+             "all_runs/master_runs の `single_mode` 列（旧キャッシュは空欄）。")
+    L.append("")
     L.append(_md_table(verdicts))
     L.append("")
     L.append("> 注意: 集計 `cv_danger_holds`/`lstm_danger_holds` は衝突をシナリオ"
@@ -624,6 +696,29 @@ def write_report(root, master, verdicts, gts, cruise):
              "汚染されるため、**主張②は必ず下記の per-scenario 分類（有意セル `*`）で"
              "読むこと**。主張①（`robust_gain_holds`）はシナリオ横断の集計でも頑健。")
     L.append("")
+    # Review 1.2-3: the raw aggregate Fisher p-values rendered above must not
+    # bypass multiplicity accounting. Correct them AS A FAMILY right here (the
+    # numbers are computed, not hand-written, so they track the table) and file
+    # the same tests as auxiliary entries in headline_tests.json.
+    agg_ps = [float(p)
+              for col in ("cv_fisher_p", "lstm_fisher_p")
+              for p in verdicts[col].tolist()
+              if p is not None and isinstance(p, (int, float, np.floating))
+              and np.isfinite(p)]
+    if agg_ps:
+        adj = adjust(agg_ps, 0.05)
+        n_bh = int(np.sum(adj["bh_reject"]))
+        L.append(f"> **未補正 p の降格（review 1.2-3）**: 上表の `cv_fisher_p`/"
+                 f"`lstm_fisher_p` は**未補正の raw p**。この集計 Fisher "
+                 f"{adj['m']} 検定を1 family として BH-FDR(α=0.05) を掛けると"
+                 f"生存 {n_bh} 件（最小 raw p={min(agg_ps):.4f}）"
+                 + ("＝表の `*_danger_holds=True` 表示は補正後には有意でない。"
+                    if n_bh == 0 else "。")
+                 + "集計 danger は M8 の宣言どおり noise-grade であり、これらの "
+                 "p は multiplicity ledger にも auxiliary（canonical family 非算入）"
+                 "として全件開示される（headline_tests.json → "
+                 "make_multiplicity_ledger.py）。")
+        L.append("")
 
     # Sensitivity: do verdicts flip across GT? (see _sensitivity_status)
     L.append("## 感度（GT 間で判定が反転するか）")
@@ -708,6 +803,14 @@ def main():
                          "all also adds the off-diagonal +/-1SD corners")
     ap.add_argument("--include-offdiag", action="store_true",
                     help="Add the two off-diagonal +/-1SD corners (alias of --gt all)")
+    ap.add_argument("--include-loso", action=argparse.BooleanOptionalAction,
+                    default=True,
+                    help="Include the two LOSO real-fold envelope arms (F3: "
+                         "calib_loso_vmax/calib_loso_smin, outside the +/-1SD "
+                         "box). ON by default -- the committed outputs/rq1b "
+                         "artifacts include them, so a default --report-only "
+                         "reproduces them byte-for-byte; --no-include-loso "
+                         "only for pre-F3 comparisons")
     ap.add_argument("--seeds-main", type=int, default=20,
                     help="Seeds for the avec/calib headline arms")
     ap.add_argument("--seeds-corner", type=int, default=10,
@@ -729,6 +832,8 @@ def main():
     gts = list(GT_CORE)
     if args.gt == "all" or args.include_offdiag:
         gts += GT_OFFDIAG
+    if args.include_loso:
+        gts += GT_LOSO
     root = Path(args.root)
     root.mkdir(parents=True, exist_ok=True)
 
@@ -771,12 +876,15 @@ def main():
     # Machine-readable headline-test sidecar for the cross-RQ multiplicity ledger
     # (make_multiplicity_ledger.py). Deterministic: rand_scenario_rows groups by
     # sorted (gt, scenario) and rounds fisher_p, so re-running (incl. report-only)
-    # overwrites this file byte-for-byte from the same cached runs.
+    # overwrites this file byte-for-byte from the same cached runs. The aggregate
+    # cv/lstm Fisher tests ride along as AUXILIARY entries (review 1.2-3) so no
+    # p-value shown in verdicts.csv/REPORT.md bypasses the ledger.
     sidecar = root / "headline_tests.json"
     sidecar.write_text(json.dumps({
         "source": "RQ1b-rand",
         "generated_by": "run_rq1b_sensitivity.py",
-        "tests": rq1b_headline_tests(rand_scenario_rows(master)),
+        "tests": (rq1b_headline_tests(rand_scenario_rows(master))
+                  + rq1b_aggregate_tests(verdicts)),
     }, indent=2) + "\n")
     print(f"Wrote {sidecar}")
 

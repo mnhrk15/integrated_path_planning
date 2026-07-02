@@ -1,0 +1,48 @@
+{
+  "source": "RQ2-DUT-multivehicle",
+  "generated_by": "run_rq2_dut_validation.py",
+  "tests": [
+    {
+      "test_id": "rq2.dut.multivehicle.closest_ks.calibrated",
+      "description": "DUT closest-approach KS: calibrated sim vs real (multivehicle)",
+      "family": "rq2_dut_fidelity_ks_multivehicle",
+      "auxiliary": true,
+      "p_value": 0.0133147333916153,
+      "statistic": 0.293103448275862,
+      "sidedness": "two-sided",
+      "n_encounters": 58,
+      "sigma": 1.156,
+      "v0": 1.681,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; multivehicle per-vehicle expansion counts a ped once per vehicle (pseudo-replication, p anti-conservative); run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    },
+    {
+      "test_id": "rq2.dut.multivehicle.closest_ks.avec_default",
+      "description": "DUT closest-approach KS: AVEC default sim vs real (multivehicle)",
+      "family": "rq2_dut_fidelity_ks_multivehicle",
+      "auxiliary": true,
+      "p_value": 0.0237762937423499,
+      "statistic": 0.2758620689655172,
+      "sidedness": "two-sided",
+      "n_encounters": 58,
+      "sigma": 0.7,
+      "v0": 3.5,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; multivehicle per-vehicle expansion counts a ped once per vehicle (pseudo-replication, p anti-conservative); run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    },
+    {
+      "test_id": "rq2.dut.multivehicle.closest_ks.no_repulsion",
+      "description": "DUT closest-approach KS: no repulsion sim vs real (multivehicle)",
+      "family": "rq2_dut_fidelity_ks_multivehicle",
+      "auxiliary": true,
+      "p_value": 0.0018657010516376,
+      "statistic": 0.3448275862068966,
+      "sidedness": "two-sided",
+      "n_encounters": 58,
+      "sigma": 1.0,
+      "v0": 0.0,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; multivehicle per-vehicle expansion counts a ped once per vehicle (pseudo-replication, p anti-conservative); run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    }
+  ]
+}

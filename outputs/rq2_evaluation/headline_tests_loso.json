@@ -3,28 +3,98 @@
   "generated_by": "run_rq2_evaluation.py",
   "tests": [
     {
-      "test_id": "rq2.loso.closest_ks.calibrated",
-      "description": "Pooled held-out closest-approach KS: calibrated sim vs real (loso)",
-      "family": "rq2_fidelity_ks_loso",
+      "test_id": "rq2.loso.closest_sign.calibrated",
+      "description": "Paired per-encounter sign test: real vs calibrated sim closest-approach (loso)",
+      "family": "rq2_fidelity_paired_loso",
       "protocol": "loso",
+      "p_value": 1.049041748046875e-05,
+      "statistic": 24.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_real_gt_sim": 24,
+      "n_real_lt_sim": 2,
+      "mean_gap_m": 0.691252007589388,
+      "headline": true,
+      "note": "small p => real standoff exceeds the calibrated sim's in nearly every encounter (the ~0.68 m fidelity gap is statistically real). Paired replacement of the misspecified independent-sample pooled KS (review F5).",
+      "controls": {
+        "avec_default": {
+          "n_real_gt_sim": 24,
+          "n_pairs": 26,
+          "sign_p": 1.049041748046875e-05,
+          "wilcoxon_p": 1.4901161193847656e-07,
+          "mean_gap_m": 0.6825740081186549
+        }
+      },
+      "controls_note": "listed control arms SATURATE at the same paired statistic as calibrated despite different sim arrays => the per-encounter direction does not discriminate repulsion strength (review C2 echo: weak identifiability); these are controls, excluded from the multiplicity family. A de-saturated arm would instead appear as its own family test."
+    },
+    {
+      "test_id": "rq2.loso.closest_wilcoxon.calibrated",
+      "description": "Paired per-encounter Wilcoxon signed-rank: real vs calibrated sim closest-approach (loso)",
+      "family": "rq2_fidelity_paired_loso",
+      "protocol": "loso",
+      "p_value": 2.980232238769531e-07,
+      "statistic": 5.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "mean_gap_m": 0.691252007589388,
+      "headline": false,
+      "note": "magnitude-aware robustness companion to the sign test over the SAME paired differences; counted in the family as honest accounting of two readings of one dataset (family size is data-dependent: de-saturated control arms join the family -- read m from the ledger's family_size)"
+    },
+    {
+      "test_id": "rq2.loso.closest_sign.no_repulsion",
+      "description": "Paired per-encounter sign test: real vs no_repulsion sim closest-approach (loso)",
+      "family": "rq2_fidelity_paired_loso",
+      "protocol": "loso",
+      "p_value": 8.046627044677734e-07,
+      "statistic": 25.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_real_gt_sim": 25,
+      "mean_gap_m": 0.7941468046800242,
+      "headline": false,
+      "note": "de-saturated (distinct from calibrated) => a separate fidelity hypothesis, counted in the family"
+    },
+    {
+      "test_id": "rq2.loso.closest_ks.calibrated",
+      "description": "(diagnostic) pooled closest-approach KS: calibrated sim vs real (loso)",
+      "family": "rq2_fidelity_ks_loso_diagnostic",
+      "protocol": "loso",
+      "auxiliary": true,
       "p_value": 0.007134100565905311,
       "statistic": 0.46153846153846156,
       "sidedness": "two-sided",
       "n_sim": 26,
       "n_real": 26,
-      "headline": true,
-      "note": "small p => the calibrated sim's standoff distribution differs from real (the ~0.68 m fidelity gap is statistically real)",
-      "controls": {
-        "avec_default": {
-          "ks": 0.46153846153846156,
-          "p": 0.007134100565905311
-        },
-        "no_repulsion": {
-          "ks": 0.46153846153846156,
-          "p": 0.007134100565905311
-        }
-      },
-      "controls_note": "listed control arms SATURATE at the same statistic as calibrated despite different arrays => closest-approach KS does not discriminate repulsion strength (review C2: weak identifiability); these are controls, excluded from the multiplicity family. A de-saturated arm would instead appear as its own family test."
+      "headline": false,
+      "note": "DIAGNOSTIC ONLY (review F5): sim_i and real_i share encounter i, so an independent two-sample KS is misspecified on these paired pools -- read the statistic as a shape summary, not the p. The valid headline is the paired sign/Wilcoxon family."
+    },
+    {
+      "test_id": "rq2.loso.closest_ks.avec_default",
+      "description": "(diagnostic) pooled closest-approach KS: avec_default sim vs real (loso)",
+      "family": "rq2_fidelity_ks_loso_diagnostic",
+      "protocol": "loso",
+      "auxiliary": true,
+      "p_value": 0.007134100565905311,
+      "statistic": 0.46153846153846156,
+      "sidedness": "two-sided",
+      "n_sim": 26,
+      "n_real": 26,
+      "headline": false,
+      "note": "DIAGNOSTIC ONLY (review F5): sim_i and real_i share encounter i, so an independent two-sample KS is misspecified on these paired pools -- read the statistic as a shape summary, not the p. The valid headline is the paired sign/Wilcoxon family."
+    },
+    {
+      "test_id": "rq2.loso.closest_ks.no_repulsion",
+      "description": "(diagnostic) pooled closest-approach KS: no_repulsion sim vs real (loso)",
+      "family": "rq2_fidelity_ks_loso_diagnostic",
+      "protocol": "loso",
+      "auxiliary": true,
+      "p_value": 0.007134100565905311,
+      "statistic": 0.46153846153846156,
+      "sidedness": "two-sided",
+      "n_sim": 26,
+      "n_real": 26,
+      "headline": false,
+      "note": "DIAGNOSTIC ONLY (review F5): sim_i and real_i share encounter i, so an independent two-sample KS is misspecified on these paired pools -- read the statistic as a shape summary, not the p. The valid headline is the paired sign/Wilcoxon family."
     }
   ]
 }

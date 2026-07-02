@@ -30,7 +30,7 @@ ROBUST_LABEL = "sgan_robust_eps0.0"
 LSTM_SINGLE = "lstm_single"
 LSTM_ROBUST = "lstm_robust_eps0.0"
 INFLATION_LABELS = [c[0] for c in CONDITIONS
-                    if c[1] == "sgan" and not c[2]]  # single-sample SGAN series
+                    if c[1] == "sgan" and not c[2]]  # non-DA (medoid-representative) SGAN series
 P_SIG = 0.05
 
 # Mapping for the per-seed sanity check against the original PoC outputs.
@@ -341,7 +341,19 @@ def main():
               f"{int(g.collision_count.sum())} | {fmt_ms(g, 'ade')} | {saturated} |")
         w("")
 
-    w("## 実験A: 膨張マージン付き単一サンプル vs robust(ε=0)")
+    # NOTE: the tracked output/exp_margin_control/REPORT.md is an AVEC-era
+    # frozen artifact and is intentionally NOT regenerated with this wording
+    # fix -- it embeds its generating commit hash, and its inputs (the old
+    # output/poc_da_* sanity references) have since been removed, so a re-run
+    # would change more than the wording. The F4 note below applies to future
+    # regenerations only.
+    w("## 実験A: 膨張マージン付き単一代表軌道 vs robust(ε=0)")
+    w("")
+    w("> 注記（F4）: `*_single` 条件の「単一」は SGAN の1描画ではなく "
+      "medoid-of-20（20 サンプル生成→平均最近傍の1本＝分散抑制済み代表値）。"
+      "robust 利得は medoid 相手でも成立している＝主張には保守的方向。"
+      "CV は決定論のため縮退（詳細は run_da_poc.py docstring / "
+      "all_runs.csv の single_mode 列）。")
     w("")
     w("各 inflation 条件と robust の差（Δ = inflation条件 − robust、Welch 両側）:")
     w("")
