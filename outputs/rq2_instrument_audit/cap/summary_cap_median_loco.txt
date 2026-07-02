@@ -1,0 +1,27 @@
+RQ2 cap-policy sensitivity  policy=median  cap_multiplier=1.3  protocol=loco  folds=26
+========================================================================
+
+Regime (review F2): pysocialforce max_speeds is BOTH the DesiredForce
+target and the hard cap; see run_rq2_cap_sensitivity.py --help for the
+policy table. closedloop peds walk ~30% faster than recorded, so read
+its ADE as a regime probe, not a fit quality.
+
+  sigma     : 1.168 +/- 0.091 [0.802, 1.259] (n=26)
+  v0        : 1.712 +/- 0.124 [1.466, 2.040] (n=26)
+
+Held-out test metrics (mean +/- std over folds), within-policy arms:
+  calibrated     ADE : 0.640 +/- 0.205 [0.239, 1.148] (n=26)
+  AVEC default   ADE : 0.639 +/- 0.207 [0.237, 1.159] (n=26)
+  no-repulsion   ADE : 0.672 +/- 0.210 [0.238, 1.165] (n=26)
+
+Paired per-encounter fidelity tests (pooled held-out encounters;
+the valid RQ2 unit, review F5):
+  calibrated     paired : real>sim 24/26  sign p=1.05e-05  Wilcoxon p=5.66e-07  mean gap +0.680 m
+  AVEC default   paired : real>sim 24/26  sign p=1.05e-05  Wilcoxon p=1.49e-07  mean gap +0.683 m
+  no-repulsion   paired : real>sim 25/26  sign p=8.05e-07  Wilcoxon p=5.96e-08  mean gap +0.794 m
+
+Honest standoff gap (pooled closest-approach, descriptive):
+  real 2.502 m vs calibrated sim 1.822 m  => gap +0.680 m (sim under-reproduces standoff)
+
+Verdict logic: examples/make_rq2_instrument_report.py compares this
+policy's gap / sign direction against the median policy's.

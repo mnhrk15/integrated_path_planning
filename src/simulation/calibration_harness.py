@@ -25,6 +25,30 @@ installed library), or (sigma, v0) would be fit to compensate for them:
   (:func:`_far_goals`) so the driving force keeps pulling at cruise speed across
   the whole window — direction is anchored, not destination.
 
+**Speed-cap regime (review F2 — disclosed limitation of the default).** Inside
+pysocialforce ``max_speeds`` plays TWO roles at once: it is the target speed
+``DesiredForce`` drives toward (``direction * max_speeds``, ``forces.py``) AND
+the hard cap ``capped_velocity`` applies inside ``PedState.step``
+(``scene.py``). A ped walking at equilibrium therefore sits exactly AT the cap
+and can never ACCELERATE above its cruise speed to evade the ego — it can only
+re-direct. The default policy pins that (target = cap) speed to each ped's
+recorded MEDIAN speed, while the closed loop the calibrated (sigma, v0) is
+deployed into (AVEC / RQ1b scenarios) runs ``max_speeds = 1.3 x
+initial_speeds`` — a DIFFERENT response ceiling from the one the parameters
+were calibrated under. Whether the standoff under-reproduction (+0.68 m,
+real>sim in 24/26 LOCO encounters) is an artifact of this cap regime or a
+structural SFM limit is measured by the ``cap_policy`` option
+(:func:`_apply_cap_policy`, exercised by
+``examples/run_rq2_cap_sensitivity.py``): ``median`` (default — exactly the
+historical behaviour), ``closedloop`` (target = cap = 1.3 x cruise, the
+closed-loop regime; peds then walk ~30% faster than recorded, so its ADE mixes
+the cap effect with a cruise-speed error), ``uncapped`` (target stays at
+cruise, cap raised to ``UNCAPPED_SPEED`` — the two roles are decoupled by
+swapping ``max_speeds`` only for the duration of the integration substep,
+:func:`_install_cap_shim`) and ``capfit`` (target at cruise, cap = m x cruise
+for a swept headroom multiplier m; m = 1 is aliased to the ``median`` path so
+it reproduces it bit-for-bit by construction — see :func:`_apply_cap_policy`).
+
 Objective design (see the thesis plan / RQ2): the FITTER is a short-rollout
 position error (:func:`objective_rollout_ade`) — driving the SFM peds with the
 recorded ego and minimising their displacement from the recorded pedestrian
@@ -52,6 +76,8 @@ import numpy as np
 from ..core.data_structures import EgoVehicleState
 from ..core.metrics import (
     avoidance_onset_distance,
+    compare_distributions_emd,
+    compare_distributions_energy,
     compare_distributions_ks,
     min_separation_series,
 )
@@ -68,6 +94,20 @@ DEFAULT_EGO_RADIUS = 1.0  # AVEC ego footprint radius [m]; held fixed (confounds
 # the same order as the sigma fold spread). Held fixed (it confounds sigma).
 DEFAULT_AGENT_RADIUS = 0.30
 GOAL_DISTANCE = 50.0  # far-goal distance along recorded heading [m]
+
+# Speed-cap policies (review F2; see the module docstring for the regime table).
+CAP_POLICIES = ("median", "closedloop", "uncapped", "capfit")
+# "uncapped" cap value [m/s]: ~2x the fastest recorded CITR pedestrian
+# (4.79 m/s), i.e. effectively unbounded while still guarding against numeric
+# blow-ups if a force ever spikes.
+UNCAPPED_SPEED = 10.0
+# Distribution metrics accepted by objective_multi. EMD is the swept default:
+# with n=26 encounters the KS statistic is a step function with 1/26 granularity
+# (a plateau landscape Nelder-Mead's fatol=1e-6 cannot descend), whereas the EMD
+# is continuous in the sample values and carries the sample unit (metres), so it
+# is commensurate with the ADE term. The energy distance is kept as a
+# cross-check (units m^0.5, so its weight is NOT comparable to the EMD's).
+DIST_METRICS = ("emd", "energy", "ks")
 
 
 def _floor(cruise: np.ndarray) -> np.ndarray:
@@ -212,6 +252,103 @@ def _set_cruise_speed(ped_sim: PedestrianSimulator, cruise: np.ndarray) -> None:
     peds.max_speeds = cruise.copy()
 
 
+def _install_cap_shim(ped_sim: PedestrianSimulator, cap: np.ndarray) -> None:
+    """Decouple the velocity CAP from the DesiredForce TARGET for this instance.
+
+    Both roles live in ``max_speeds`` (module docstring), so raising the cap by
+    assignment alone would also raise the goal-driving target and make the peds
+    sprint. Instead: ``PedestrianSimulator.step`` runs ``compute_forces()``
+    (which reads ``max_speeds`` as the DesiredForce target) and THEN
+    ``peds.step(force)`` (which reads it as the hard cap and, at its end,
+    re-derives ``max_speeds = multiplier * initial_speeds`` via the state
+    setter). Shadowing the bound ``peds.step`` lets ``max_speeds`` equal ``cap``
+    only while the integration substep applies it; the state setter inside the
+    original ``step`` then restores the cruise value for the next
+    ``compute_forces``, so the walking-speed target is untouched.
+
+    Instance-level attribute shadowing only: the closed-loop simulator classes
+    stay unmodified, and the default (``median``) path never installs the shim,
+    keeping it bit-for-bit intact. Plain attribute assignment does not run the
+    state setter, so the ``ped_states`` history is not polluted;
+    ``objective_one_step`` never calls ``peds.step``, so the teacher-forced
+    diagnostic is unaffected.
+    """
+    peds = ped_sim.sim.peds
+    orig_step = peds.step  # bound method, captured before shadowing
+    cap = np.asarray(cap, dtype=float).copy()
+
+    def step_with_cap(force, groups=None):
+        peds.max_speeds = cap  # read by capped_velocity inside this step only
+        orig_step(force, groups)  # its state setter restores the cruise target
+
+    peds.step = step_with_cap
+
+
+def _apply_cap_policy(
+    ped_sim: PedestrianSimulator,
+    cruise: np.ndarray,
+    cap_policy: Optional[str],
+    cap_multiplier: float,
+) -> None:
+    """Set the desired-speed / speed-cap regime for one encounter simulator.
+
+    ``None`` / ``"median"``: the historical default — target = cap = cruise
+    (:func:`_set_cruise_speed`); no shim is installed, so this path is
+    bit-for-bit the pre-``cap_policy`` behaviour.
+
+    ``"closedloop"``: target = cap = multiplier x cruise, i.e. exactly the
+    ``max_speeds = 1.3 x initial_speeds`` regime of the closed-loop simulator
+    the calibrated parameters are deployed into. Design note: the closed loop
+    seeds ``initial_speeds`` from the scenario's initial frame; here the
+    (noise-robust) per-ped cruise estimate stands in for it — the point of the
+    arm is the REGIME (target = cap at 1.3x), not the seed statistic. Peds walk
+    ~30% faster than recorded under this arm, so its ADE mixes the cap effect
+    with a cruise-speed error (report it as a regime probe, not a fit quality).
+
+    ``"uncapped"``: target = cruise, cap = ``UNCAPPED_SPEED`` (decoupled via
+    :func:`_install_cap_shim`) — peds keep their recorded walking speed but may
+    transiently ACCELERATE to evade, which the default regime forbids.
+
+    ``"capfit"``: target = cruise, cap = ``cap_multiplier`` x cruise
+    (decoupled) — the headroom multiplier is swept externally by
+    ``run_rq2_cap_sensitivity.py``. ``cap_multiplier=1`` is ALIASED to the
+    ``median`` path (no shim): re-applying the cap through the shim as
+    ``1.0*cruise`` is NOT bit-identical to the state setter's own
+    ``multiplier*(cruise/multiplier)`` round trip (a 1-ulp float difference
+    that ~5% of real cruise values expose), so the exact-equality contract
+    "m=1 == median" is made true by construction instead of by luck.
+    """
+    if cap_policy == "capfit" and not (np.isfinite(cap_multiplier)
+                                       and cap_multiplier > 0.0):
+        raise ValueError(
+            f"capfit needs a positive finite cap_multiplier, got {cap_multiplier!r}"
+            " (a non-positive cap would freeze every ped via capped_velocity)")
+    if cap_policy is None or cap_policy == "median" \
+            or (cap_policy == "capfit" and cap_multiplier == 1.0):
+        _set_cruise_speed(ped_sim, cruise)
+        return
+    peds = ped_sim.sim.peds
+    multiplier = float(peds.max_speed_multiplier)
+    if cap_policy == "closedloop":
+        # The setter recomputes max_speeds = multiplier * initial_speeds on
+        # every state assignment, so seeding initial_speeds = cruise makes the
+        # closed-loop regime persist (same trick as _set_cruise_speed).
+        peds.initial_speeds = cruise.copy()
+        peds.max_speeds = multiplier * cruise
+        return
+    if cap_policy == "uncapped":
+        _set_cruise_speed(ped_sim, cruise)
+        _install_cap_shim(ped_sim, np.full(cruise.shape, UNCAPPED_SPEED))
+        return
+    if cap_policy == "capfit":
+        _set_cruise_speed(ped_sim, cruise)
+        _install_cap_shim(ped_sim, cap_multiplier * cruise)
+        return
+    raise ValueError(
+        f"unknown cap_policy {cap_policy!r}; expected one of {CAP_POLICIES}"
+    )
+
+
 def _build_ped_sim(
     enc: Encounter,
     sigma: float,
@@ -220,13 +357,17 @@ def _build_ped_sim(
     agent_radius: float,
     dt: float,
     cruise_fn: Optional[CruiseEstimator] = None,
+    cap_policy: Optional[str] = None,
+    cap_multiplier: float = 1.3,
 ) -> PedestrianSimulator:
     """Construct a PedestrianSimulator for one encounter at given (sigma, v0).
 
     ``cruise_fn`` (default :func:`_cruise_speeds` on the recorded velocity)
     estimates each ped's desired walking speed; pass an alternative (e.g.
-    :func:`cruise_freewalk`) for the RQ2 cruise-bias diagnostic. Default None
-    reproduces the original behaviour bit-for-bit.
+    :func:`cruise_freewalk`) for the RQ2 cruise-bias diagnostic.
+    ``cap_policy`` selects the desired-speed / speed-cap regime (review F2; see
+    :func:`_apply_cap_policy`); ``cap_multiplier`` is the ``capfit`` headroom.
+    The defaults (None everywhere) reproduce the original behaviour bit-for-bit.
     """
     pos0 = enc.ped_xy[0]  # [N, 2]
     vel0 = enc.ped_vel[0]  # [N, 2]
@@ -246,7 +387,7 @@ def _build_ped_sim(
     cruise = _cruise_speeds(enc.ped_vel) if cruise_fn is None else cruise_fn(enc)
     # Floor at the consumption point so the stop-when-arrived guarantee holds for
     # ANY cruise_fn (the built-ins self-floor, so this is a no-op for them).
-    _set_cruise_speed(ped_sim, _floor(cruise))
+    _apply_cap_policy(ped_sim, _floor(cruise), cap_policy, cap_multiplier)
     return ped_sim
 
 
@@ -274,6 +415,8 @@ def simulate_encounter(
     agent_radius: float = DEFAULT_AGENT_RADIUS,
     dt: float = 0.1,
     cruise_fn: Optional[CruiseEstimator] = None,
+    cap_policy: Optional[str] = None,
+    cap_multiplier: float = 1.3,
 ) -> np.ndarray:
     """Roll out SFM pedestrians reacting to the recorded ego; return sim ped xy.
 
@@ -299,7 +442,8 @@ def simulate_encounter(
     """
     substeps = max(1, int(round(enc.dt / dt)))
     dt_sub = enc.dt / substeps
-    ped_sim = _build_ped_sim(enc, sigma, v0, ego_radius, agent_radius, dt_sub, cruise_fn)
+    ped_sim = _build_ped_sim(enc, sigma, v0, ego_radius, agent_radius, dt_sub,
+                             cruise_fn, cap_policy, cap_multiplier)
     T, N, _ = enc.ped_xy.shape
     sim_xy = np.empty((T, N, 2))
     sim_xy[0] = enc.ped_xy[0]
@@ -320,6 +464,8 @@ def objective_rollout_ade(
     dt: float = 0.1,
     interaction_distance: Optional[float] = None,
     cruise_fn: Optional[CruiseEstimator] = None,
+    cap_policy: Optional[str] = None,
+    cap_multiplier: float = 1.3,
 ) -> float:
     """Short-rollout displacement error vs the recorded pedestrians (the FITTER).
 
@@ -344,7 +490,8 @@ def objective_rollout_ade(
     total = 0.0
     count = 0
     for enc in encounters:
-        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt, cruise_fn)
+        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt,
+                                    cruise_fn, cap_policy, cap_multiplier)
         err = np.linalg.norm(sim_xy - enc.ped_xy, axis=2)  # [T, N]
         if interaction_distance is not None:
             dist = np.linalg.norm(enc.ped_xy - enc.ego_xy[:, None, :], axis=2)  # [T, N]
@@ -356,6 +503,124 @@ def objective_rollout_ade(
     if count == 0:
         return float("inf")
     return total / count
+
+
+def _distribution_distance(sim_vals, real_vals, dist_metric: str) -> float:
+    """Scalar distribution distance for the multi-objective (``inf`` on empty).
+
+    ``inf`` (not ``nan``) on an empty side so a degenerate parameter region is
+    never selected by the grid search (mirrors the ``count == 0`` convention of
+    :func:`objective_rollout_ade`).
+    """
+    sim = np.asarray(sim_vals, dtype=float)
+    real = np.asarray(real_vals, dtype=float)
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return float("inf")
+    if dist_metric == "emd":
+        return compare_distributions_emd(sim, real)
+    if dist_metric == "energy":
+        return compare_distributions_energy(sim, real)
+    if dist_metric == "ks":
+        return float(compare_distributions_ks(sim, real)[0])
+    raise ValueError(
+        f"unknown dist_metric {dist_metric!r}; expected one of {DIST_METRICS}"
+    )
+
+
+def objective_multi(
+    encounters: List[Encounter],
+    sigma: float,
+    v0: float,
+    *,
+    w_ade: float = 1.0,
+    w_dist: float = 1.0,
+    dist_metric: str = "emd",
+    w_onset: float = 0.0,
+    onset_fallback: float = 5.0,
+    ego_radius: float = DEFAULT_EGO_RADIUS,
+    agent_radius: float = DEFAULT_AGENT_RADIUS,
+    dt: float = 0.1,
+    interaction_distance: Optional[float] = None,
+    cruise_fn: Optional[CruiseEstimator] = None,
+    cap_policy: Optional[str] = None,
+    cap_multiplier: float = 1.3,
+) -> float:
+    """Distribution-matching fitter: ``w_ade*ADE + w_dist*D(closest_sim, closest_real)``.
+
+    One rollout per encounter feeds BOTH terms: the per-frame displacement error
+    (identical accumulation to :func:`objective_rollout_ade`, so
+    ``w_ade=1, w_dist=0, w_onset=0`` is bit-for-bit that objective) and the
+    per-encounter closest-approach scalars (one ``min(min_separation_series)``
+    per encounter, the same independent unit :func:`fidelity_report` validates
+    on). ``D`` is one of ``DIST_METRICS`` — EMD by default; see that constant's
+    comment for why KS is unusable as a Nelder-Mead term at n=26 and why the
+    energy distance's weight is not comparable.
+
+    ``interaction_distance`` filters the ADE term ONLY (its purpose is removing
+    the (sigma, v0)-independent baseline error of never-interacting peds); the
+    closest-approach term always uses every ped, mirroring
+    :func:`fidelity_report` — encounters are extracted with
+    ``min_separation <= min_sep``, so an ``interaction_distance >= min_sep``
+    can never empty the closest pool.
+
+    ``w_onset`` (default 0 = off) optionally adds the same distance over the
+    per-encounter median avoidance-onset distances. It is OFF by default
+    because the SFM forces are often too weak to trigger the onset threshold in
+    simulation (module docstring), leaving the sim pool empty; when that
+    happens with ``w_onset > 0`` the term contributes ``onset_fallback``
+    (a continuous worst-case at ``avoidance_onset_distance``'s ``max_distance``
+    of 5 m) instead of ``inf``, so Nelder-Mead does not step off a cliff.
+    """
+    if dist_metric not in DIST_METRICS:  # fail fast, before any rollout
+        raise ValueError(
+            f"unknown dist_metric {dist_metric!r}; expected one of {DIST_METRICS}"
+        )
+    if w_ade < 0.0 or w_dist < 0.0 or w_onset < 0.0:
+        # A negative weight REWARDS mismatch on that term; no audit configuration
+        # means that, so treat it as a caller bug rather than optimising nonsense.
+        raise ValueError(
+            f"weights must be >= 0, got w_ade={w_ade}, w_dist={w_dist}, "
+            f"w_onset={w_onset}")
+    total = 0.0
+    count = 0
+    sim_closest: List[float] = []
+    real_closest: List[float] = []
+    sim_onsets: List[np.ndarray] = []
+    real_onsets: List[np.ndarray] = []
+    for enc in encounters:
+        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt,
+                                    cruise_fn, cap_policy, cap_multiplier)
+        err = np.linalg.norm(sim_xy - enc.ped_xy, axis=2)  # [T, N]
+        if interaction_distance is not None:
+            dist = np.linalg.norm(enc.ped_xy - enc.ego_xy[:, None, :], axis=2)
+            keep = np.min(dist, axis=0) <= interaction_distance  # [N]
+            err = err[:, keep]
+        err = err[1:]  # frame 0 is pinned to the recorded start (error 0)
+        total += float(err.sum())
+        count += err.size
+        if w_dist != 0.0:
+            sim_closest.append(float(np.min(min_separation_series(enc.ego_xy, sim_xy))))
+            real_closest.append(float(np.min(min_separation_series(enc.ego_xy, enc.ped_xy))))
+        if w_onset != 0.0:
+            sim_onsets.append(avoidance_onset_distance(enc.ego_xy, sim_xy, dt=enc.dt))
+            real_onsets.append(avoidance_onset_distance(enc.ego_xy, enc.ped_xy, dt=enc.dt))
+    if count == 0:
+        return float("inf")
+    loss = w_ade * (total / count)
+    if w_dist != 0.0:
+        loss += w_dist * _distribution_distance(sim_closest, real_closest, dist_metric)
+    if w_onset != 0.0:
+        sim_pe = np.asarray(_per_encounter_onset(sim_onsets), dtype=float)
+        real_pe = np.asarray(_per_encounter_onset(real_onsets), dtype=float)
+        sim_pe = sim_pe[np.isfinite(sim_pe)]
+        real_pe = real_pe[np.isfinite(real_pe)]
+        if sim_pe.size and real_pe.size:
+            loss += w_onset * _distribution_distance(sim_pe, real_pe, dist_metric)
+        else:
+            loss += w_onset * onset_fallback
+    return loss
 
 
 def _set_real_state(ped_sim: PedestrianSimulator, pos: np.ndarray, vel: np.ndarray, goals: np.ndarray) -> None:
@@ -387,6 +652,11 @@ def objective_one_step(
     dwarfs the small/noisy real per-step radial acceleration. Reported alongside
     the rollout-ADE calibration to show the paper's force is too impulsive
     instantaneously even where a moderate ``v0`` reproduces the trajectory.
+
+    NOTE: this diagnostic has no ``cap_policy`` parameter — it is teacher-forced
+    (never integrates, never calls ``peds.step``), so the cap regime cannot
+    affect it. Do NOT quote it side-by-side with a non-``median`` cap-policy
+    calibration as if both were evaluated under that regime.
 
 
     For every encounter, frame and pedestrian, compare the radial (ego->ped)
@@ -460,6 +730,8 @@ def fidelity_report(
     agent_radius: float = DEFAULT_AGENT_RADIUS,
     dt: float = 0.1,
     cruise_fn: Optional[CruiseEstimator] = None,
+    cap_policy: Optional[str] = None,
+    cap_multiplier: float = 1.3,
 ) -> Dict[str, float]:
     """Roll out at (sigma, v0) and compare simulated vs real avoidance (VALIDATION).
 
@@ -477,7 +749,8 @@ def fidelity_report(
     ade_sum = 0.0
     ade_count = 0
     for enc in encounters:
-        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt, cruise_fn)
+        sim_xy = simulate_encounter(enc, sigma, v0, ego_radius, agent_radius, dt,
+                                    cruise_fn, cap_policy, cap_multiplier)
         sim_sep = min_separation_series(enc.ego_xy, sim_xy)
         real_sep = min_separation_series(enc.ego_xy, enc.ped_xy)
         sim_closest.append(float(np.min(sim_sep)))

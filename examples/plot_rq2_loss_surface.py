@@ -37,6 +37,11 @@ FIGS = REPO / "figs"
 
 AVEC_DEFAULT = (0.7, 3.5)  # paper's hand-tuned (sigma, v0)
 
+# "Indistinguishable" band: profile values within this relative margin of the
+# profile minimum (review C2). Shared by the v0/sigma profile plots and the
+# identifiability CSV (profile_band) so figure and table always agree.
+BAND_REL = 0.02
+
 # CITR vehicle scenarios for the 2x2 grid, with display titles.
 SCENARIO_TITLES = {
     "vci_front": "front",
@@ -102,13 +107,15 @@ def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False):
     return mesh
 
 
-def plot_v0_profile(ax, surf: Dict[str, object]) -> None:
+def plot_v0_profile(ax, surf: Dict[str, object],
+                    ylabel: str = "rollout ADE [m]") -> None:
     """1-D ADE-vs-v0 profile at the grid sigma nearest the fitted optimum.
 
     Makes the review-C2 identifiability explicit: along the ridge the rollout ADE
     is nearly flat between the calibrated v0 (~1.7) and the AVEC hand-tuned v0=3.5,
     so the data CANNOT distinguish them (the '<2% ADE' band). Shades the v0 span
-    whose ADE is within 2% of the profile minimum.
+    whose ADE is within 2% of the profile minimum. ``ylabel`` overrides the axis
+    label when the surface holds a non-ADE objective (the multi-objective sweeps).
     """
     gs, gv = surf["grid_sigma"], surf["grid_v0"]
     loss = surf["loss"]  # masked [S, V]
@@ -122,10 +129,10 @@ def plot_v0_profile(ax, surf: Dict[str, object]) -> None:
     v = gv[finite]
     a = np.asarray(prof[finite])
     amin = float(a.min())
-    band = a <= amin * 1.02  # within 2% of the minimum -> indistinguishable
+    band = a <= amin * (1.0 + BAND_REL)  # within 2% of min -> indistinguishable
     ax.plot(v, a, "-o", color="#1f77b4", ms=4)
     if band.any():
-        ax.axhspan(amin, amin * 1.02, color="orange", alpha=0.18,
+        ax.axhspan(amin, amin * (1.0 + BAND_REL), color="orange", alpha=0.18,
                    label="within 2% of min (indistinguishable)")
         ax.axvspan(float(v[band].min()), float(v[band].max()),
                    color="orange", alpha=0.10)
@@ -134,9 +141,129 @@ def plot_v0_profile(ax, surf: Dict[str, object]) -> None:
     ax.axvline(AVEC_DEFAULT[1], color="red", ls=":", lw=1.5,
                label=f"AVEC v0={AVEC_DEFAULT[1]}")
     ax.set_xlabel(r"$v_0$ [m/s$^2$]")
-    ax.set_ylabel("rollout ADE [m]")
+    ax.set_ylabel(ylabel)
+    # Title kept verbatim from the pre-sigma-profile version so re-rendering the
+    # committed figs/rq2_v0_profile_all.png stays unchanged ("ADE" reads wrong
+    # for a multi-objective surface, but the ylabel carries the objective there).
     ax.set_title(rf"RQ2 ADE vs $v_0$ at $\sigma$={gs[si]:.2f} (identifiability)")
     ax.legend(fontsize=8, framealpha=0.85)
+
+
+def plot_sigma_profile(ax, surf: Dict[str, object],
+                       ylabel: str = "rollout ADE [m]") -> None:
+    """1-D loss-vs-sigma profile at the grid v0 nearest the fitted optimum.
+
+    The sigma-axis counterpart of :func:`plot_v0_profile` (review 1.2-2: the S2
+    discriminating cell is driven by the repulsion RANGE sigma, so sigma-side
+    identifiability must be shown, not only the v0 side). Shades the sigma span
+    within ``BAND_REL`` of the profile minimum.
+    """
+    gs, gv = surf["grid_sigma"], surf["grid_v0"]
+    loss = surf["loss"]  # masked [S, V]
+    vi = int(np.argmin(np.abs(gv - surf["v0"])))
+    prof = loss[:, vi]  # masked [S]
+    finite = ~np.ma.getmaskarray(prof)
+    if finite.sum() < 2:
+        ax.text(0.5, 0.5, "profile degenerate", ha="center", va="center",
+                transform=ax.transAxes)
+        return
+    s = gs[finite]
+    a = np.asarray(prof[finite])
+    amin = float(a.min())
+    band = a <= amin * (1.0 + BAND_REL)
+    ax.plot(s, a, "-o", color="#1f77b4", ms=4)
+    if band.any():
+        ax.axhspan(amin, amin * (1.0 + BAND_REL), color="orange", alpha=0.18,
+                   label="within 2% of min (indistinguishable)")
+        ax.axvspan(float(s[band].min()), float(s[band].max()),
+                   color="orange", alpha=0.10)
+    ax.axvline(surf["sigma"], color="black", ls="--", lw=1.2,
+               label=f"calibrated sigma={surf['sigma']:.2f}")
+    ax.axvline(AVEC_DEFAULT[0], color="red", ls=":", lw=1.5,
+               label=f"AVEC sigma={AVEC_DEFAULT[0]}")
+    ax.set_xlabel(r"$\sigma$ [m]")
+    ax.set_ylabel(ylabel)
+    ax.set_title(rf"loss vs $\sigma$ at $v_0$={gv[vi]:.2f} (identifiability)")
+    ax.legend(fontsize=8, framealpha=0.85)
+
+
+def profile_band(surf: Dict[str, object], axis: str,
+                 rel: float = BAND_REL) -> Dict[str, float]:
+    """Quantify one axis' identifiability band (pure function, CSV-ready).
+
+    Profiles the loss along ``axis`` ("v0" at the grid sigma nearest the fitted
+    optimum, or "sigma" at the grid v0 nearest it -- the same slices the profile
+    plots draw) and measures the span of grid nodes whose loss is within ``rel``
+    of the profile minimum. Returns::
+
+        {axis, fixed_value, band_lo, band_hi, band_width, n_nodes_in_band,
+         n_nodes_total, band_contiguous, censored_lo, censored_hi, fitted,
+         fitted_on_grid_edge, min_loss, degenerate}
+
+    ``censored_lo/hi``: the band touches the grid edge, so the true flat region
+    extends beyond the evaluated grid and ``band_width`` is a LOWER bound.
+    ``band_contiguous``: the in-band nodes form one unbroken run; False means a
+    MULTI-MODAL profile whose [band_lo, band_hi] hull straddles an out-of-band
+    ridge, so ``band_width`` overstates the flat region and must not be quoted
+    as one. ``fitted_on_grid_edge``: the refined optimum sits at/beyond the
+    grid border (the optimiser may have wanted to leave the box).
+    ``degenerate``: fewer than two finite profile nodes, or a non-finite fitted
+    optimum (either axis) that would make the slice/edge fields meaningless --
+    every band field is NaN and nothing downstream may read the row as a
+    measurement.
+    """
+    if axis not in ("sigma", "v0"):
+        raise ValueError(f"axis must be 'sigma' or 'v0', got {axis!r}")
+    gs, gv = surf["grid_sigma"], surf["grid_v0"]
+    loss = surf["loss"]  # masked [S, V]
+    fit_sigma, fit_v0 = float(surf["sigma"]), float(surf["v0"])
+
+    def _degenerate(fixed, fitted):
+        return {"axis": axis, "fixed_value": fixed, "fitted": fitted,
+                "fitted_on_grid_edge": False, "n_nodes_total": 0,
+                "band_lo": float("nan"), "band_hi": float("nan"),
+                "band_width": float("nan"), "n_nodes_in_band": 0,
+                "band_contiguous": False,
+                "censored_lo": False, "censored_hi": False,
+                "min_loss": float("nan"), "degenerate": True}
+
+    # A non-finite fitted optimum makes both the slice choice (argmin over
+    # |grid - nan| silently picks index 0) and the edge flags meaningless;
+    # refuse to emit a plausible-looking row (review: NaN fail-open).
+    if not (np.isfinite(fit_sigma) and np.isfinite(fit_v0)):
+        return _degenerate(float("nan"), float("nan"))
+    if axis == "v0":
+        si = int(np.argmin(np.abs(gs - fit_sigma)))
+        prof, coords, fixed, fitted = loss[si], gv, float(gs[si]), fit_v0
+    else:
+        vi = int(np.argmin(np.abs(gv - fit_v0)))
+        prof, coords, fixed, fitted = loss[:, vi], gs, float(gv[vi]), fit_sigma
+    finite = ~np.ma.getmaskarray(prof)
+    grid_lo, grid_hi = float(coords.min()), float(coords.max())
+    if finite.sum() < 2:
+        out = _degenerate(fixed, fitted)
+        out["n_nodes_total"] = int(finite.sum())
+        return out
+    x = coords[finite]
+    a = np.asarray(prof[finite])
+    amin = float(a.min())
+    band = a <= amin * (1.0 + rel)
+    band_idx = np.flatnonzero(band)
+    band_lo, band_hi = float(x[band].min()), float(x[band].max())
+    return {
+        "axis": axis, "fixed_value": fixed, "fitted": fitted,
+        "fitted_on_grid_edge": bool(fitted <= grid_lo or fitted >= grid_hi),
+        "n_nodes_total": int(finite.sum()),
+        "band_lo": band_lo, "band_hi": band_hi,
+        "band_width": band_hi - band_lo,
+        "n_nodes_in_band": int(band.sum()),
+        # One unbroken run of (finite) nodes <=> hull == the actual flat region.
+        "band_contiguous": bool(band_idx.size
+                                and band_idx[-1] - band_idx[0] + 1 == band_idx.size),
+        "censored_lo": bool(band_lo <= float(x.min())),
+        "censored_hi": bool(band_hi >= float(x.max())),
+        "min_loss": amin, "degenerate": False,
+    }
 
 
 def _find_npz(input_dir: Path, scenario: str) -> Optional[Path]:

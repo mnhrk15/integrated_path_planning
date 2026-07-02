@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
-from scipy.stats import ks_2samp
+from scipy.stats import energy_distance, ks_2samp, wasserstein_distance
 
 from .data_structures import SimulationResult
 
@@ -443,6 +443,47 @@ def compare_distributions_ks(
         return float("nan"), float("nan")
     result = ks_2samp(sim, real)
     return float(result.statistic), float(result.pvalue)
+
+
+def compare_distributions_emd(
+    sim_samples: np.ndarray, real_samples: np.ndarray
+) -> float:
+    """1-D earth mover's distance (Wasserstein-1) between two samples.
+
+    Same input conventions as :func:`compare_distributions_ks`: flatten to 1-D,
+    drop non-finite values, return ``nan`` if either side is then empty. Unlike
+    the KS statistic — a step function with 1/n granularity that plateaus under
+    a small n — the EMD is continuous in the sample values, which is what makes
+    it usable as a smooth optimisation objective term; and it carries the
+    sample's own unit (metres for closest-approach distances), so it is
+    directly commensurate with an ADE in metres.
+    """
+    sim = np.asarray(sim_samples, dtype=float).ravel()
+    real = np.asarray(real_samples, dtype=float).ravel()
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return float("nan")
+    return float(wasserstein_distance(sim, real))
+
+
+def compare_distributions_energy(
+    sim_samples: np.ndarray, real_samples: np.ndarray
+) -> float:
+    """1-D energy distance between two samples.
+
+    Same conventions as :func:`compare_distributions_emd`. Note the energy
+    distance carries the SQUARE ROOT of the sample unit (m^0.5 here), so a
+    weight tuned for the EMD term is not transferable to this metric; it is
+    kept as a cross-check, not the swept default.
+    """
+    sim = np.asarray(sim_samples, dtype=float).ravel()
+    real = np.asarray(real_samples, dtype=float).ravel()
+    sim = sim[np.isfinite(sim)]
+    real = real[np.isfinite(real)]
+    if sim.size == 0 or real.size == 0:
+        return float("nan")
+    return float(energy_distance(sim, real))
 
 
 def ks_sample_imbalance(
