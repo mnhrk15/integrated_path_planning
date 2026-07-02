@@ -14,12 +14,21 @@ Held-out test metrics (mean +/- std over folds), 3 groups:
   AVEC default   ADE : 0.643 +/- 0.092 [0.519, 0.716] (n=4)
   no-repulsion   ADE : 0.671 +/- 0.109 [0.532, 0.759] (n=4)
 
-Pooled held-out KS (review C1: ALL folds' raw closest-approach scalars
-pooled into ONE n-sample KS -- a per-fold KS is degenerate (often n=1
-per held-out clip, ~1.000 and uninformative), so it is NOT reported as
-fidelity. NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN
+Paired per-encounter fidelity test (review F5: sim_i and real_i come from
+the SAME held-out encounter i, so the valid unit is the per-encounter
+difference d_i = real_i - sim_i -- sign test + Wilcoxon signed-rank over
+all folds' pooled held-out encounters. This replaces the former pooled
+independent-sample KS headline, which is misspecified on paired pools.
+NOTE the asymmetry: the 'calibrated' pool mixes each fold's OWN
 (sigma, v0) -- a cross-validated mixture, not one fixed model -- while the
 AVEC-default / no-repulsion pools use a single fixed parameter set:
+  calibrated     paired : real>sim 24/26  sign p=1.05e-05  Wilcoxon p=2.98e-07  mean gap +0.691 m
+  AVEC default   paired : real>sim 24/26  sign p=1.05e-05  Wilcoxon p=1.49e-07  mean gap +0.683 m
+  no-repulsion   paired : real>sim 25/26  sign p=8.05e-07  Wilcoxon p=5.96e-08  mean gap +0.794 m
+
+(diagnostic only) pooled independent-two-sample KS over the same pools --
+kept for comparability with the earlier C1 headline; its p is NOT valid
+on paired data (read the statistic as a shape summary only):
   calibrated     KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)
   AVEC default   KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)
   no-repulsion   KS_closest : 0.462 (p=0.007, n_sim=26, n_real=26)

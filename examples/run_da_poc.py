@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Margin-control experiment: distribution information vs. mere conservatism.
 
-Extends the original distribution-aware planning PoC (single-sample baseline
-vs. chance-constrained planning over the full 20-sample SGAN distribution)
-with two controls that separate "value of the predicted distribution" from
-"mere conservatism" (RESEARCH_ISSUES_AND_SOLUTIONS.md §C-1):
+Extends the original distribution-aware planning PoC (representative-sample
+baseline vs. chance-constrained planning over the full 20-sample SGAN
+distribution) with two controls that separate "value of the predicted
+distribution" from "mere conservatism" (RESEARCH_ISSUES_AND_SOLUTIONS.md §C-1):
 
-  Experiment A: single-sample planning with an inflated collision margin
-      (collision_margin_inflation in {1.0, 1.1, 1.2, 1.35, 1.5}) compared
-      against the robust (eps=0) planner on the MinDist-vs-Time trade-off.
+  Experiment A: representative-sample planning with an inflated collision
+      margin (collision_margin_inflation in {1.0, 1.1, 1.2, 1.35, 1.5})
+      compared against the robust (eps=0) planner on the MinDist-vs-Time
+      trade-off.
   Experiment B: robust (eps=0) planning over the LSTM (no pooling)
       20-sample distribution, to test whether the robust gain is specific
       to the interaction-aware (pooling) distribution.
+
+NOTE (review F4): the "*_single" conditions do NOT plan on one random SGAN
+draw. Scenario YAMLs set num_samples: 20 and the predictor's
+predict_single_best() returns the scene-level MEDOID of those 20 draws (the
+sample closest to the sample mean) -- a variance-suppressed, mode-seeking
+representative. The robust gain measured here is therefore against a medoid
+opponent (conservative for the robust-gain claim); CV is deterministic, so
+its medoid degenerates to the plain forecast. Each run records this as the
+``single_mode`` provenance column (e.g. ``medoid_of_20``).
 
 Runs are cached per (scenario, condition, seed) under <outdir>/runs/, so an
 interrupted campaign resumes where it left off. all_runs.csv is rebuilt from
@@ -135,9 +145,15 @@ def run_one(scenario, method, distribution_aware, epsilon, inflation, seed,
         sfp = getattr(config, "social_force_params", None) or {}
         eff_sigma = float(sfp.get("ego_repulsion.sigma", float("nan")))
         eff_v0 = float(sfp.get("ego_repulsion.v0", float("nan")))
+    # How the "single" representative trajectory was selected (review F4):
+    # num_samples > 1 -> predict_single_best returns the medoid of that many
+    # draws, NOT one random draw (degenerate for deterministic CV).
+    n_samples = int(getattr(config, "num_samples", 1))
+    single_mode = f"medoid_of_{n_samples}" if n_samples > 1 else "single_draw"
     return {
         "ego_footprint": config.ego_footprint,
         "n_circles": int(config.ego_footprint_n_circles),
+        "single_mode": single_mode,
         "time_cap": float(config.total_time),
         "termination": sim.termination_reason,
         "goal_reached": sim.goal_reached,
@@ -240,9 +256,10 @@ def aggregate_and_write(df, outdir, conditions, baseline_label=BASELINE_LABEL,
                     "min_dist_m", "min_ttc_s", "collision_count", "ade", "fde"]
     # These fields only exist in caches written by newer code.
     column_order += [c for c in ["rms_jerk", "mean_accel", "ego_footprint",
-                                 "n_circles", "time_cap", "termination",
-                                 "goal_reached", "ego_repulsion_sigma",
-                                 "ego_repulsion_v0", "ego_target_speed"]
+                                 "n_circles", "single_mode", "time_cap",
+                                 "termination", "goal_reached",
+                                 "ego_repulsion_sigma", "ego_repulsion_v0",
+                                 "ego_target_speed"]
                      if c in df.columns]
     df = df[column_order].sort_values(["scenario", "condition", "seed"])
     df.to_csv(outdir / "all_runs.csv", index=False)

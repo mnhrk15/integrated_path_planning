@@ -1,0 +1,48 @@
+{
+  "source": "RQ2-DUT-single",
+  "generated_by": "run_rq2_dut_validation.py",
+  "tests": [
+    {
+      "test_id": "rq2.dut.single.closest_ks.calibrated",
+      "description": "DUT closest-approach KS: calibrated sim vs real (single)",
+      "family": "rq2_dut_fidelity_ks_single",
+      "auxiliary": true,
+      "p_value": 0.3517071164129987,
+      "statistic": 0.4444444444444444,
+      "sidedness": "two-sided",
+      "n_encounters": 9,
+      "sigma": 1.156,
+      "v0": 1.681,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    },
+    {
+      "test_id": "rq2.dut.single.closest_ks.avec_default",
+      "description": "DUT closest-approach KS: AVEC default sim vs real (single)",
+      "family": "rq2_dut_fidelity_ks_single",
+      "auxiliary": true,
+      "p_value": 0.3517071164129987,
+      "statistic": 0.4444444444444444,
+      "sidedness": "two-sided",
+      "n_encounters": 9,
+      "sigma": 0.7,
+      "v0": 3.5,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    },
+    {
+      "test_id": "rq2.dut.single.closest_ks.no_repulsion",
+      "description": "DUT closest-approach KS: no repulsion sim vs real (single)",
+      "family": "rq2_dut_fidelity_ks_single",
+      "auxiliary": true,
+      "p_value": 0.1258741258741258,
+      "statistic": 0.5555555555555556,
+      "sidedness": "two-sided",
+      "n_encounters": 9,
+      "sigma": 1.0,
+      "v0": 0.0,
+      "headline": false,
+      "caveat": "out-of-domain generalization check, not a headline family; run point (sigma, v0) recorded per row -- committed CSVs used (1.156, 1.681), see the calibration-point note in the module docstring"
+    }
+  ]
+}

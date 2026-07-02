@@ -96,5 +96,38 @@ def test_trajectory_predictor_with_vendor_sgan(monkeypatch):
     assert np.allclose(pred, expected)
 
 
+def test_predict_single_best_returns_the_medoid_not_a_draw(monkeypatch):
+    """predict_single_best with num_samples>1 must return the MEDOID (review F4):
+    the actual sample whose summed distance to the sample mean is smallest --
+    not a random draw, and not the mean itself."""
+    predictor = TrajectoryPredictor(model_path=None, pred_len=3,
+                                    num_samples=5, device='cpu')
+    # Scripted draws: constant trajectories at 0, 10, 10, 10, 8. The sample
+    # mean is 7.6, so the medoid is the 8.0 sample (index 4).
+    draws = [np.full((2, 3, 2), v, dtype=float) for v in (0.0, 10.0, 10.0, 10.0, 8.0)]
+    calls = iter(draws)
+    monkeypatch.setattr(predictor, "predict", lambda *a, **k: next(calls))
+
+    best, dist = predictor.predict_single_best(None, None, None)
+
+    assert np.array_equal(best, draws[4])          # the medoid, an actual sample
+    assert not np.allclose(best, 7.6)              # NOT the sample mean
+    assert dist.shape == (5, 2, 3, 2)              # full distribution returned
+    assert any(np.array_equal(best, d) for d in draws)
+
+
+def test_predict_single_best_single_sample_passthrough(monkeypatch):
+    """num_samples=1 is a true single draw: passthrough, no distribution."""
+    predictor = TrajectoryPredictor(model_path=None, pred_len=3,
+                                    num_samples=1, device='cpu')
+    draw = np.full((1, 3, 2), 2.5)
+    monkeypatch.setattr(predictor, "predict", lambda *a, **k: draw)
+
+    best, dist = predictor.predict_single_best(None, None, None)
+
+    assert np.array_equal(best, draw)
+    assert dist is None
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

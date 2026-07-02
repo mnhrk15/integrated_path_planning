@@ -3,3 +3,5 @@ avec,True,,0,False,True,0.5,True,False,0.0287
 calib,True,,0,False,True,0.5,False,True,0.1822
 calib_lo,True,,0,False,True,0.2458,False,True,0.1186
 calib_hi,True,,0,False,False,1.0,False,True,0.306
+calib_loso_vmax,True,,0,False,False,1.0,False,True,0.5
+calib_loso_smin,True,,0,False,True,0.1186,False,True,0.2458

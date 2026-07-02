@@ -13,6 +13,8 @@
 | calib | 1.156 | 1.681 | LOCO mean (canonical calibration) |
 | calib_lo | 1.04 | 1.542 | -1SD (weakest avoidance) |
 | calib_hi | 1.272 | 1.82 | +1SD (strongest avoidance) |
+| calib_loso_vmax | 1.085 | 2.617 | LOSO fold vci_back (real point; v0 above +1SD box) |
+| calib_loso_smin | 0.743 | 1.849 | LOSO fold vci_lat_bi (real point; sigma below -1SD box) |
 
 （avec の σ/v0 は各シナリオ YAML 値: S1/S3 σ0.7/v0 3.5, S2 σ0.3/v0 2.1。実効値は means.csv の min_dist 等とともに all_runs.csv の ego_repulsion_sigma/v0 列に記録。）
 
@@ -22,14 +24,20 @@
 - cv_danger_holds: CV single の collided-run > SGAN robust **かつ** run-level 片側 Fisher p<0.05（有意な主張②保持）。方向はあるが非有意なら `cv_danger_undetermined`＝判定保留（単桁差はノイズ grade）
 - lstm_danger_holds: LSTM single vs LSTM robust に同じ有意性ゲート
 
+> 注記（F4）: `*_single` 条件の「単一」は予測器の1描画ではなく medoid-of-20（20 サンプル生成→サンプル平均に最も近い1本＝分散抑制済み・モード探索的な代表値。CV は決定論のため縮退）。robust 利得は medoid 相手でも成立している＝主張①には保守的方向。手法間では CV（決定論）と SGAN/LSTM（medoid）で代表値の性質が非対称な点に注意。provenance は all_runs/master_runs の `single_mode` 列（旧キャッシュは空欄）。
+
 | gt_label | robust_gain_holds | dominating_inflations | robust_collisions | cv_danger_holds | cv_danger_undetermined | cv_fisher_p | lstm_danger_holds | lstm_danger_undetermined | lstm_fisher_p |
 |---|---|---|---|---|---|---|---|---|---|
 | avec | True |  | 0 | False | True | 0.5 | True | False | 0.0287 |
 | calib | True |  | 0 | False | True | 0.5 | False | True | 0.1822 |
 | calib_lo | True |  | 0 | False | True | 0.2458 | False | True | 0.1186 |
 | calib_hi | True |  | 0 | False | False | 1.0 | False | True | 0.306 |
+| calib_loso_vmax | True |  | 0 | False | False | 1.0 | False | True | 0.5 |
+| calib_loso_smin | True |  | 0 | False | True | 0.1186 | False | True | 0.2458 |
 
 > 注意: 集計 `cv_danger_holds`/`lstm_danger_holds` は衝突をシナリオ横断で合算し、かつ corner GT は seed 予算が少ない（avec/calib=20・±1SD=10）ため、単桁カウントの flip は Monte-Carlo ノイズと区別できない。有意性ゲート（Fisher p<0.05）を課しても集計はなお GT-artifact シナリオに汚染されるため、**主張②は必ず下記の per-scenario 分類（有意セル `*`）で読むこと**。主張①（`robust_gain_holds`）はシナリオ横断の集計でも頑健。
+
+> **未補正 p の降格（review 1.2-3）**: 上表の `cv_fisher_p`/`lstm_fisher_p` は**未補正の raw p**。この集計 Fisher 12 検定を1 family として BH-FDR(α=0.05) を掛けると生存 0 件（最小 raw p=0.0287）＝表の `*_danger_holds=True` 表示は補正後には有意でない。集計 danger は M8 の宣言どおり noise-grade であり、これらの p は multiplicity ledger にも auxiliary（canonical family 非算入）として全件開示される（headline_tests.json → make_multiplicity_ledger.py）。
 
 ## 感度（GT 間で判定が反転するか）
 
@@ -51,24 +59,32 @@
 | scenario_01 | calib | 1 | 1 | 0 | 0 | 0 | 0.3576 | single-danger |
 | scenario_01 | calib_lo | 0 | 1 | 0 | 0 | 0 | 0.6 | single-danger |
 | scenario_01 | calib_hi | 0 | 1 | 1 | 0 | 0 | 0.3551 | single-danger |
+| scenario_01 | calib_loso_vmax | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
+| scenario_01 | calib_loso_smin | 1 | 0 | 0 | 0 | 0 | 0.6 | single-danger |
 | scenario_02 | avec | 0 | 3 | 6 | 0 | 0 | 0.0078 | single-danger |
 | scenario_02 | calib | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
 | scenario_02 | calib_lo | 0 | 0 | 1 | 0 | 0 | 0.6 | single-danger |
 | scenario_02 | calib_hi | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
+| scenario_02 | calib_loso_vmax | 0 | 0 | 0 | 0 | 0 | 1.0 | no-conflict |
+| scenario_02 | calib_loso_smin | 0 | 0 | 1 | 0 | 0 | 0.6 | single-danger |
 | scenario_03 | avec | 0 | 2 | 1 | 0 | 0 | 0.2116 | single-danger |
 | scenario_03 | calib | 1 | 3 | 3 | 1 | 1 | 0.2199 | mixed |
 | scenario_03 | calib_lo | 2 | 2 | 1 | 0 | 0 | 0.0673 | single-danger |
 | scenario_03 | calib_hi | 0 | 2 | 1 | 1 | 0 | 0.4716 | mixed |
+| scenario_03 | calib_loso_vmax | 0 | 2 | 1 | 1 | 0 | 0.4716 | mixed |
+| scenario_03 | calib_loso_smin | 2 | 2 | 1 | 0 | 0 | 0.0673 | single-danger |
 
 **読み筋（per-scenario・全 GT をデータから自動生成）**:
-- **scenario_01**: avec=single-danger / calib=single-danger / calib_lo=single-danger / calib_hi=single-danger
-- **scenario_02**: avec=single-danger*(p=0.008) / calib=no-conflict / calib_lo=single-danger / calib_hi=no-conflict
-- **scenario_03**: avec=single-danger / calib=mixed / calib_lo=single-danger / calib_hi=mixed
+- **scenario_01**: avec=single-danger / calib=single-danger / calib_lo=single-danger / calib_hi=single-danger / calib_loso_vmax=no-conflict / calib_loso_smin=single-danger
+- **scenario_02**: avec=single-danger*(p=0.008) / calib=no-conflict / calib_lo=single-danger / calib_hi=no-conflict / calib_loso_vmax=no-conflict / calib_loso_smin=single-danger
+- **scenario_03**: avec=single-danger / calib=mixed / calib_lo=single-danger / calib_hi=mixed / calib_loso_vmax=mixed / calib_loso_smin=single-danger
 
 - **avec** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_02', 'scenario_03']。
 - **calib** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_03']。
 - **calib_lo** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_02', 'scenario_03']。
 - **calib_hi** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_03']。
+- **calib_loso_vmax** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_03']。
+- **calib_loso_smin** で主張②（single-danger/mixed）が立つシナリオ: ['scenario_01', 'scenario_02', 'scenario_03']。
 
 **結論（データ駆動）**: 主張②（分布なし計画は危険）の成否は GT 反応モデルに依存する（上表が一次情報・`*` は per-scenario の single-vs-robust run-level Fisher が有意なセル）。集計 `cv_danger_holds` は単桁・不均等シードでノイズgrade なので、主張②の主証拠はこの per-scenario 有意セル。robust 利得（主張①）は別途 `robust_gain_holds` 参照（全 GT で頑健）。
 
@@ -152,6 +168,42 @@
 | calib_lo | scenario_03 | sgan_single_inf1.20 | 10 | 0 | 2.349 | 49.93 | 0.935 | 0.09 |
 | calib_lo | scenario_03 | sgan_single_inf1.35 | 10 | 0 | 2.776 | 37.49 | 0.614 | 0.128 |
 | calib_lo | scenario_03 | sgan_single_inf1.50 | 10 | 0 | 2.953 | 32.04 | 0.575 | 0.145 |
+| calib_loso_smin | scenario_01 | sgan_robust_eps0.0 | 10 | 0 | 2.187 | 16.23 | 0.103 | 0.09 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.00 | 10 | 0 | 1.765 | 15.34 | 0.127 | 0.148 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.10 | 10 | 0 | 1.835 | 15.34 | 0.125 | 0.147 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.20 | 10 | 0 | 1.89 | 15.44 | 0.121 | 0.142 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.35 | 10 | 0 | 2.068 | 16.04 | 0.099 | 0.096 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.50 | 10 | 0 | 2.131 | 15.95 | 0.108 | 0.108 |
+| calib_loso_smin | scenario_02 | sgan_robust_eps0.0 | 10 | 0 | 1.49 | 16.84 | 0.078 | 0.055 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.00 | 10 | 5 | 1.212 | 25.24 | 2.955 | 0.217 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.10 | 10 | 0 | 1.343 | 25.45 | 2.107 | 0.196 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.20 | 10 | 0 | 1.527 | 28.23 | 1.607 | 0.158 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.35 | 10 | 0 | 1.705 | 29.55 | 1.25 | 0.163 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.50 | 10 | 0 | 1.845 | 31.33 | 1.138 | 0.156 |
+| calib_loso_smin | scenario_03 | sgan_robust_eps0.0 | 10 | 0 | 2.495 | 31.91 | 0.256 | 0.138 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.00 | 10 | 3 | 1.41 | 59.9 | 1.243 | 0.102 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.10 | 10 | 0 | 1.799 | 57.19 | 0.829 | 0.064 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.20 | 10 | 0 | 2.291 | 49.99 | 0.931 | 0.089 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.35 | 10 | 0 | 2.736 | 37.53 | 0.612 | 0.126 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.50 | 10 | 0 | 2.937 | 31.85 | 0.571 | 0.143 |
+| calib_loso_vmax | scenario_01 | sgan_robust_eps0.0 | 10 | 0 | 2.309 | 16.21 | 0.104 | 0.089 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.00 | 10 | 0 | 1.897 | 15.26 | 0.124 | 0.143 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.10 | 10 | 0 | 1.968 | 15.28 | 0.123 | 0.144 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.20 | 10 | 0 | 2.02 | 15.37 | 0.119 | 0.14 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.35 | 10 | 0 | 2.19 | 15.96 | 0.102 | 0.101 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.50 | 10 | 0 | 2.245 | 15.75 | 0.113 | 0.12 |
+| calib_loso_vmax | scenario_02 | sgan_robust_eps0.0 | 10 | 0 | 1.61 | 16.99 | 0.076 | 0.056 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.00 | 10 | 0 | 1.302 | 21.84 | 0.475 | 0.072 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.10 | 10 | 0 | 1.413 | 19.62 | 0.781 | 0.113 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.20 | 10 | 0 | 1.586 | 24.64 | 0.911 | 0.138 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.35 | 10 | 0 | 1.772 | 30.71 | 0.818 | 0.138 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.50 | 10 | 1 | 1.861 | 29.71 | 0.957 | 0.161 |
+| calib_loso_vmax | scenario_03 | sgan_robust_eps0.0 | 10 | 0 | 2.571 | 31.74 | 0.14 | 0.135 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.00 | 10 | 1 | 1.674 | 56.9 | 1.034 | 0.083 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.10 | 10 | 0 | 1.962 | 54.48 | 0.871 | 0.075 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.20 | 10 | 0 | 2.485 | 49.84 | 0.936 | 0.09 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.35 | 10 | 0 | 2.864 | 36.8 | 0.513 | 0.131 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.50 | 10 | 0 | 2.942 | 30.89 | 0.501 | 0.155 |
 
 ### rand キャンペーン（衝突数）
 
@@ -217,3 +269,33 @@
 | calib_lo | scenario_03 | lstm_single | 10 | 2 | 1.755 |
 | calib_lo | scenario_03 | sgan_robust_eps0.0 | 10 | 0 | 2.425 |
 | calib_lo | scenario_03 | sgan_single_inf1.00 | 10 | 1 | 1.848 |
+| calib_loso_smin | scenario_01 | cv_single | 10 | 1 | 1.494 |
+| calib_loso_smin | scenario_01 | lstm_robust_eps0.0 | 10 | 0 | 3.121 |
+| calib_loso_smin | scenario_01 | lstm_single | 10 | 0 | 1.716 |
+| calib_loso_smin | scenario_01 | sgan_robust_eps0.0 | 10 | 0 | 2.064 |
+| calib_loso_smin | scenario_01 | sgan_single_inf1.00 | 10 | 0 | 1.747 |
+| calib_loso_smin | scenario_02 | cv_single | 10 | 0 | 1.409 |
+| calib_loso_smin | scenario_02 | lstm_robust_eps0.0 | 10 | 0 | 1.863 |
+| calib_loso_smin | scenario_02 | lstm_single | 10 | 0 | 1.454 |
+| calib_loso_smin | scenario_02 | sgan_robust_eps0.0 | 10 | 0 | 1.683 |
+| calib_loso_smin | scenario_02 | sgan_single_inf1.00 | 10 | 1 | 1.406 |
+| calib_loso_smin | scenario_03 | cv_single | 10 | 2 | 1.523 |
+| calib_loso_smin | scenario_03 | lstm_robust_eps0.0 | 10 | 0 | 2.921 |
+| calib_loso_smin | scenario_03 | lstm_single | 10 | 2 | 1.742 |
+| calib_loso_smin | scenario_03 | sgan_robust_eps0.0 | 10 | 0 | 2.4 |
+| calib_loso_smin | scenario_03 | sgan_single_inf1.00 | 10 | 1 | 1.828 |
+| calib_loso_vmax | scenario_01 | cv_single | 10 | 0 | 1.54 |
+| calib_loso_vmax | scenario_01 | lstm_robust_eps0.0 | 10 | 0 | 3.262 |
+| calib_loso_vmax | scenario_01 | lstm_single | 10 | 0 | 1.833 |
+| calib_loso_vmax | scenario_01 | sgan_robust_eps0.0 | 10 | 0 | 2.26 |
+| calib_loso_vmax | scenario_01 | sgan_single_inf1.00 | 10 | 0 | 1.809 |
+| calib_loso_vmax | scenario_02 | cv_single | 10 | 0 | 1.512 |
+| calib_loso_vmax | scenario_02 | lstm_robust_eps0.0 | 10 | 0 | 2.011 |
+| calib_loso_vmax | scenario_02 | lstm_single | 10 | 0 | 1.552 |
+| calib_loso_vmax | scenario_02 | sgan_robust_eps0.0 | 10 | 0 | 1.79 |
+| calib_loso_vmax | scenario_02 | sgan_single_inf1.00 | 10 | 0 | 1.511 |
+| calib_loso_vmax | scenario_03 | cv_single | 10 | 0 | 1.692 |
+| calib_loso_vmax | scenario_03 | lstm_robust_eps0.0 | 10 | 1 | 2.872 |
+| calib_loso_vmax | scenario_03 | lstm_single | 10 | 2 | 1.776 |
+| calib_loso_vmax | scenario_03 | sgan_robust_eps0.0 | 10 | 0 | 2.565 |
+| calib_loso_vmax | scenario_03 | sgan_single_inf1.00 | 10 | 1 | 1.937 |

@@ -319,7 +319,21 @@ class TrajectoryPredictor:
         seq_start_end: torch.Tensor,
         staleness: float = 0.0
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
-        """Predict trajectories, returning best sample and full distribution.
+        """Predict trajectories, returning a representative sample and the
+        full distribution.
+
+        NOTE (review F4): with num_samples > 1 the "best" trajectory is NOT a
+        single random draw -- it is the scene-level MEDOID of num_samples
+        draws: num_samples full predictions are generated and the one whose
+        summed distance to the sample mean is smallest is returned. Scenario
+        YAMLs set num_samples: 20, so every "single"-planning condition in the
+        DA-PoC / RQ1b campaigns actually plans on a medoid-of-20
+        representative (variance-suppressed, mode-seeking), not on one SGAN
+        draw. For the deterministic CV predictor all draws coincide, so the
+        medoid degenerates to the single forecast -- the selection is only
+        material for stochastic predictors (SGAN/LSTM). Downstream provenance
+        records this as ``single_mode=medoid_of_{num_samples}``
+        (examples/run_da_poc.py).
 
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2]
@@ -330,7 +344,8 @@ class TrajectoryPredictor:
 
         Returns:
             Tuple of:
-            - Best predicted trajectory [n_peds, n_dense_steps, 2]
+            - Representative predicted trajectory [n_peds, n_dense_steps, 2]
+              (medoid of the samples when num_samples > 1)
             - Full distribution [num_samples, n_peds, n_dense_steps, 2] or None
         """
         if self.num_samples == 1:

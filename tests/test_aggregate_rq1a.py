@@ -4,6 +4,8 @@ Pins the aggregation arithmetic on a tiny hand-computable synthetic table so the
 RQ1a headline is reproducible and the documented aggregation-sensitivity (eth
 unit confound, ordering flip) cannot silently change.
 """
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,6 +15,7 @@ from examples.aggregate_rq1a import (
     per_scene_means,
     cross_scene,
     aggregate_all,
+    build_markdown,
 )
 from src.datasets.eth_ucy_loader import SCENE_DT, SGAN_PROTOCOL_DT
 
@@ -92,6 +95,26 @@ def test_missing_column_raises_actionable_error():
     df = _df().drop(columns=["ade_per_agent"])
     with pytest.raises(ValueError, match="ade_per_agent"):
         aggregate_all(df, metrics=("ade", "ade_per_agent"))
+
+
+def test_build_markdown_primary_framing_is_canonical_per_agent():
+    """Review 1.2-4: the Adopted-framing PRIMARY claim must be the sim->real
+    non-transfer on the CANONICAL per-agent minADE (with values pulled from the
+    tidy table, not hand-written), and the scene-ordering flip must be demoted
+    to SECONDARY (it only holds under the non-canonical scene-level metric)."""
+    df = _df()
+    tidy = aggregate_all(df)
+    md = build_markdown(df, tidy, Path("dummy.csv"))
+
+    assert "PRIMARY claim (H1, metric-robust)" in md
+    # Dynamic values from the synthetic table: per-agent unweighted 5-scene
+    # cv = mean(1.0, 0.2) = 0.600, lstm = mean(0.6, 0.3) = 0.450, sgan absent.
+    assert "cv 0.600 / lstm 0.450 / sgan n/a" in md
+    assert "does not\ntransfer to real data" in md
+    # The flip survives only as SECONDARY sensitivity, never as the primary.
+    assert "SECONDARY (sensitivity, non-canonical metric)" in md
+    assert "NOT as the primary H1 claim" in md
+    assert "PRIMARY evidence for H1 is the PER-SCENE table" not in md
 
 
 def test_n_scenes_reflects_dropped_nan_scene():

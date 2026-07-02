@@ -7,14 +7,23 @@ cross-scene headline must be reported as a sensitivity over aggregation
 choices, not a single equal-weighted mean. Per-scene orderings (the H1
 evidence) are invariant to these choices.
 
-## Adopted framing (thesis decision, 2026-06-23)
-PRIMARY evidence for H1 is the PER-SCENE table below: the method ordering
-flips across scenes (cv is best on hotel/univ but worst on eth/zara1),
-so the displacement-error ordering is a simulator/setup artifact rather
-than a stable property. The cross-scene means are reported ONLY as a
-SENSITIVITY analysis (all four variants), never as a single headline,
-with eth flagged as a cadence confound. If one representative number is
-unavoidable, use per-agent minADE (canonical ADE_N) with eth excluded.
+## Adopted framing (thesis decision 2026-06-23; reframed 2026-07-02, review 1.2-4)
+PRIMARY claim (H1, metric-robust): the closed-loop sim benchmark ranked CV
+as the best predictor on ADE, but on real data the CANONICAL metric --
+per-agent minADE (ADE_N) -- puts the learned predictors clearly ahead of
+CV in EVERY cross-scene aggregation variant (unweighted 5-scene:
+cv 0.534 / lstm 0.333 / sgan 0.363; see the
+per-agent tables below). The sim-derived method ordering does not
+transfer to real data -- that non-transfer is the H1 evidence.
+
+SECONDARY (sensitivity, non-canonical metric): under the scene-level
+joint best-of-N `ade` (flagged non-canonical by review M1), the ordering
+flips across scenes (cv best on hotel/univ, worst on eth/zara1). This is
+kept as supporting evidence that scene composition drives that metric --
+NOT as the primary H1 claim -- with eth flagged as a cadence confound.
+The cross-scene means remain a SENSITIVITY analysis (all four variants),
+never a single headline. If one representative number is unavoidable,
+use per-agent minADE (canonical ADE_N) with eth excluded.
 
 ## Scene-level ADE (`ade`, joint best-of-N) -- cross-scene
 | method | unwtd 5-scene | traj-wtd 5-scene | unwtd no-eth | traj-wtd no-eth |

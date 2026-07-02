@@ -181,6 +181,15 @@ def build_markdown(df: pd.DataFrame, tidy: pd.DataFrame, csv_path: Path) -> str:
             lines.append(f"| {m} | " + " | ".join(cells) + " |")
         return "\n".join(lines)
 
+    # Canonical per-agent minADE values for the framing paragraph, pulled from
+    # the SAME tidy table the report renders (never hand-written numbers).
+    pa = _wide(tidy, "ade_per_agent", ["unweighted_5scene"])
+
+    def _pa(m: str) -> str:
+        v = (pa.loc[m, "unweighted_5scene"]
+             if (m in pa.index and "unweighted_5scene" in pa.columns) else np.nan)
+        return "n/a" if pd.isna(v) else f"{v:.3f}"
+
     out = [
         "# RQ1a cross-scene ADE aggregation (reproducible)",
         "",
@@ -191,14 +200,23 @@ def build_markdown(df: pd.DataFrame, tidy: pd.DataFrame, csv_path: Path) -> str:
         "choices, not a single equal-weighted mean. Per-scene orderings (the H1",
         "evidence) are invariant to these choices.",
         "",
-        "## Adopted framing (thesis decision, 2026-06-23)",
-        "PRIMARY evidence for H1 is the PER-SCENE table below: the method ordering",
-        "flips across scenes (cv is best on hotel/univ but worst on eth/zara1),",
-        "so the displacement-error ordering is a simulator/setup artifact rather",
-        "than a stable property. The cross-scene means are reported ONLY as a",
-        "SENSITIVITY analysis (all four variants), never as a single headline,",
-        "with eth flagged as a cadence confound. If one representative number is",
-        "unavoidable, use per-agent minADE (canonical ADE_N) with eth excluded.",
+        "## Adopted framing (thesis decision 2026-06-23; reframed 2026-07-02, review 1.2-4)",
+        "PRIMARY claim (H1, metric-robust): the closed-loop sim benchmark ranked CV",
+        "as the best predictor on ADE, but on real data the CANONICAL metric --",
+        "per-agent minADE (ADE_N) -- puts the learned predictors clearly ahead of",
+        "CV in EVERY cross-scene aggregation variant (unweighted 5-scene:",
+        f"cv {_pa('cv')} / lstm {_pa('lstm')} / sgan {_pa('sgan')}; see the",
+        "per-agent tables below). The sim-derived method ordering does not",
+        "transfer to real data -- that non-transfer is the H1 evidence.",
+        "",
+        "SECONDARY (sensitivity, non-canonical metric): under the scene-level",
+        "joint best-of-N `ade` (flagged non-canonical by review M1), the ordering",
+        "flips across scenes (cv best on hotel/univ, worst on eth/zara1). This is",
+        "kept as supporting evidence that scene composition drives that metric --",
+        "NOT as the primary H1 claim -- with eth flagged as a cadence confound.",
+        "The cross-scene means remain a SENSITIVITY analysis (all four variants),",
+        "never a single headline. If one representative number is unavoidable,",
+        "use per-agent minADE (canonical ADE_N) with eth excluded.",
         "",
         "## Scene-level ADE (`ade`, joint best-of-N) -- cross-scene",
         table("ade", cross, ["unwtd 5-scene", "traj-wtd 5-scene", "unwtd no-eth", "traj-wtd no-eth"]),

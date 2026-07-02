@@ -101,6 +101,9 @@ def test_run_campaign_caches_and_records_provenance(tmp_path, monkeypatch):
     assert row["ego_repulsion_v0"] == pytest.approx(1.681)
     assert row["ego_target_speed"] == pytest.approx(3.0)
     assert "rms_jerk" in df.columns and "mean_accel" in df.columns
+    # F4: the representative-selection mode is recorded -- scenario_01 sets
+    # num_samples: 20, so "single" planning actually uses a medoid-of-20.
+    assert row["single_mode"] == "medoid_of_20"
     cache = run_da_poc.cache_path(tmp_path, "scenarios/scenario_01.yaml",
                                   "cv_single", 0)
     assert cache.exists()
@@ -438,3 +441,114 @@ def test_default_scenarios_point_at_rq1b_variants():
         assert isinstance(yaml.safe_load(p.read_text()), dict)
     # Must NOT silently fall back to the base AVEC scenarios.
     assert not any(s.startswith("scenarios/scenario_") for s in rq1b.DEFAULT_SCENARIOS)
+
+
+# --------------------------------------------------------------------------- #
+# (e) 1.2-3: aggregate Fisher p-values must not bypass the ledger
+# --------------------------------------------------------------------------- #
+def test_rq1b_aggregate_tests_are_auxiliary_and_skip_unevaluable():
+    """The aggregate cv/lstm Fisher cells become AUXILIARY sidecar entries:
+    never canonical (auxiliary=True, headline=False), and unevaluable p
+    (None/NaN from an empty arm) must not fabricate a hypothesis."""
+    verdicts = pd.DataFrame([
+        {"gt_label": "avec", "cv_fisher_p": 0.5, "lstm_fisher_p": 0.0287},
+        {"gt_label": "calib", "cv_fisher_p": None, "lstm_fisher_p": float("nan")},
+    ])
+    tests = rq1b.rq1b_aggregate_tests(verdicts)
+
+    assert [t["test_id"] for t in tests] == [
+        "rq1b.rand.fisher_aggregate.avec.cv",
+        "rq1b.rand.fisher_aggregate.avec.lstm",
+    ]
+    assert all(t["auxiliary"] is True and t["headline"] is False for t in tests)
+    assert all(t["family"] == "rq1b_claim2_fisher_aggregate" for t in tests)
+    assert all("noise-grade" in t["caveat"] for t in tests)
+    assert tests[1]["p_value"] == pytest.approx(0.0287)
+
+    assert rq1b.rq1b_aggregate_tests(pd.DataFrame()) == []
+    assert rq1b.rq1b_aggregate_tests(None) == []
+
+
+# --------------------------------------------------------------------------- #
+# (f) F3: LOSO real-fold envelope arms
+# --------------------------------------------------------------------------- #
+def test_gt_loso_matches_real_loso_fold_points():
+    """GT_LOSO must be the REAL folds_loso.csv points, not synthetic corners.
+
+    F3 (novelty-reinforcement review): the LOSO folds land outside the +/-1SD
+    box the campaign sweeps, so the envelope arms must anchor to the actual
+    fitted fold points -- a drifting constant here would silently sweep a point
+    no calibration ever reached.
+    """
+    folds = pd.read_csv("outputs/rq2_evaluation/folds_loso.csv").set_index("fold")
+    by_label = {g["label"]: g for g in rq1b.GT_LOSO}
+    assert set(by_label) == {"calib_loso_vmax", "calib_loso_smin"}
+
+    vmax = by_label["calib_loso_vmax"]
+    assert vmax["sigma"] == pytest.approx(folds.loc["vci_back", "sigma"], abs=5e-4)
+    assert vmax["v0"] == pytest.approx(folds.loc["vci_back", "v0"], abs=5e-4)
+
+    smin = by_label["calib_loso_smin"]
+    assert smin["sigma"] == pytest.approx(folds.loc["vci_lat_bi", "sigma"], abs=5e-4)
+    assert smin["v0"] == pytest.approx(folds.loc["vci_lat_bi", "v0"], abs=5e-4)
+
+    # The whole point of F3: both arms lie OUTSIDE the +/-1SD box.
+    box_sigma, box_v0 = (1.040, 1.272), (1.542, 1.820)
+    assert vmax["v0"] > box_v0[1]
+    assert smin["sigma"] < box_sigma[0]
+
+
+def test_gt_loso_labels_seeds_and_display_order():
+    """LOSO arm labels must be distinct cache subdirectories, listed in the
+    canonical display order, and budgeted as corner (robustness) arms."""
+    core_labels = [g["label"] for g in rq1b.GT_CORE + rq1b.GT_OFFDIAG]
+    loso_labels = [g["label"] for g in rq1b.GT_LOSO]
+    assert not set(core_labels) & set(loso_labels)
+    # New labels = new cache subdirectories; they must also be in the canonical
+    # display order so tables/narrative stay deterministic.
+    for lbl in loso_labels:
+        assert lbl in rq1b._GT_ORDER
+    # Envelope arms are robustness checks: corner seed budget, corner tier.
+    for lbl in loso_labels:
+        assert list(rq1b._seeds_for(lbl, 20, 10)) == list(range(10))
+
+
+def test_include_loso_defaults_on_and_opt_out_parses(tmp_path, monkeypatch):
+    """The committed outputs/rq1b artifacts include the LOSO arms, so the
+    DEFAULT invocation must include them (reproducibility contract, same class
+    as the DEFAULT_SCENARIOS guard above): a plain --report-only that silently
+    dropped LOSO would regress the committed verdicts/REPORT/sidecar. The
+    opt-out spelling --no-include-loso must also parse (pre-F3 comparisons).
+    """
+    import sys as _sys
+
+    captured = {}
+    real_build = rq1b.build_verdicts
+
+    def _spy(master, gt_labels):
+        captured["gt_labels"] = list(gt_labels)
+        return real_build(master, gt_labels)
+
+    monkeypatch.setattr(rq1b, "build_verdicts", _spy)
+    # A minimal one-cell cache so main() reaches the verdict stage.
+    seed = dict(scenario="scenario_01", condition="sgan_single_inf1.00",
+                method="sgan", distribution_aware=False, epsilon=0.0,
+                inflation=1.0, seed=0, time_s=10.0, speed_ms=1.0,
+                min_dist_m=2.0, min_ttc_s=1.0, collision_count=0,
+                ade=0.5, fde=1.0, rms_jerk=0.1, mean_accel=0.5)
+    cpath = tmp_path / "margin" / "avec" / "runs" / "scenario_01" / \
+        "sgan_single_inf1.00" / "seed_00.json"
+    cpath.parent.mkdir(parents=True)
+    cpath.write_text(pd.Series(seed).to_json())
+
+    monkeypatch.setattr(_sys, "argv",
+                        ["rq1b", "--report-only", "--root", str(tmp_path)])
+    rq1b.main()
+    loso_labels = {g["label"] for g in rq1b.GT_LOSO}
+    assert loso_labels <= set(captured["gt_labels"])  # default INCLUDES loso
+
+    monkeypatch.setattr(_sys, "argv",
+                        ["rq1b", "--report-only", "--no-include-loso",
+                         "--root", str(tmp_path)])
+    rq1b.main()
+    assert not loso_labels & set(captured["gt_labels"])  # opt-out works

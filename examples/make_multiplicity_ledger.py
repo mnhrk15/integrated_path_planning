@@ -2,13 +2,14 @@
 """Aggregate every RQ's headline-test sidecar into one multiplicity-corrected ledger.
 
 The axis-A review (``docs/CODE_REVIEW_axisA_20260619.md`` point 8) flagged that the
-RQ suite reports many significance tests -- RQ2 pooled closest-approach KS, RQ1b
-claim-(2) per-scenario single-vs-robust Fisher -- without any family-wise / FDR
-management, while calling non-significant results "indistinguishable". This tool
-removes that asymmetry. Each RQ script emits a ``headline_tests*.json`` sidecar
-listing its hypotheses; this collects them, applies Benjamini-Hochberg FDR
-(primary) and Holm-Bonferroni (conservative FWER) via ``src.core.multiplicity``,
-and writes:
+RQ suite reports many significance tests -- RQ2 paired closest-approach fidelity
+tests (per-encounter sign/Wilcoxon, review F5; formerly the misspecified pooled
+KS, kept as an auxiliary diagnostic), RQ1b claim-(2) per-scenario single-vs-robust
+Fisher -- without any family-wise / FDR management, while calling non-significant
+results "indistinguishable". This tool removes that asymmetry. Each RQ script
+emits a ``headline_tests*.json`` sidecar listing its hypotheses; this collects
+them, applies Benjamini-Hochberg FDR (primary) and Holm-Bonferroni (conservative
+FWER) via ``src.core.multiplicity``, and writes:
 
   * ``outputs/multiplicity_ledger.csv`` -- every test with within-family and
     study-wide adjusted p / survival flags.
@@ -19,9 +20,12 @@ RQ1a contributes NO tests: its open-loop ADE/FDE/NLL are point estimates with no
 significance test (intentional -- review M1/M10). That is itself good multiplicity
 hygiene -- you cannot p-hack tests you never ran -- and is stated explicitly.
 
-LOSO RQ2 sidecars (``*_loso``) are a re-split of the SAME fidelity question as the
-canonical LOCO; including both would double-count it. LOSO families are reported
-on their own but EXCLUDED from the study-wide "overall" correction.
+AUXILIARY tests are excluded from the study-wide "overall" correction but still
+reported with their own within-family correction: LOSO RQ2 sidecars (``*_loso``,
+a re-split of the SAME fidelity question as the canonical LOCO -- counting both
+would double-count it) and any test carrying an explicit ``auxiliary: true`` flag
+(diagnostic pooled KS, RQ1b aggregate Fisher, DUT generalization KS -- entries
+whose p-values are disclosed for completeness, not canonical hypotheses).
 
 Usage:
     .venv/bin/python examples/make_multiplicity_ledger.py
@@ -214,17 +218,22 @@ def render_markdown(canonical_rows: List[Dict], loso_rows: List[Dict],
     L.append("> **overall の読み方**: overall は RQ2 忠実度と RQ1b 計画安全という"
              "*異なる問い*を1 family に束ねた最保守の境界（cross-suite 過剰補正）。"
              "適切な評価単位は各 family 内補正（上表 `family_bh_q`）と下の RQ1b "
-             "family 定義感度。overall は『最悪でもこの程度』の sanity 上限として読む"
-             "（実際 RQ2 忠実度は family 内 q=0.007 で明確に有意・overall でのみ境界化）。")
+             "family 定義感度。overall は『最悪でもこの程度』の sanity 上限として読む。")
     L.append("")
 
     if loso_rows:
-        L.append("## 付録: LOSO（補助・overall から除外）")
+        L.append("## 付録: auxiliary（補助・overall から除外）")
         L.append("")
-        L.append("LOSO は LOCO と同じ忠実度の問いの再分割。二重計上を避けるため overall "
-                 "には含めず、family 内補正のみ示す。")
+        L.append("LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、診断専用 pooled KS"
+                 "（対標本に独立2標本検定＝p は読まない、review F5）、RQ1b 集計 Fisher"
+                 "（M8 noise-grade）、DUT 汎化 KS（pseudo-replication caveat）。canonical "
+                 "仮説ではないため研究横断 overall には含めず、開示と family 内補正のみ示す"
+                 "（誤読防止のため overall_* 列は本表から省く＝auxiliary プール内の "
+                 "overall 補正値は研究横断値ではない）。")
         L.append("")
-        L.append(_md_table(_flat_df(loso_rows), disp))
+        aux_disp = ["test_id", "family", "p_value", "family_size",
+                    "family_bh_q", "family_holm_p"]
+        L.append(_md_table(_flat_df(loso_rows), aux_disp))
         L.append("")
 
     # RQ1b family-definition sensitivity.
@@ -237,9 +246,9 @@ def render_markdown(canonical_rows: List[Dict], loso_rows: List[Dict],
         L.append("")
         L.append("| view | m | min test | raw p | BH q | Holm p | BH 生存 | Holm 生存 |")
         L.append("|---|---|---|---|---|---|---|---|")
-        labels = {"avec_only": "avec 条件付き（3）",
-                  "headline_gts": "headline GT（avec+calib, 6）",
-                  "full_scan": "全 GT×scenario 走査（12, 弱パワー corner 含む）"}
+        labels = {"avec_only": "avec 条件付き",
+                  "headline_gts": "headline GT（avec+calib）",
+                  "full_scan": "全 GT×scenario 走査（弱パワー corner 含む）"}
         for key in ["avec_only", "headline_gts", "full_scan"]:
             if key not in sens:
                 continue
@@ -261,18 +270,25 @@ def render_markdown(canonical_rows: List[Dict], loso_rows: List[Dict],
 def _thesis_paragraph(rows: List[Dict], sens: Dict, alpha: float) -> List[str]:
     """Generate the honest survival narrative FROM the corrected rows."""
     P: List[str] = []
-    # RQ2 fidelity KS.
-    rq2 = [r for r in rows if str(r.get("family", "")).startswith("rq2_fidelity_ks")]
-    rq2_cal = next((r for r in rq2 if r.get("test_id", "").endswith("calibrated")), None)
+    # RQ2 fidelity: the paired per-encounter sign test is the headline (F5).
+    rq2 = [r for r in rows
+           if str(r.get("family", "")).startswith("rq2_fidelity_paired")]
+    rq2_cal = next((r for r in rq2
+                    if r.get("test_id", "").endswith("closest_sign.calibrated")),
+                   None)
     if rq2_cal is not None:
+        n_gt = rq2_cal.get("n_real_gt_sim", "?")
+        n_pairs = rq2_cal.get("n_pairs", "?")
         P.append(
-            f"- **RQ2 忠実度（closest-approach KS）**: 較正 sim vs 実の pooled KS は "
-            f"raw p={rq2_cal['p_value']:.3f}。**忠実度 family 内（m={rq2_cal['family_size']}）"
-            f"では BH q={rq2_cal['family_bh_q']:.3f}＝明確に有意**＝sim が実 standoff を"
+            f"- **RQ2 忠実度（per-encounter 対応検定, review F5）**: 較正 sim vs 実の"
+            f"最接近距離は同一遭遇の対標本＝符号検定が正当な見出し。real>sim が "
+            f"{n_gt}/{n_pairs} 遭遇・raw p={rq2_cal['p_value']:.2e}。**忠実度 family 内"
+            f"（m={rq2_cal['family_size']}, Wilcoxon 併記）で BH "
+            f"q={rq2_cal['family_bh_q']:.2e}＝明確に有意**＝sim が実 standoff を"
             "再現しきれない＝~0.68m の忠実度ギャップは統計的に実在（限界を補強する向きの"
-            f"所見）。RQ1b の無関係な計画検定まで一括する最保守の研究横断プール"
-            f"（m={rq2_cal['overall_size']}）でのみ q={rq2_cal['overall_bh_q']:.3f}＝境界化"
-            "（異質な問いを跨ぐ過剰補正のため参考値）。")
+            f"所見）。研究横断プール（m={rq2_cal['overall_size']}）でも "
+            f"q={rq2_cal['overall_bh_q']:.2e}。旧見出しの pooled KS（p=0.007）は対標本に"
+            "独立2標本検定を当てた仕様ミスで、診断（auxiliary）に降格。")
     # RQ1b claim-2.
     if sens:
         fs = sens.get("full_scan")
@@ -283,7 +299,7 @@ def _thesis_paragraph(rows: List[Dict], sens: Dict, alpha: float) -> List[str]:
                 f"p={fs['min_p']:.4f}（pseudo-replication で反保守的＝真の p の下界）。"
                 f"avec 条件付き family（m={av['m']}）では BH q={av['min_bh_q']:.4f}＝"
                 f"{'生存' if av['survives_bh'] else '不成立'}だが、"
-                f"弱パワー corner を含む全 12 セル走査（m={fs['m']}）では "
+                f"弱パワー corner を含む全 GT×scenario 走査（m={fs['m']}）では "
                 f"BH q={fs['min_bh_q']:.4f}＝{'生存' if fs['survives_bh'] else '不成立'}。"
                 "**＝claim-(2) の per-scenario 信号は family 定義に敏感な境界事例で、"
                 "確定的ではなく示唆に留まる**（既存 REPORT の『示唆・反応モデル依存・"

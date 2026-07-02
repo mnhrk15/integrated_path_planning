@@ -16,8 +16,19 @@ Estimators (all swapped in via the harness ``cruise_fn`` hook):
   {6,8,10} m from the ego (not yet reacting).
 * upper_q85         -- 85th-percentile speed over all frames (cheap dip-robust).
 
+CALIBRATION-POINT NOTE (review 1.2-5, the M6-style cross-reference): the
+``baseline_median`` row of cruise_sensitivity.csv, (1.2005, 1.6219), is the
+WHOLE-POOL single fit under the default cruise estimator -- it is NOT the
+canonical calibration. Three (sigma, v0) points coexist in this repo:
+(1.2005, 1.6219) = pooled single fit (this CSV; rounded to the DUT CLI default
+1.20/1.62); (1.156, 1.681) = radius-0.35 LOCO fold mean (RQ1b GT ``calib`` arm
+and the committed DUT CSVs); (1.168, 1.712) = radius-0.30 LOCO fold mean = the
+CURRENT CANONICAL point (outputs/rq2_evaluation/summary_loco.txt). Use
+``--note-only`` to (re)write this note next to the CSV without re-calibrating.
+
 Usage:
     .venv/bin/python examples/run_rq2_cruise_sensitivity.py --scenario all
+    .venv/bin/python examples/run_rq2_cruise_sensitivity.py --note-only
 """
 import argparse
 import functools
@@ -72,9 +83,40 @@ def mean_cruise(encs: List[Encounter], fn: CruiseEstimator) -> float:
     return float(np.mean(vals)) if vals.size else float("nan")
 
 
+POINTS_NOTE = """\
+# 較正点3種の正準化注記（review 1.2-5）
+
+このディレクトリの `cruise_sensitivity.csv` の `baseline_median` 行
+(sigma, v0) = (1.2005, 1.6219) は、既定 cruise 推定器下の**全プール単一フィット**であり、
+正準較正値ではない。リポジトリ内に併存する3点を混同しないこと:
+
+| 点 (sigma, v0) | 実体 | 使用箇所 |
+|---|---|---|
+| (1.2005, 1.6219) | 全プール単一フィット（cruise 診断の baseline） | この CSV／DUT CLI 既定 1.20/1.62 の丸め元 |
+| (1.156, 1.681) | radius=0.35 の LOCO fold 平均 | RQ1b GT `calib` アーム／committed DUT fidelity CSV の実行点 |
+| (1.168, 1.712) | radius=0.30 の LOCO fold 平均＝**現行正準** | outputs/rq2_evaluation/summary_loco.txt |
+
+3点の差は σ で最大 ~4%・v0 で最大 ~5.6% で、いずれも RQ1b の ±1SD 感度箱の内側
+（M6 注記参照）＝committed な結論は選択に依存しないが、修論本文では正準点
+(1.168, 1.712) を引用し、他2点は由来を明示して言及すること。
+
+（examples/run_rq2_cruise_sensitivity.py --note-only で再生成）
+"""
+
+
+def _write_points_note(out_dir: Path) -> Path:
+    """Write the calibration-point canonicalization note next to the CSV."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / "calibration_points_note.md"
+    path.write_text(POINTS_NOTE, encoding="utf-8")
+    return path
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--note-only", action="store_true",
+                   help="only (re)write calibration_points_note.md, no re-calibration")
     p.add_argument("--scenario", default="all", choices=VEHICLE_SCENARIOS + ["all"])
     p.add_argument("--root", default="datasets/vci_citr/data")
     p.add_argument("--fps", type=float, default=29.97)
@@ -92,6 +134,10 @@ def parse_args():
 
 def main():
     args = parse_args()
+    if args.note_only:
+        path = _write_points_note(Path(args.out))
+        print(f"wrote {path}")
+        return
     if args.quiet:
         logger.remove()
         logger.add(sys.stderr, level="WARNING")
@@ -136,6 +182,10 @@ def main():
     csv_path = out_dir / "cruise_sensitivity.csv"
     pd.DataFrame(rows).to_csv(csv_path, index=False)
     print(f"\nsaved cruise sensitivity to {csv_path}")
+    note_path = _write_points_note(out_dir)
+    print(f"saved calibration-point note to {note_path}")
+    print("NOTE: baseline_median here is the pooled single fit, NOT the canonical "
+          "LOCO mean (1.168, 1.712) -- see the note file / module docstring.")
 
 
 if __name__ == "__main__":
