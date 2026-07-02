@@ -105,12 +105,19 @@ POOLED_COLUMNS = [
     "wilcoxon_p_calibrated",
     "gap_avec", "n_real_gt_sim_avec", "sign_p_avec",
     "gap_norep", "n_real_gt_sim_norep", "sign_p_norep",
+    "obj_interaction_distance", "scenario",
 ]
 M_PROFILE_COLUMNS = [
     "m", "sigma", "v0", "fit_loss", "refined",
     "ade", "gap", "n_pairs", "n_real_gt_sim", "sign_p",
+    "obj_interaction_distance", "scenario",
 ]
-LOCO_COLUMNS = COLUMNS + ["cap_policy", "cap_multiplier"]
+# Fit-affecting run parameters (--interaction-distance, --scenario) are
+# recorded IN the rows/sidecars: without them a non-default run would be
+# indistinguishable from the canonical one and could silently be picked up as
+# the w0 reference by make_rq2_instrument_report (review finding).
+LOCO_COLUMNS = COLUMNS + ["cap_policy", "cap_multiplier",
+                          "obj_interaction_distance", "scenario"]
 
 
 def effective_headroom(policy: str, cap_multiplier: float) -> float:
@@ -182,6 +189,8 @@ def pooled_row(args, encs: List[Encounter], policy: str,
         row[f"sign_p_{tag}"] = p["sign_p"] if p else float("nan")
     row["n_pairs"] = p_cal["n_pairs"] if p_cal else float("nan")
     row["wilcoxon_p_calibrated"] = p_cal["wilcoxon_p"] if p_cal else float("nan")
+    row["obj_interaction_distance"] = args.interaction_distance
+    row["scenario"] = args.scenario
     return row
 
 
@@ -210,15 +219,25 @@ def sweep_capfit_m(args, encs: List[Encounter]) -> pd.DataFrame:
             "n_pairs": p["n_pairs"] if p else float("nan"),
             "n_real_gt_sim": p["n_real_gt_sim"] if p else float("nan"),
             "sign_p": p["sign_p"] if p else float("nan"),
+            "obj_interaction_distance": args.interaction_distance,
+            "scenario": args.scenario,
         })
         print(f"  capfit m={m:<5} sigma={result.sigma:.3f} v0={result.v0:.3f} "
               f"fit_loss={result.loss:.4f} gap={rows[-1]['gap']:+.3f} m")
     return pd.DataFrame(rows, columns=M_PROFILE_COLUMNS)
 
 
+def _json_float(x) -> Optional[float]:
+    """None for non-finite floats: json.dumps would emit a non-standard NaN
+    token that strict parsers reject; null round-trips everywhere."""
+    x = float(x)
+    return x if np.isfinite(x) else None
+
+
 def aux_paired_sidecar_tests(pools: Dict[str, list], protocol: str, *,
                              family: str, prefix: str, extra: Dict,
-                             note: str) -> List[Dict]:
+                             note: str,
+                             control_note: Optional[str] = None) -> List[Dict]:
     """Auxiliary-only ledger records for one arm-triple of paired held-out tests.
 
     Deliberately NOT run_rq2_evaluation.headline_tests: reusing it would emit
@@ -229,7 +248,10 @@ def aux_paired_sidecar_tests(pools: Dict[str, list], protocol: str, *,
     confirmatory research claims, so they never join the canonical study-wide
     correction (ledger policy: no p-value bypasses the ledger; auxiliary is the
     honest tier for diagnostics). ``extra`` fields (e.g. cap_policy, weights)
-    are copied into every record for provenance.
+    are copied into every record for provenance. ``control_note`` (optional) is
+    appended to the CONTROL arms only -- e.g. the distmatch sidecars' controls
+    are bitwise identical across configs (cap_policy fixed), so their family
+    row count overstates the distinct hypotheses and must say so.
     """
     tests: List[Dict] = []
     for arm, key in (("calibrated", "calibrated_closest"),
@@ -238,6 +260,9 @@ def aux_paired_sidecar_tests(pools: Dict[str, list], protocol: str, *,
         s = _paired_stats(pools, key, "real_closest")
         if s is None:
             continue
+        arm_note = note
+        if control_note and arm != "calibrated":
+            arm_note = f"{note}; {control_note}"
         tests.append({
             "test_id": f"{prefix}.closest_sign.{arm}",
             "description": (f"(diagnostic) paired per-encounter sign test: real "
@@ -245,32 +270,41 @@ def aux_paired_sidecar_tests(pools: Dict[str, list], protocol: str, *,
             "family": family,
             "protocol": protocol,
             "auxiliary": True,
-            "p_value": s["sign_p"],
+            "p_value": _json_float(s["sign_p"]),
             "statistic": float(s["n_real_gt_sim"]),
             "sidedness": "two-sided",
             "n_pairs": s["n_pairs"],
             "n_real_gt_sim": s["n_real_gt_sim"],
-            "mean_gap_m": s["mean_gap"],
-            "wilcoxon_p": s["wilcoxon_p"],
+            "mean_gap_m": _json_float(s["mean_gap"]),
+            "wilcoxon_p": _json_float(s["wilcoxon_p"]),
             "headline": False,
-            "note": note,
+            "note": arm_note,
             **extra,
         })
     return tests
 
 
 def cap_sidecar_tests(pools: Dict[str, list], protocol: str, policy: str,
-                      cap_multiplier: float) -> List[Dict]:
+                      cap_multiplier: float,
+                      interaction_distance: Optional[float] = None,
+                      scenario: str = "all") -> List[Dict]:
     """Auxiliary sidecar records for one cap policy (rq2cap.* namespace)."""
-    return aux_paired_sidecar_tests(
+    tests = aux_paired_sidecar_tests(
         pools, protocol,
         family=f"rq2_cap_sensitivity_{protocol}",
         prefix=f"rq2cap.{protocol}.{policy}",
-        extra={"cap_policy": policy, "cap_multiplier": float(cap_multiplier)},
+        extra={"cap_policy": policy, "cap_multiplier": float(cap_multiplier),
+               "obj_interaction_distance": interaction_distance,
+               "scenario": scenario},
         note=("instrument diagnosis (review F2 speed-cap regime), not a "
               "confirmatory claim; auxiliary => excluded from the canonical "
               "study-wide correction"),
+        control_note=("the median policy's arms reproduce the canonical "
+                      "rq2.loco values by design (full-scale preservation "
+                      "proof), so they duplicate, not add, hypotheses"
+                      if policy == "median" else None),
     )
+    return tests
 
 
 def write_loco_summary(path: Path, df: pd.DataFrame, pools: Dict[str, list],
@@ -337,6 +371,8 @@ def run_loco(args, clips, policy: str, cap_multiplier: float, out_dir: Path):
                                  fidelity_kwargs=fidelity_kwargs)
         row["cap_policy"] = policy
         row["cap_multiplier"] = float(cap_multiplier)
+        row["obj_interaction_distance"] = args.interaction_distance
+        row["scenario"] = args.scenario
         rows.append(row)
         for k in RAW_KEYS:
             pools[k].extend(raw[k])
@@ -354,7 +390,8 @@ def run_loco(args, clips, policy: str, cap_multiplier: float, out_dir: Path):
     sidecar.write_text(json.dumps({
         "source": f"RQ2-cap-{policy}-loco",
         "generated_by": "run_rq2_cap_sensitivity.py",
-        "tests": cap_sidecar_tests(pools, "loco", policy, cap_multiplier),
+        "tests": cap_sidecar_tests(pools, "loco", policy, cap_multiplier,
+                                   args.interaction_distance, args.scenario),
     }, indent=2) + "\n")
     print(f"saved per-fold CSV to {csv_path}")
     print(f"saved summary to {summary_path}")

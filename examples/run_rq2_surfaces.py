@@ -33,7 +33,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -71,8 +71,9 @@ from src.simulation.calibration_harness import (  # noqa: E402
 IDENT_COLUMNS = [
     "objective", "policy", "cap_multiplier", "axis", "fixed_value",
     "band_lo", "band_hi", "band_width", "n_nodes_in_band", "n_nodes_total",
-    "censored_lo", "censored_hi", "fitted", "fitted_on_grid_edge",
-    "min_loss", "degenerate", "fit_sigma", "fit_v0", "fit_loss",
+    "band_contiguous", "censored_lo", "censored_hi", "fitted",
+    "fitted_on_grid_edge", "min_loss", "degenerate",
+    "fit_sigma", "fit_v0", "fit_loss",
 ]
 
 # Dense audit grids (vs the 6x7 fitting grid): sigma resolves the 0.3-2.5 m
@@ -97,6 +98,29 @@ def make_surface_objective(spec: str, encs, dist_metric: str, policy: str,
                 dist_metric=dist_metric,
                 interaction_distance=cfg["interaction_distance"], **kw)
     return obj
+
+
+def merge_identifiability(existing: Optional[pd.DataFrame],
+                          new_rows: List[Dict]) -> pd.DataFrame:
+    """Merge freshly evaluated combo rows into an existing identifiability table.
+
+    A partial re-run (e.g. --objectives pure only) must not wipe the other
+    combos' rows -- identifiability_summary needs the 'ade' reference rows of
+    every policy, and a full replace would silently drop them (review
+    finding). Rows for the (objective, policy) combos just evaluated replace
+    their old versions; everything else is kept. Deterministic mergesort keeps
+    the file byte-stable across re-runs.
+    """
+    df = pd.DataFrame(new_rows, columns=IDENT_COLUMNS)
+    if existing is not None and not existing.empty:
+        ran = {(r["objective"], r["policy"]) for r in new_rows}
+        keep = existing[~existing.apply(
+            lambda r: (r["objective"], r["policy"]) in ran, axis=1)]
+        if not keep.empty:
+            keep = keep.reindex(columns=IDENT_COLUMNS)
+            df = pd.concat([keep, df], ignore_index=True)
+    return df.sort_values(["objective", "policy", "axis"],
+                          kind="mergesort").reset_index(drop=True)
 
 
 def ylabel_for(spec: str, dist_metric: str) -> str:
@@ -198,8 +222,9 @@ def main():
             plt.close(fig)
             print(f"  saved {npz_path.name}, {fig_path.name}")
 
-    df = pd.DataFrame(ident_rows, columns=IDENT_COLUMNS)
     csv_path = out_dir / "identifiability.csv"
+    existing = pd.read_csv(csv_path) if csv_path.exists() else None
+    df = merge_identifiability(existing, ident_rows)
     df.to_csv(csv_path, index=False)
     print(f"\nsaved identifiability table to {csv_path}")
 

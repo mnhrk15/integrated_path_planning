@@ -18,7 +18,9 @@
       "headline": false,
       "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "closedloop",
-      "cap_multiplier": 1.3
+      "cap_multiplier": 1.3,
+      "obj_interaction_distance": null,
+      "scenario": "all"
     },
     {
       "test_id": "rq2cap.loco.closedloop.closest_sign.avec_default",
@@ -36,7 +38,9 @@
       "headline": false,
       "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "closedloop",
-      "cap_multiplier": 1.3
+      "cap_multiplier": 1.3,
+      "obj_interaction_distance": null,
+      "scenario": "all"
     },
     {
       "test_id": "rq2cap.loco.closedloop.closest_sign.no_repulsion",
@@ -54,7 +58,9 @@
       "headline": false,
       "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "closedloop",
-      "cap_multiplier": 1.3
+      "cap_multiplier": 1.3,
+      "obj_interaction_distance": null,
+      "scenario": "all"
     }
   ]
 }

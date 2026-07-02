@@ -34,6 +34,11 @@ Modes:
 
 The cap policy is inherited from the cap-sensitivity verdict (--cap-policy);
 outputs go to a NEW directory (default outputs/rq2_instrument_audit/distmatch).
+NOTE output names are keyed by CONFIG only: re-running the same config with a
+different --dist-metric or --cap-policy OVERWRITES the previous files (both
+values are recorded inside the CSV/sidecar; archive the directory first when
+sweeping those). make_rq2_instrument_report refuses to mix regimes silently:
+it reads the recorded cap_policy/dist_metric back and flags a mismatch.
 
 Usage:
     .venv/bin/python examples/run_rq2_distmatch.py --mode pooled \\
@@ -92,11 +97,11 @@ POOLED_COLUMNS = [
     "config", "dist_metric", "w_ade", "w_dist", "interaction_distance",
     "cap_policy", "cap_multiplier", "sigma", "v0", "fit_loss", "refined",
     "ade", "emd_closest", "gap", "n_pairs", "n_real_gt_sim", "sign_p",
-    "wilcoxon_p",
+    "wilcoxon_p", "scenario",
 ]
 LOCO_COLUMNS = COLUMNS + ["config", "dist_metric", "w_ade", "w_dist",
                           "obj_interaction_distance", "cap_policy",
-                          "cap_multiplier"]
+                          "cap_multiplier", "scenario"]
 
 
 def parse_config(spec: str) -> Dict:
@@ -110,6 +115,9 @@ def parse_config(spec: str) -> Dict:
             w_ade, w_dist = 1.0, float(head[1:])
         except ValueError:
             raise ValueError(f"bad config {spec!r} (expected 'wX' or 'pure')")
+        if w_dist < 0.0:
+            raise ValueError(f"bad config {spec!r}: negative weight would "
+                             "REWARD distribution mismatch")
     else:
         raise ValueError(f"bad config {spec!r} (expected 'wX' or 'pure')")
     interaction: Optional[float] = None
@@ -119,6 +127,9 @@ def parse_config(spec: str) -> Dict:
                 interaction = float(p[2:])
             except ValueError:
                 raise ValueError(f"bad config suffix {p!r} in {spec!r}")
+            if interaction <= 0.0:
+                raise ValueError(f"bad config {spec!r}: interaction distance "
+                                 "must be positive")
         else:
             raise ValueError(f"bad config suffix {p!r} in {spec!r}")
     return {"config": spec, "w_ade": w_ade, "w_dist": w_dist,
@@ -166,6 +177,7 @@ def pooled_row(args, encs, cfg: Dict) -> Dict:
         "n_real_gt_sim": p["n_real_gt_sim"] if p else float("nan"),
         "sign_p": p["sign_p"] if p else float("nan"),
         "wilcoxon_p": p["wilcoxon_p"] if p else float("nan"),
+        "scenario": args.scenario,
     }
 
 
@@ -226,7 +238,8 @@ def run_loco(args, clips, cfg: Dict, out_dir: Path):
                     "w_ade": cfg["w_ade"], "w_dist": cfg["w_dist"],
                     "obj_interaction_distance": cfg["interaction_distance"],
                     "cap_policy": args.cap_policy,
-                    "cap_multiplier": args.cap_multiplier})
+                    "cap_multiplier": args.cap_multiplier,
+                    "scenario": args.scenario})
         rows.append(row)
         for k in RAW_KEYS:
             pools[k].extend(raw[k])
@@ -250,10 +263,16 @@ def run_loco(args, clips, cfg: Dict, out_dir: Path):
             prefix=f"rq2dm.loco.{cfg['config']}",
             extra={"config": cfg["config"], "dist_metric": args.dist_metric,
                    "w_ade": cfg["w_ade"], "w_dist": cfg["w_dist"],
-                   "cap_policy": args.cap_policy},
+                   "obj_interaction_distance": cfg["interaction_distance"],
+                   "cap_policy": args.cap_policy,
+                   "scenario": args.scenario},
             note=("distribution-matching calibration diagnostic, not a "
                   "confirmatory claim; auxiliary => excluded from the "
-                  "canonical study-wide correction")),
+                  "canonical study-wide correction"),
+            control_note=("this control arm does not depend on the config "
+                          "(cap_policy fixed), so it is bitwise identical in "
+                          "every rq2dm sidecar -- the family row count "
+                          "overstates the distinct hypotheses")),
     }, indent=2) + "\n")
     print(f"saved per-fold CSV to {csv_path}")
     print(f"saved summary to {summary_path}")

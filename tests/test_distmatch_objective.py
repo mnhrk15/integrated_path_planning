@@ -109,6 +109,41 @@ def test_objective_multi_onset_fallback_keeps_loss_finite():
     assert loss == pytest.approx(ade + 5.0)
 
 
+def test_objective_multi_onset_hot_path_with_both_pools_nonempty():
+    """The non-fallback onset branch (both pools trigger avoidance) was
+    unreachable with the plain synthetic fixtures (review finding): the 'real'
+    ped never evades. Use harness-generated pseudo-real data whose ped DOES
+    evade, then evaluate at the generating params: both onset pools are
+    non-empty and identical, so the onset term contributes ~0 -- exercising
+    the hot path with a known expected value.
+    """
+    base = make_encounter(T=18)
+    sigma_true, v0_true = 1.0, 6.0  # strong repulsion => onset fires
+    goals = _far_goals(base.ped_xy, base.ped_vel)
+    sim_xy = simulate_encounter(base, sigma_true, v0_true)
+    pseudo = Encounter(
+        clip="pseudo", times=base.times, ego_xy=base.ego_xy, ego_psi=base.ego_psi,
+        ego_vel=base.ego_vel, ped_xy=sim_xy, ped_vel=base.ped_vel,
+        ped_ids=base.ped_ids, dt=base.dt, min_separation=0.0, goals=goals,
+    )
+    from src.core.metrics import avoidance_onset_distance
+    assert avoidance_onset_distance(pseudo.ego_xy, pseudo.ped_xy,
+                                    dt=pseudo.dt).size > 0  # real pool non-empty
+    loss = objective_multi([pseudo], sigma_true, v0_true,
+                           w_ade=1.0, w_dist=1.0, w_onset=1.0,
+                           onset_fallback=5.0)
+    # self-consistent params: every term ~0; a fallback hit would add 5.0
+    assert loss == pytest.approx(0.0, abs=1e-6)
+
+
+def test_objective_multi_negative_weights_raise():
+    """A negative weight REWARDS mismatch; treat as caller bug, fail fast."""
+    enc = make_encounter(T=8)
+    for kw in ({"w_ade": -1.0}, {"w_dist": -0.5}, {"w_onset": -2.0}):
+        with pytest.raises(ValueError, match="weights must be >= 0"):
+            objective_multi([enc], 0.7, 3.5, **kw)
+
+
 def test_calibrate_with_objective_multi_recovers_params():
     """The grid+NM optimiser still recovers generating params through the
     multi-objective (the added EMD term is zero at the truth too)."""

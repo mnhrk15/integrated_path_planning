@@ -37,16 +37,14 @@ m*（pooled fit loss 最小）= **1**。m=1.0 は median 経路へのエイリ�
 | median | 1.168 | 1.712 | 0.6402 | 0.6392 | 0.6797 | 0.6826 | 24 | 26 | 1.05e-05 |
 | uncapped | 0.9322 | 0.9394 | 0.694 | 0.7192 | 0.7645 | 0.6219 | 25 | 26 | 8.05e-07 |
 
-注記: closedloop 行の v0_mean は fold ごとの縮退フィット（v0 が 10〜10^4 域に発散）の平均であり「較正値」ではない（fold 詳細は folds_cap_closedloop_loco.csv）。
+注記: closedloop 行の v0_mean は fold ごとの縮退フィット（fold 範囲 [13.7, 3.54e+04]）の平均であり「較正値」ではない（fold 詳細は folds_cap_closedloop_loco.csv）。
 
 ### 1.4 verdict（standoff 過小再現の帰属）
 
-**structural_limit** — no decoupled policy shrinks the gap >= 25% with broken sign dominance
+**structural_limit** — no decoupled policy shrinks the gap >= 25% with broken direction dominance
 
-- `closedloop`: gap +0.347 m（median +0.680 m、変化 -49.0%）・sign 17/26 (p=0.169)・gap縮小=yes・優位崩壊=yes（**verdict 対象外**: 交絡 or median エイリアス）
+- `closedloop`: gap +0.347 m（median +0.680 m、変化 -49.0%）・sign 17/26 (p=0.169)・gap縮小=yes・優位崩壊=no（**verdict 対象外**: confounded regime probe (speed confound)）
 - `uncapped`: gap +0.764 m（median +0.680 m、変化 +12.5%）・sign 25/26 (p=8.05e-07)・gap縮小=no・優位崩壊=no
-
-注記: 交絡アーム ['closedloop'] は縮小基準を満たすが、closedloop の desired 速度は録画の ~1.3 倍であり、gap 変化はキャップ効果と歩速誤差の混合＝verdict 証拠に用いない（F2 開示参照）。
 
 クロスチェック（fitter 交絡対策）: 判定は再フィット較正アームに基づくが、ADE fitter は v0 にほぼ不感（C2）なので「fitter が縮めに行かないだけ」の可能性は方策内 AVEC 対照（固定の強斥力・再フィットなし）で棄却する — uncapped レジームの AVEC 対照でも gap +0.622 m と正の standoff 過小再現が残存＝強斥力を固定しても gap は閉じない。
 
@@ -70,66 +68,62 @@ m*（pooled fit loss 最小）= **1**。m=1.0 は median 経路へのエイリ�
 
 ### 2.2 LOCO held-out
 
-| config | sigma_mean | v0_mean | test_ade | ade_avec | mean_gap | gap_avec | n_real_gt_sim | n_pairs | sign_p |
-|---|---|---|---|---|---|---|---|---|---|
-| pure | 0.3175 | 949.2 | 0.8449 | 0.6392 | 0.3455 | 0.6826 | 20 | 26 | 0.009355 |
-| w0.5 | 1.41 | 2.713 | 0.6614 | 0.6392 | 0.6018 | 0.6826 | 21 | 26 | 0.002494 |
-| w1_id8 | 0.7613 | 21.7 | 0.7351 | 0.6392 | 0.509 | 0.6826 | 21 | 26 | 0.002494 |
-| w1 | 0.711 | 23.62 | 0.7426 | 0.6392 | 0.4969 | 0.6826 | 21 | 26 | 0.002494 |
-| w0 | 1.168 | 1.712 | 0.6402 | 0.6392 | 0.6797 | 0.6826 | 24 | 26 | 1.05e-05 |
+| config | cap_policy | dist_metric | sigma_mean | v0_mean | test_ade | ade_avec | mean_gap | gap_avec | n_real_gt_sim | n_pairs | sign_p |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| pure | median | emd | 0.3175 | 949.2 | 0.8449 | 0.6392 | 0.3455 | 0.6826 | 20 | 26 | 0.009355 |
+| w0.5 | median | emd | 1.41 | 2.713 | 0.6614 | 0.6392 | 0.6018 | 0.6826 | 21 | 26 | 0.002494 |
+| w1_id8 | median | emd | 0.7613 | 21.7 | 0.7351 | 0.6392 | 0.509 | 0.6826 | 21 | 26 | 0.002494 |
+| w1 | median | emd | 0.711 | 23.62 | 0.7426 | 0.6392 | 0.4969 | 0.6826 | 21 | 26 | 0.002494 |
+| w0 | median | emd | 1.168 | 1.712 | 0.6402 | 0.6392 | 0.6797 | 0.6826 | 24 | 26 | 1.05e-05 |
+
+**警告**: config ['w0'] は非デフォルトの --scenario で実行されており、verdict/F1 から除外している。
 
 ### 2.3 verdict（standoff 改善 × ADE 犠牲）
 
-**standoff_improved**
+**undetermined** — w0 reference row missing
 
-- `pure`: gap +0.346 m（w0 +0.680 m、変化 -49.2%）・held-out ADE 0.845（w0 0.640、犠牲 +32.0%）・sign 20/26 (p=0.00936)
-- `w0.5`: gap +0.602 m（w0 +0.680 m、変化 -11.5%）・held-out ADE 0.661（w0 0.640、犠牲 +3.3%）・sign 21/26 (p=0.00249)
-- `w1_id8`: gap +0.509 m（w0 +0.680 m、変化 -25.1%）・held-out ADE 0.735（w0 0.640、犠牲 +14.8%）・sign 21/26 (p=0.00249)（gap縮小判定は 25% 閾値ぎわ＝境界事例）
-- `w1`: gap +0.497 m（w0 +0.680 m、変化 -26.9%）・held-out ADE 0.743（w0 0.640、犠牲 +16.0%）・sign 21/26 (p=0.00249)
-
-方向優位（real>sim）はどの構成でも崩れない（最良の pure でも 20/26）＝分布項は gap を部分的に縮めるだけで、standoff の系統的過小再現そのものは解消しない。
 
 ## 3. 識別性監査（σ軸・v0軸の 2% バンド幅）
 
-| objective | policy | axis | band_lo | band_hi | band_width | censored_lo | censored_hi | fitted | fitted_on_grid_edge |
-|---|---|---|---|---|---|---|---|---|---|
-| ade | median | v0 | 0.800 | 2.400 | 1.600 | False | False | 1.637 | False |
-| ade | median | sigma | 0.500 | 1.900 | 1.400 | False | False | 1.214 | False |
-| ade | uncapped | v0 | 0.400 | 2.000 | 1.600 | False | False | 1.147 | False |
-| ade | uncapped | sigma | 0.300 | 1.500 | 1.200 | True | False | 0.759 | False |
-| ade | closedloop | v0 | 6.500 | 8.000 | 1.500 | False | True | 35.865 | True |
-| ade | closedloop | sigma | 0.900 | 2.100 | 1.200 | False | False | 0.616 | False |
-| w1 | median | v0 | 6.500 | 8.000 | 1.500 | False | True | 21.320 | True |
-| w1 | median | sigma | 0.900 | 0.900 | 0.000 | False | False | 0.649 | False |
-| w1 | uncapped | v0 | 6.500 | 8.000 | 1.500 | False | True | 26.523 | True |
-| w1 | uncapped | sigma | 0.700 | 0.900 | 0.200 | False | False | 0.425 | False |
-| w1 | closedloop | v0 | 6.500 | 8.000 | 1.500 | False | True | 33660.780 | True |
-| w1 | closedloop | sigma | 0.500 | 1.300 | 0.800 | False | False | 0.207 | True |
-| pure | median | v0 | 6.500 | 8.000 | 1.500 | False | True | 1108.213 | True |
-| pure | median | sigma | 0.900 | 1.100 | 0.200 | False | False | 0.308 | False |
-| pure | uncapped | v0 | 8.000 | 8.000 | 0.000 | False | True | 24.875 | True |
-| pure | uncapped | sigma | 0.900 | 0.900 | 0.000 | False | False | 0.592 | False |
-| pure | closedloop | v0 | 8.000 | 8.000 | 0.000 | False | True | 22772.626 | True |
-| pure | closedloop | sigma | 0.500 | 0.900 | 0.400 | False | False | 0.224 | True |
+| objective | policy | axis | band_lo | band_hi | band_width | band_contiguous | censored_lo | censored_hi | fitted | fitted_on_grid_edge |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ade | closedloop | sigma | 0.900 | 2.100 | 1.200 | True | False | False | 0.616 | False |
+| ade | closedloop | v0 | 6.500 | 8.000 | 1.500 | True | False | True | 35.865 | True |
+| ade | median | sigma | 0.500 | 1.900 | 1.400 | True | False | False | 1.214 | False |
+| ade | median | v0 | 0.800 | 2.400 | 1.600 | True | False | False | 1.637 | False |
+| ade | uncapped | sigma | 0.300 | 1.500 | 1.200 | True | True | False | 0.759 | False |
+| ade | uncapped | v0 | 0.400 | 2.000 | 1.600 | True | False | False | 1.147 | False |
+| pure | closedloop | sigma | 0.500 | 0.900 | 0.400 | True | False | False | 0.224 | True |
+| pure | closedloop | v0 | 8.000 | 8.000 | 0.000 | True | False | True | 22772.626 | True |
+| pure | median | sigma | 0.900 | 1.100 | 0.200 | True | False | False | 0.308 | False |
+| pure | median | v0 | 6.500 | 8.000 | 1.500 | True | False | True | 1108.213 | True |
+| pure | uncapped | sigma | 0.900 | 0.900 | 0.000 | True | False | False | 0.592 | False |
+| pure | uncapped | v0 | 8.000 | 8.000 | 0.000 | True | False | True | 24.875 | True |
+| w1 | closedloop | sigma | 0.500 | 1.300 | 0.800 | True | False | False | 0.207 | True |
+| w1 | closedloop | v0 | 6.500 | 8.000 | 1.500 | True | False | True | 33660.780 | True |
+| w1 | median | sigma | 0.900 | 0.900 | 0.000 | True | False | False | 0.649 | False |
+| w1 | median | v0 | 6.500 | 8.000 | 1.500 | True | False | True | 21.320 | True |
+| w1 | uncapped | sigma | 0.700 | 0.900 | 0.200 | True | False | False | 0.425 | False |
+| w1 | uncapped | v0 | 6.500 | 8.000 | 1.500 | True | False | True | 26.523 | True |
 
-識別性の回復（バンド幅 <= 0.5x ADE 基準・自軸非打切り・**他軸の fitted がグリッド内**の3条件）: **no**
+識別性の回復（バンド幅 <= 0.5x ADE 基準・自軸非打切り・連結バンド・fitted が自バンド内・他軸の fitted がグリッド内・ADE 基準行も同品質、の全条件）: **no**
 
-判定規則の理由: profile_band は各軸を「他軸の fitted に最近傍のグリッドノード」で切る。分布目的の fitted v0 は 21〜874 とグリッド外へ発散するため（v0=8 ノードへクランプ）、そのスライス上の鋭い σ バンドは**最適点から遠い条件付き断面**の性質であり、識別性の回復とは読めない（(他軸端) 注記）。幅 0 は「グリッド刻み（~0.2）未満」の意味（(1ノード) 注記）。
+判定規則の理由: profile_band は各軸を「他軸の fitted に最近傍のグリッドノード」で切る。本表の分布目的の fitted v0 は 21.3〜3.37e+04 とグリッド外へ発散するため（最上ノードへクランプ）、そのスライス上の鋭い σ バンドは**最適点から遠い条件付き断面**の性質であり、識別性の回復とは読めない（(他軸端) 注記）。幅 0 は「グリッド刻み未満」（(1ノード) 注記）、(非連結) はバンドの凸包が out-of-band の尾根を跨ぐ多峰プロファイル。なお 2% バンドは各目的関数自身の最小値に対する相対幅であり、目的関数間の絶対許容は同一でない（バンド幅比較はこの前提つきで読む）。
 
-- `closedloop/sigma`: ADE 基準 1.2 → w1: 0.8(他軸端), pure: 0.4(他軸端)
-- `closedloop/v0`: ADE 基準 1.5(打切り) → w1: 1.5(打切り)(他軸端), pure: 0(打切り)(他軸端)(1ノード)
-- `median/sigma`: ADE 基準 1.4 → w1: 0(他軸端)(1ノード), pure: 0.2(他軸端)
-- `median/v0`: ADE 基準 1.6 → w1: 1.5(打切り), pure: 1.5(打切り)
-- `uncapped/sigma`: ADE 基準 1.2(打切り) → w1: 0.2(他軸端), pure: 0(他軸端)(1ノード)
-- `uncapped/v0`: ADE 基準 1.6 → w1: 1.5(打切り), pure: 0(打切り)(1ノード)
+- `closedloop/sigma`: ADE 基準 1.2(基準劣化) → pure: 0.4(他軸端)(fit外), w1: 0.8(他軸端)(fit外)
+- `closedloop/v0`: ADE 基準 1.5(打切り)(基準劣化) → pure: 0(打切り)(他軸端)(1ノード)(fit外), w1: 1.5(打切り)(他軸端)(fit外)
+- `median/sigma`: ADE 基準 1.4 → pure: 0.2(他軸端)(fit外), w1: 0(他軸端)(1ノード)(fit外)
+- `median/v0`: ADE 基準 1.6 → pure: 1.5(打切り)(fit外), w1: 1.5(打切り)(fit外)
+- `uncapped/sigma`: ADE 基準 1.2(打切り)(基準劣化) → pure: 0(他軸端)(1ノード)(fit外), w1: 0.2(他軸端)(fit外)
+- `uncapped/v0`: ADE 基準 1.6 → pure: 0(打切り)(1ノード)(fit外), w1: 1.5(打切り)(fit外)
 
 ## 4. 総合 verdict（review F1: 較正は手調整に勝てるか）
 
 **f1_stands**
 
-対象: cap:{median, uncapped} と dm:* の LOCO 構成（方策内 AVEC 対照との比較）。closedloop は両アームとも歩速 ~30% 過大の壊れたレジーム内比較になるため F1 の証拠から除外（§1.4 の交絡注記と同一の理由）。
+対象（実際に判定した LOCO 構成）: ['cap:median', 'cap:uncapped', 'dm:pure', 'dm:w0.5', 'dm:w1', 'dm:w1_id8']（方策内 AVEC 対照との比較）。closedloop は両アームとも歩速 ~30% 過大の壊れたレジーム内比較になるため F1 の証拠から除外（§1.4 の交絡注記と同一の理由）。非デフォルト provenance / 非 median レジームの構成も除外（§1.3/§2.2 の警告参照）。
 
-監査した全構成で、較正は AVEC 手調整 (0.7, 3.5) を held-out ADE と standoff の両方で同時に上回れなかった（F1 の否定的所見は維持・強化）。
+監査した全 6 構成で、較正は AVEC 手調整 (0.7, 3.5) を held-out ADE と standoff の両方で同時に上回れなかった（F1 の否定的所見は維持・強化）。
 片側のみ改善した構成: ['cap:uncapped', 'dm:pure', 'dm:w0.5', 'dm:w1_id8', 'dm:w1']
 
 ### 4.1 新較正点の RQ1b 掃引域チェック
@@ -149,7 +143,7 @@ m*（pooled fit loss 最小）= **1**。m=1.0 は median 経路へのエイリ�
 
 ## 5. §3(B)（実データ接地閉ループ）への設計含意
 
-キャップ方策を解放しても分布目的を足しても、SFM 斥力は実データの standoff 分布を held-out で再現できず、ADE でも手調整と識別不能のまま残った。これは (B) の replay 対照設計を直接支持する: 較正 SFM を「実歩行者の代理」として信頼する根拠は現状存在しないため、閉ループ評価の反応性軸には replay（記録実歩行者）アームが不可欠であり、SFM 系アーム（較正/手調整/斥力なし）は「反応モデル仮定の感度幅」を張る器具として位置づけるべきである。較正の限界そのものが測定妥当性研究の証拠（ベンチマーク結論の誤差棒）になる。
+キャップ方策を解放しても分布目的を足しても、SFM 斥力は実データの standoff 分布を held-out で再現できなかった。正準（median レジーム）では ADE でも手調整と識別不能（0.640 vs 0.639）のまま残り、片側のみの改善（§4 partial）は ADE×standoff の同時改善に届かなかった。これは (B) の replay 対照設計を直接支持する: 較正 SFM を「実歩行者の代理」として信頼する根拠は現状存在しないため、閉ループ評価の反応性軸には replay（記録実歩行者）アームが不可欠であり、SFM 系アーム（較正/手調整/斥力なし）は「反応モデル仮定の感度幅」を張る器具として位置づけるべきである。較正の限界そのものが測定妥当性研究の証拠（ベンチマーク結論の誤差棒）になる。
 
 ### 実行上の注記
 - closedloop アームの歩速 ~30% 過大は F2 開示（calibration_harness module docstring）参照。閉ループ徹底整合には desired 速度も 1.3x する本アームの挙動が「閉ループが録画歩行と不整合」という所見そのもの。

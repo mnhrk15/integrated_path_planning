@@ -78,6 +78,58 @@ def test_cap_verdict_undetermined_without_median_or_decoupled():
         == "undetermined"
 
 
+def test_cap_verdict_sign_flip_is_not_an_artifact_claim():
+    """A gap that flips side (under- -> over-reproduction) was REPLACED by an
+    opposite systematic error, not explained; it must be flagged, never counted
+    as shrunk/artifact (review finding: |gap| alone would call -0.40 'shrunk')."""
+    df = _cap_df([("median", 0.68, 1e-5, 24, 26),
+                  ("uncapped", -0.40, 0.17, 9, 26)])
+    v = cap_verdict(df)
+    assert v["verdict"] == "structural_limit"
+    d = v["per_policy"]["uncapped"]
+    assert d["sign_flipped"] is True
+    assert d["gap_shrunk"] is False
+
+
+def test_cap_verdict_wilcoxon_vetoes_sign_only_dominance_break():
+    """sign p > alpha alone (n=26, low power) must not declare 'dominance
+    broke' while the Wilcoxon on the same differences is still significant."""
+    df = pd.DataFrame(
+        [("median", 0.68, 1e-5, 24, 26, 1e-7),
+         ("uncapped", 0.40, 0.076, 18, 26, 0.002)],  # closedloop-AVEC profile
+        columns=["policy", "mean_gap", "sign_p", "n_real_gt_sim", "n_pairs",
+                 "wilcoxon_p"])
+    v = cap_verdict(df)
+    assert v["per_policy"]["uncapped"]["dominance_broken"] is False
+    assert v["verdict"] == "structural_limit"
+    # ... and with BOTH tests null, the same numbers do break dominance
+    df.loc[df["policy"] == "uncapped", "wilcoxon_p"] = 0.3
+    assert cap_verdict(df)["per_policy"]["uncapped"]["dominance_broken"] is True
+
+
+def test_cap_verdict_partial_explanation_is_surfaced():
+    """Gap shrunk but dominance intact: structural verdict, but the middle
+    ground must be exported, not hidden by the binary (review finding)."""
+    df = _cap_df([("median", 0.68, 1e-5, 24, 26),
+                  ("uncapped", 0.30, 5e-4, 22, 26)])
+    v = cap_verdict(df)
+    assert v["verdict"] == "structural_limit"
+    assert v["partially_explained"] == ["uncapped"]
+
+
+def test_cap_verdict_capfit_nan_multiplier_fails_closed():
+    """A capfit row with unknown provenance (no cap_multiplier) must not be
+    counted as decoupled evidence (review finding: NaN != 1.0 passed open)."""
+    df = pd.DataFrame(
+        [("median", 0.68, 1e-5, 24, 26, np.nan),
+         ("capfit", 0.20, 0.4, 15, 26, np.nan)],
+        columns=["policy", "mean_gap", "sign_p", "n_real_gt_sim", "n_pairs",
+                 "cap_multiplier"])
+    v = cap_verdict(df)
+    assert not v["per_policy"]["capfit"]["verdict_eligible"]
+    assert v["verdict"] == "undetermined"
+
+
 # --------------------------------------------------------------------------- #
 # distmatch_verdict / identifiability / f1
 # --------------------------------------------------------------------------- #
@@ -101,6 +153,35 @@ def test_distmatch_verdict_reports_tradeoff_both_ways():
         == "undetermined"
 
 
+def test_distmatch_verdict_w0_alone_is_undetermined_not_negative():
+    """Only the (fallback-synthesised) w0 reference present = nothing audited
+    yet; 'no_standoff_improvement' would misread a partial run as a completed
+    negative result (review finding, reproduced on a cap-only directory)."""
+    v = distmatch_verdict(_dm_df([("w0", 0.68, 1e-5, 24, 26, 0.640)]))
+    assert v["verdict"] == "undetermined"
+    assert "no non-w0" in v["reason"]
+
+
+def test_distmatch_verdict_sign_flip_is_not_improvement():
+    df = _dm_df([("w0", 0.68, 1e-5, 24, 26, 0.640),
+                 ("w1", -0.30, 0.2, 9, 26, 0.700)])
+    v = distmatch_verdict(df)
+    assert v["verdict"] == "no_standoff_improvement"
+    assert v["per_config"]["w1"]["sign_flipped"] is True
+
+
+def test_distmatch_verdict_survives_missing_test_ade_column():
+    """A folds CSV lost next to a surviving sidecar must degrade to NaN ADE
+    fields, not crash with KeyError (review finding, reproduced)."""
+    df = pd.DataFrame([("w0", 0.68, 1e-5, 24, 26),
+                       ("w1", 0.30, 0.2, 17, 26)],
+                      columns=["config", "mean_gap", "sign_p",
+                               "n_real_gt_sim", "n_pairs"])
+    v = distmatch_verdict(df)  # must not raise
+    assert v["verdict"] == "standoff_improved"
+    assert np.isnan(v["per_config"]["w1"]["test_ade"])
+
+
 def _ident_row(objective, axis, band_width, *, censored=False, band_lo=1.0,
                fitted=1.2, n_nodes=2, edge=False, policy="median"):
     return {"objective": objective, "policy": policy, "axis": axis,
@@ -112,7 +193,7 @@ def _ident_row(objective, axis, band_width, *, censored=False, band_lo=1.0,
 
 def test_identifiability_summary_detects_restoration():
     df = pd.DataFrame([
-        _ident_row("ade", "v0", 2.0, censored=True),
+        _ident_row("ade", "v0", 2.0),
         _ident_row("w1", "v0", 0.4),
         _ident_row("pure", "v0", 1.9),
         # interior sigma-axis fits, so the cross-axis clamp guard stays quiet
@@ -125,6 +206,51 @@ def test_identifiability_summary_detects_restoration():
     assert entry["objectives"]["w1"]["restored"] is True
     assert entry["objectives"]["pure"]["restored"] is False
     assert s["restored_any"] is True
+
+
+def test_identifiability_summary_degraded_reference_blocks_restoration():
+    """A censored ADE reference band makes the <= factor comparison
+    meaningless: the whole entry is flagged and cannot grant restoration."""
+    df = pd.DataFrame([
+        _ident_row("ade", "v0", 2.0, censored=True),
+        _ident_row("w1", "v0", 0.4),
+        _ident_row("ade", "sigma", 1.4),
+        _ident_row("w1", "sigma", 1.0),
+    ])
+    s = identifiability_summary(df)
+    entry = s["per_policy_axis"]["median/v0"]
+    assert entry["reference_degraded"] is True
+    assert entry["objectives"]["w1"]["restored"] is False
+    assert s["restored_any"] is False
+
+
+def test_identifiability_summary_fitted_outside_band_is_not_restoration():
+    """A narrow band that does not contain the refined optimum does not
+    describe the optimum (review finding)."""
+    df = pd.DataFrame([
+        _ident_row("ade", "v0", 2.0),
+        _ident_row("w1", "v0", 0.4, fitted=3.0),  # band [1.0, 1.4], fit at 3.0
+        _ident_row("ade", "sigma", 1.4),
+        _ident_row("w1", "sigma", 1.0),
+    ])
+    s = identifiability_summary(df)
+    w1 = s["per_policy_axis"]["median/v0"]["objectives"]["w1"]
+    assert w1["fitted_in_band"] is False
+    assert w1["restored"] is False
+
+
+def test_identifiability_summary_missing_other_axis_fails_closed():
+    """Without the other-axis row the slice anchor cannot be verified; the
+    guard must fail closed, not silently pass (review finding)."""
+    df = pd.DataFrame([
+        _ident_row("ade", "v0", 2.0),
+        _ident_row("w1", "v0", 0.4),
+        # no sigma-axis rows at all
+    ])
+    s = identifiability_summary(df)
+    w1 = s["per_policy_axis"]["median/v0"]["objectives"]["w1"]
+    assert w1["other_axis_edge"] is True
+    assert w1["restored"] is False
 
 
 def test_identifiability_summary_censored_band_is_not_restoration():
@@ -188,6 +314,21 @@ def test_f1_verdict_requires_joint_improvement():
                            "gap_avec": 0.62}])
     assert partial["verdict"] == "f1_stands"
     assert partial["partial"] == ["dm:w2"]
+
+
+def test_f1_verdict_empty_audit_is_undetermined():
+    """Zero audited configurations must not read as 'the negative result
+    stands' (review finding, reproduced on an empty directory)."""
+    assert f1_verdict([])["verdict"] == "undetermined"
+
+
+def test_f1_verdict_zero_references_cannot_fabricate_a_win():
+    """An all-zero degenerate row satisfies both <= comparisons numerically;
+    it must not produce the audit's strongest positive claim (review finding)."""
+    v = f1_verdict([{"label": "dm:bug", "ade_calibrated": 0.0,
+                     "ade_avec": 0.0, "gap_calibrated": 0.0, "gap_avec": 0.0}])
+    assert v["verdict"] == "f1_stands"
+    assert v["beats"] == []
 
 
 # --------------------------------------------------------------------------- #

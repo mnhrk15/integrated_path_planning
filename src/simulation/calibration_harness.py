@@ -318,6 +318,11 @@ def _apply_cap_policy(
     that ~5% of real cruise values expose), so the exact-equality contract
     "m=1 == median" is made true by construction instead of by luck.
     """
+    if cap_policy == "capfit" and not (np.isfinite(cap_multiplier)
+                                       and cap_multiplier > 0.0):
+        raise ValueError(
+            f"capfit needs a positive finite cap_multiplier, got {cap_multiplier!r}"
+            " (a non-positive cap would freeze every ped via capped_velocity)")
     if cap_policy is None or cap_policy == "median" \
             or (cap_policy == "capfit" and cap_multiplier == 1.0):
         _set_cruise_speed(ped_sim, cruise)
@@ -572,6 +577,12 @@ def objective_multi(
         raise ValueError(
             f"unknown dist_metric {dist_metric!r}; expected one of {DIST_METRICS}"
         )
+    if w_ade < 0.0 or w_dist < 0.0 or w_onset < 0.0:
+        # A negative weight REWARDS mismatch on that term; no audit configuration
+        # means that, so treat it as a caller bug rather than optimising nonsense.
+        raise ValueError(
+            f"weights must be >= 0, got w_ade={w_ade}, w_dist={w_dist}, "
+            f"w_onset={w_onset}")
     total = 0.0
     count = 0
     sim_closest: List[float] = []
@@ -641,6 +652,11 @@ def objective_one_step(
     dwarfs the small/noisy real per-step radial acceleration. Reported alongside
     the rollout-ADE calibration to show the paper's force is too impulsive
     instantaneously even where a moderate ``v0`` reproduces the trajectory.
+
+    NOTE: this diagnostic has no ``cap_policy`` parameter — it is teacher-forced
+    (never integrates, never calls ``peds.step``), so the cap regime cannot
+    affect it. Do NOT quote it side-by-side with a non-``median`` cap-policy
+    calibration as if both were evaluated under that regime.
 
 
     For every encounter, frame and pedestrian, compare the radial (ego->ped)

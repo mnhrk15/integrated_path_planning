@@ -4,7 +4,7 @@
   "tests": [
     {
       "test_id": "rq2cap.loco.uncapped.closest_sign.calibrated",
-      "description": "(diagnostic) paired per-encounter sign test under cap_policy=uncapped: real vs calibrated sim closest-approach (loco)",
+      "description": "(diagnostic) paired per-encounter sign test: real vs calibrated sim closest-approach (loco)",
       "family": "rq2_cap_sensitivity_loco",
       "protocol": "loco",
       "auxiliary": true,
@@ -15,14 +15,16 @@
       "n_real_gt_sim": 25,
       "mean_gap_m": 0.7644848153202479,
       "wilcoxon_p": 2.980232238769531e-07,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "uncapped",
       "cap_multiplier": 1.3,
-      "headline": false,
-      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction"
+      "obj_interaction_distance": null,
+      "scenario": "all"
     },
     {
       "test_id": "rq2cap.loco.uncapped.closest_sign.avec_default",
-      "description": "(diagnostic) paired per-encounter sign test under cap_policy=uncapped: real vs avec_default sim closest-approach (loco)",
+      "description": "(diagnostic) paired per-encounter sign test: real vs avec_default sim closest-approach (loco)",
       "family": "rq2_cap_sensitivity_loco",
       "protocol": "loco",
       "auxiliary": true,
@@ -33,14 +35,16 @@
       "n_real_gt_sim": 24,
       "mean_gap_m": 0.6218778571642337,
       "wilcoxon_p": 5.662441253662109e-07,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "uncapped",
       "cap_multiplier": 1.3,
-      "headline": false,
-      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction"
+      "obj_interaction_distance": null,
+      "scenario": "all"
     },
     {
       "test_id": "rq2cap.loco.uncapped.closest_sign.no_repulsion",
-      "description": "(diagnostic) paired per-encounter sign test under cap_policy=uncapped: real vs no_repulsion sim closest-approach (loco)",
+      "description": "(diagnostic) paired per-encounter sign test: real vs no_repulsion sim closest-approach (loco)",
       "family": "rq2_cap_sensitivity_loco",
       "protocol": "loco",
       "auxiliary": true,
@@ -51,10 +55,12 @@
       "n_real_gt_sim": 25,
       "mean_gap_m": 0.8379508564705256,
       "wilcoxon_p": 1.4901161193847656e-07,
+      "headline": false,
+      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
       "cap_policy": "uncapped",
       "cap_multiplier": 1.3,
-      "headline": false,
-      "note": "instrument diagnosis (review F2 speed-cap regime), not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction"
+      "obj_interaction_distance": null,
+      "scenario": "all"
     }
   ]
 }

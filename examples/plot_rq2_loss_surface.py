@@ -197,50 +197,73 @@ def profile_band(surf: Dict[str, object], axis: str,
     of the profile minimum. Returns::
 
         {axis, fixed_value, band_lo, band_hi, band_width, n_nodes_in_band,
-         n_nodes_total, censored_lo, censored_hi, fitted, fitted_on_grid_edge,
-         min_loss, degenerate}
+         n_nodes_total, band_contiguous, censored_lo, censored_hi, fitted,
+         fitted_on_grid_edge, min_loss, degenerate}
 
     ``censored_lo/hi``: the band touches the grid edge, so the true flat region
     extends beyond the evaluated grid and ``band_width`` is a LOWER bound.
-    ``fitted_on_grid_edge``: the refined optimum sits at/beyond the grid border
-    (the optimiser may have wanted to leave the box). ``degenerate``: fewer than
-    two finite profile nodes -- every other field is NaN.
+    ``band_contiguous``: the in-band nodes form one unbroken run; False means a
+    MULTI-MODAL profile whose [band_lo, band_hi] hull straddles an out-of-band
+    ridge, so ``band_width`` overstates the flat region and must not be quoted
+    as one. ``fitted_on_grid_edge``: the refined optimum sits at/beyond the
+    grid border (the optimiser may have wanted to leave the box).
+    ``degenerate``: fewer than two finite profile nodes, or a non-finite fitted
+    optimum (either axis) that would make the slice/edge fields meaningless --
+    every band field is NaN and nothing downstream may read the row as a
+    measurement.
     """
     if axis not in ("sigma", "v0"):
         raise ValueError(f"axis must be 'sigma' or 'v0', got {axis!r}")
     gs, gv = surf["grid_sigma"], surf["grid_v0"]
     loss = surf["loss"]  # masked [S, V]
+    fit_sigma, fit_v0 = float(surf["sigma"]), float(surf["v0"])
+
+    def _degenerate(fixed, fitted):
+        return {"axis": axis, "fixed_value": fixed, "fitted": fitted,
+                "fitted_on_grid_edge": False, "n_nodes_total": 0,
+                "band_lo": float("nan"), "band_hi": float("nan"),
+                "band_width": float("nan"), "n_nodes_in_band": 0,
+                "band_contiguous": False,
+                "censored_lo": False, "censored_hi": False,
+                "min_loss": float("nan"), "degenerate": True}
+
+    # A non-finite fitted optimum makes both the slice choice (argmin over
+    # |grid - nan| silently picks index 0) and the edge flags meaningless;
+    # refuse to emit a plausible-looking row (review: NaN fail-open).
+    if not (np.isfinite(fit_sigma) and np.isfinite(fit_v0)):
+        return _degenerate(float("nan"), float("nan"))
     if axis == "v0":
-        si = int(np.argmin(np.abs(gs - surf["sigma"])))
-        prof, coords, fixed, fitted = loss[si], gv, float(gs[si]), float(surf["v0"])
+        si = int(np.argmin(np.abs(gs - fit_sigma)))
+        prof, coords, fixed, fitted = loss[si], gv, float(gs[si]), fit_v0
     else:
-        vi = int(np.argmin(np.abs(gv - surf["v0"])))
-        prof, coords, fixed, fitted = loss[:, vi], gs, float(gv[vi]), float(surf["sigma"])
+        vi = int(np.argmin(np.abs(gv - fit_v0)))
+        prof, coords, fixed, fitted = loss[:, vi], gs, float(gv[vi]), fit_sigma
     finite = ~np.ma.getmaskarray(prof)
     grid_lo, grid_hi = float(coords.min()), float(coords.max())
-    out = {"axis": axis, "fixed_value": fixed, "fitted": fitted,
-           "fitted_on_grid_edge": bool(fitted <= grid_lo or fitted >= grid_hi),
-           "n_nodes_total": int(finite.sum())}
     if finite.sum() < 2:
-        out.update({"band_lo": float("nan"), "band_hi": float("nan"),
-                    "band_width": float("nan"), "n_nodes_in_band": 0,
-                    "censored_lo": False, "censored_hi": False,
-                    "min_loss": float("nan"), "degenerate": True})
+        out = _degenerate(fixed, fitted)
+        out["n_nodes_total"] = int(finite.sum())
         return out
     x = coords[finite]
     a = np.asarray(prof[finite])
     amin = float(a.min())
     band = a <= amin * (1.0 + rel)
+    band_idx = np.flatnonzero(band)
     band_lo, band_hi = float(x[band].min()), float(x[band].max())
-    out.update({
+    return {
+        "axis": axis, "fixed_value": fixed, "fitted": fitted,
+        "fitted_on_grid_edge": bool(fitted <= grid_lo or fitted >= grid_hi),
+        "n_nodes_total": int(finite.sum()),
         "band_lo": band_lo, "band_hi": band_hi,
         "band_width": band_hi - band_lo,
         "n_nodes_in_band": int(band.sum()),
+        # One unbroken run of (finite) nodes <=> hull == the actual flat region.
+        "band_contiguous": bool(band_idx.size
+                                and band_idx[-1] - band_idx[0] + 1 == band_idx.size),
         "censored_lo": bool(band_lo <= float(x.min())),
         "censored_hi": bool(band_hi >= float(x.max())),
         "min_loss": amin, "degenerate": False,
-    })
-    return out
+    }
 
 
 def _find_npz(input_dir: Path, scenario: str) -> Optional[Path]:

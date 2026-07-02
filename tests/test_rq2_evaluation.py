@@ -187,3 +187,25 @@ def test_evaluate_fold_custom_objective_and_fidelity_kwargs():
     assert set(cap_row.keys()) == set(COLUMNS)
     assert np.isfinite(cap_row["test_ade"])
     assert cap_raw["default_closest"] != base_raw["default_closest"]
+
+    # fidelity_kwargs alone (default fitter => same (sigma, v0)) must reach the
+    # train_ade call AND the calibrated test arm too -- dropping **fidelity_kwargs
+    # from any single fidelity_report call would leave that arm in the median
+    # regime while the others moved (review finding: only the AVEC arm was
+    # pinned before). The v0 grid forces a strong-repulsion fit: at the default
+    # grid the fit lands on v0=0, where the cap never binds and every arm is
+    # legitimately regime-invariant (no discrimination possible).
+    strong = _args(v0_grid=[2.0, 6.0])
+    base2_row, base2_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, strong)
+    fk_row, fk_raw = evaluate_fold(
+        "f", "loco", train, test, train_encs, test_encs, strong,
+        fidelity_kwargs={"cap_policy": "uncapped"})
+    assert fk_row["sigma"] == base2_row["sigma"]  # same fit, regime-only change
+    assert fk_row["v0"] == base2_row["v0"] and fk_row["v0"] >= 2.0
+    assert fk_row["train_ade"] != base2_row["train_ade"]
+    assert fk_raw["calibrated_closest"] != base2_raw["calibrated_closest"]
+    assert fk_raw["default_closest"] != base2_raw["default_closest"]
+    # (no no-repulsion assert: with v0=0 the cap never binds, so that arm is
+    # legitimately identical across cap regimes -- the reach of the kwargs is
+    # already proven by the two arms above plus train_ade.)

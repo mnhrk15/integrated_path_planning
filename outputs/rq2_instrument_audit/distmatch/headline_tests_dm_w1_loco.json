@@ -21,7 +21,9 @@
       "dist_metric": "emd",
       "w_ade": 1.0,
       "w_dist": 1.0,
-      "cap_policy": "median"
+      "obj_interaction_distance": null,
+      "cap_policy": "median",
+      "scenario": "all"
     },
     {
       "test_id": "rq2dm.loco.w1.closest_sign.avec_default",
@@ -37,12 +39,14 @@
       "mean_gap_m": 0.6825740081186549,
       "wilcoxon_p": 1.4901161193847656e-07,
       "headline": false,
-      "note": "distribution-matching calibration diagnostic, not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
+      "note": "distribution-matching calibration diagnostic, not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction; this control arm does not depend on the config (cap_policy fixed), so it is bitwise identical in every rq2dm sidecar -- the family row count overstates the distinct hypotheses",
       "config": "w1",
       "dist_metric": "emd",
       "w_ade": 1.0,
       "w_dist": 1.0,
-      "cap_policy": "median"
+      "obj_interaction_distance": null,
+      "cap_policy": "median",
+      "scenario": "all"
     },
     {
       "test_id": "rq2dm.loco.w1.closest_sign.no_repulsion",
@@ -58,12 +62,14 @@
       "mean_gap_m": 0.7941468046800242,
       "wilcoxon_p": 5.960464477539063e-08,
       "headline": false,
-      "note": "distribution-matching calibration diagnostic, not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction",
+      "note": "distribution-matching calibration diagnostic, not a confirmatory claim; auxiliary => excluded from the canonical study-wide correction; this control arm does not depend on the config (cap_policy fixed), so it is bitwise identical in every rq2dm sidecar -- the family row count overstates the distinct hypotheses",
       "config": "w1",
       "dist_metric": "emd",
       "w_ade": 1.0,
       "w_dist": 1.0,
-      "cap_policy": "median"
+      "obj_interaction_distance": null,
+      "cap_policy": "median",
+      "scenario": "all"
     }
   ]
 }

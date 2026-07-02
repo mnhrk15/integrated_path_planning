@@ -75,6 +75,58 @@ def test_profile_band_degenerate_when_all_masked():
         profile_band(surf, "tau")
 
 
+def test_profile_band_nan_fitted_is_degenerate_not_plausible():
+    """A NaN fitted optimum silently selected slice 0 (argmin over all-NaN
+    distances) and produced a plausible-looking row, defeating the downstream
+    other-axis-edge guard (review finding). It must be degenerate."""
+    loss = [[1.0, 0.5, 0.7], [0.9, 0.45, 0.65]]
+    surf = _surf(loss, [0.5, 1.0], [0, 2, 4], sigma=float("nan"), v0=2.0)
+    for axis in ("v0", "sigma"):
+        band = profile_band(surf, axis)
+        assert band["degenerate"], axis
+        assert np.isnan(band["band_width"])
+
+
+def test_profile_band_flags_noncontiguous_bimodal_band():
+    """Two separated 2%-lobes: the hull [0, 4] is NOT a flat region; the
+    contiguity flag must expose it (review finding: the width alone reads as
+    'flat over 4 units')."""
+    loss = [[0.50, 2.0, 2.0, 2.0, 0.505]]
+    surf = _surf(loss, [1.0], [0, 1, 2, 3, 4], sigma=1.0, v0=0.0)
+    band = profile_band(surf, "v0")
+    assert band["n_nodes_in_band"] == 2
+    assert band["band_width"] == 4.0
+    assert band["band_contiguous"] is False
+    # ... while an unbroken run is contiguous
+    loss2 = [[0.50, 0.505, 2.0, 2.0, 2.0]]
+    surf2 = _surf(loss2, [1.0], [0, 1, 2, 3, 4], sigma=1.0, v0=0.0)
+    assert profile_band(surf2, "v0")["band_contiguous"] is True
+
+
+def test_merge_identifiability_keeps_other_combos():
+    """A partial surfaces re-run must replace only the re-evaluated combos,
+    never wipe the other policies' ade reference rows (review finding)."""
+    import pandas as pd
+    from examples.run_rq2_surfaces import IDENT_COLUMNS, merge_identifiability
+
+    def row(obj, pol, axis, width):
+        r = {c: float("nan") for c in IDENT_COLUMNS}
+        r.update({"objective": obj, "policy": pol, "axis": axis,
+                  "band_width": width})
+        return r
+
+    existing = pd.DataFrame([row("ade", "median", "v0", 1.6),
+                             row("w1", "median", "v0", 1.5)],
+                            columns=IDENT_COLUMNS)
+    merged = merge_identifiability(existing, [row("w1", "median", "v0", 0.9),
+                                              row("w1", "median", "sigma", 0.2)])
+    key = merged.set_index(["objective", "policy", "axis"])["band_width"]
+    assert key[("ade", "median", "v0")] == 1.6      # kept
+    assert key[("w1", "median", "v0")] == 0.9       # replaced
+    assert key[("w1", "median", "sigma")] == 0.2    # added
+    assert len(merged) == 3
+
+
 def test_surface_npz_roundtrips_through_load_surface(tmp_path):
     """The npz written by run_rq2_surfaces must satisfy load_surface's contract
     (same 6 keys as run_rq2_calibration; combo metadata lives in the filename)."""
