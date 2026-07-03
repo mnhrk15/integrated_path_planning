@@ -159,7 +159,7 @@ LSTM −0.10〜1.70 nats / SGAN 2.02〜9.20 nats。第2世代での結論（「�
 1. **★1「inflation は robust を支配できない」維持**（平均・有意性とも、`exp_margin_control_g5a2/REPORT.md`）。さらに強化: **robust(ε=0) は S2/S3 で MinDist・Time の両軸で single を支配**（S2: MinDist +0.32・Time −1.4s、S3: +1.09・−2.5s、全て p<1e-3）。S1 は MinDist +0.50（p=5e-30）で Time 同等（Δ−0.07s, p=0.95）。「安全構成 = robust eps0」の論文主張の定量根拠。
 2. **margin_control 全480ラン衝突ゼロ**（第4世代は S2 inf1.00 で 4/20）。緩減速再設計（エンベロープ+適応緊急減速）が決定論 GT の衝突を排除し、弁別軸は MinDist/TTC へ移行。
 3. **comfort 全衝突ゼロ**: 第4世代の「決定論 GT 衝突ゼロ天井の崩壊」（S1: CV 1/1・LSTM 8/20 衝突）は**第5世代で天井が復活**。§6-4 の論文修正はさらに更新が必要 — 「分布なし予測の危険」の衝突論拠は rand 側に一本化する。SGAN S1 のタイムアウトも 19/20 → 4/20 に解消。
-4. **rand: CV > LSTM > SGAN の ADE 序列維持**（S1: 0.34/0.59/0.92、S2: 0.16/0.25/0.45、S3: 0.10/0.25/0.53）。衝突弁別は rand_s1 で CV 4/20 vs **LSTM/SGAN 0/20** — 予測品質が安全に直結する構図が鮮明化（第4世代 CV 14/20 から衝突数自体は減、エンベロープの安全効果）。
+4. **rand: CV > LSTM > SGAN の ADE 序列維持**（S1: 0.33/0.59/0.92、S2: 0.16/0.25/0.45、S3: 0.10/0.25/0.53）。〔2026-07-03 訂正: S1 CV の旧記載 0.34 は本メモの丸め誤記。生データ再計算・三者照合済みの論文表の値は 0.33±0.11（早期衝突終了 2 ランを除く n=18）〕衝突弁別は rand_s1 で CV 4/20 vs **LSTM/SGAN 0/20** — 予測品質が安全に直結する構図が鮮明化（第4世代 CV 14/20 から衝突数自体は減、エンベロープの安全効果）。
 5. **S3 の弁別力が復活**: 第4世代で3手法ビット一致（time 9.0s）だった comfort S3 が、譲り挙動の導入で手法別に分離（CV 23.0 / LSTM 24.07±0.94 / SGAN 24.21±1.01、min_d も分散）。§7-5 の limitation は第5世代では該当しない。
 6. **proc_planning: robust20 = 3.67x**（circle、リトライ込み定義）。ブレーキ候補ラダー・全域速度サンプリングで候補数が増えたため第4世代 2.59x と**非比較**（定義は同じだが分母の base planning が変化）。
 7. 乗り心地プロファイル（検証ラダー記録、verify_g5a_s8/smoke_g5a_s8）: S3 lstm/sgan の hard decel（a<−2.5）ゼロ・a_min −2.0、9ラン+33ラン全 goal・衝突ゼロ。
@@ -188,7 +188,7 @@ LSTM −0.10〜1.70 nats / SGAN 2.02〜9.20 nats。第2世代での結論（「�
 > 数値は本文の表に自己完結。再現が必要なら `examples/run_statistical_benchmark.py` 等で再生成する。一覧は提出時にどのキャンペーンが存在したかの記録として残置する。
 
 **第5世代（論文表の実体、単円構成）**:
-- ★1: `output/exp_margin_control_g5a2/{REPORT.md, welch_vs_baseline.csv, summary.csv, tradeoff_curve.png}`
+- ★1: `output/exp_margin_control_g5a2/{REPORT.md, welch_tests.csv, welch_vs_baseline.csv, summary.csv, tradeoff_curve.png}`（welch_tests.csv は `make_margin_report.py` が生成する実験A/B の Welch 検定表。2026-07-03 追記: 旧記載はこれを欠いていた）
 - comfort/rand: `output/{comfort,benchmark_rand}_s{1,2,3}_g5a2/{summary_stats.csv, all_runs.csv, latex_table.txt}`
 - proc: `output/exp_proc_planning_g5a2/{REPORT.md, results.json}`
 - robust×rand（rebuttal、§9）: `output/exp_robust_rand_g5a2/{REPORT.md, all_runs.csv, summary.csv}`

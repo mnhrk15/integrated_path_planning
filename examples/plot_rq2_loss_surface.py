@@ -3,8 +3,8 @@
 
 Reads the ``loss_surface_{scenario}.npz`` files written by run_rq2_calibration.py
 and draws the rollout-ADE loss over the (sigma, v0) grid as a heatmap with the
-identifiability ridge visible, marking the calibrated (refined) optimum and the
-AVEC paper's hand-tuned (0.7, 3.5) for contrast. Two outputs:
+identifiability ridge visible, marking the canonical calibrated point and the
+hand-tuned (0.7, 3.5) for contrast. Two outputs:
 
 * ``rq2_loss_surface_all.png`` -- the pooled-CITR surface (paper body).
 * ``rq2_loss_surface_grid.png`` -- the four CITR scenarios in a 2x2 grid
@@ -35,7 +35,22 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 REPO = Path(__file__).resolve().parent.parent
 FIGS = REPO / "figs"
 
-AVEC_DEFAULT = (0.7, 3.5)  # paper's hand-tuned (sigma, v0)
+# The hand-tuned (sigma, v0) reference the calibration is contrasted against.
+# Shown as "hand-tuned" in every figure legend -- the figures must stay free of
+# conference / paper names (thesis figure-independence rule), so this label never
+# names its origin.
+HAND_TUNED = (0.7, 3.5)
+
+# Canonical calibrated (sigma, v0): the radius-0.30 LOCO 26-fold mean reported in
+# outputs/rq2_evaluation/summary_loco.txt (sigma=1.168 +/- 0.091, v0=1.712 +/-
+# 0.124). This is a CROSS-VALIDATED fold-mean, NOT the minimum of any single loss
+# surface -- the pooled full-data fit stored in the npz is ~(1.21, 1.65), within
+# 2% rollout-ADE of it along the flat ridge -- so it can only be OVERLAID as an
+# annotation on the pooled surface. It is what the thesis body cites as "the
+# calibrated point", so it is passed as ``cal_point=`` to the pooled body figures
+# ONLY; the per-scenario grid and the per-objective identifiability surfaces keep
+# each surface's OWN fitted marker (cal_point left None).
+CALIBRATED_REFINED = (1.168, 1.712)
 
 # "Indistinguishable" band: profile values within this relative margin of the
 # profile minimum (review C2). Shared by the v0/sigma profile plots and the
@@ -71,11 +86,19 @@ def load_surface(npz_path: Path) -> Dict[str, object]:
     }
 
 
-def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False):
+def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False,
+                cal_point: Optional[tuple] = None):
     """Draw one (sigma, v0) loss surface onto ``ax``; return the mappable.
 
     x-axis = sigma, y-axis = v0 (the (sigma, v0) notation order). ``loss`` is
     [S=sigma, V=v0], so it is transposed for pcolormesh, whose C is [rows=y, cols=x].
+
+    ``cal_point`` overrides the marked calibrated ``(sigma, v0)`` with an external
+    point (the canonical fold-mean :data:`CALIBRATED_REFINED` for the pooled body
+    figures); left None it marks this surface's OWN fitted optimum -- the correct
+    behaviour for the per-scenario grid and the per-objective identifiability
+    surfaces, whose story IS their per-surface fit. The heatmap/contour are never
+    affected, so the surface stays byte-consistent with the un-annotated version.
     """
     gs, gv = surf["grid_sigma"], surf["grid_v0"]
     loss = surf["loss"]  # masked [S, V]
@@ -95,11 +118,16 @@ def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False):
     if loss.count() >= 4:
         ax.contour(gs, gv, loss.T, levels=8, colors="w", alpha=0.35, linewidths=0.5)
 
-    # calibrated (refined) optimum and the AVEC default for contrast.
-    ax.plot(surf["sigma"], surf["v0"], "o", mfc="white", mec="black", mew=1.5,
-            ms=9, label=f"calibrated ({surf['sigma']:.2f}, {surf['v0']:.2f})")
-    ax.plot(*AVEC_DEFAULT, "*", color="red", ms=13, mec="black", mew=0.6,
-            label=f"AVEC default ({AVEC_DEFAULT[0]}, {AVEC_DEFAULT[1]})")
+    # calibrated optimum (external override or this surface's own fit) and the
+    # hand-tuned reference for contrast.
+    # 3 decimals for the externally-supplied canonical point so the legend reads
+    # the exact figure the thesis body cites; 2 for a surface's own fitted marker.
+    cs, cv = cal_point if cal_point is not None else (surf["sigma"], surf["v0"])
+    p = 3 if cal_point is not None else 2
+    ax.plot(cs, cv, "o", mfc="white", mec="black", mew=1.5,
+            ms=9, label=f"calibrated ({cs:.{p}f}, {cv:.{p}f})")
+    ax.plot(*HAND_TUNED, "*", color="red", ms=13, mec="black", mew=0.6,
+            label=f"hand-tuned ({HAND_TUNED[0]}, {HAND_TUNED[1]})")
 
     ax.set_xlabel(r"$\sigma$ [m]")
     ax.set_ylabel(r"$v_0$ [m/s$^2$]")
@@ -108,14 +136,20 @@ def plot_single(ax, surf: Dict[str, object], title: str, use_log: bool = False):
 
 
 def plot_v0_profile(ax, surf: Dict[str, object],
-                    ylabel: str = "rollout ADE [m]") -> None:
+                    ylabel: str = "rollout ADE [m]",
+                    cal_point: Optional[tuple] = None) -> None:
     """1-D ADE-vs-v0 profile at the grid sigma nearest the fitted optimum.
 
     Makes the review-C2 identifiability explicit: along the ridge the rollout ADE
-    is nearly flat between the calibrated v0 (~1.7) and the AVEC hand-tuned v0=3.5,
+    is nearly flat between the calibrated v0 (~1.7) and the hand-tuned v0=3.5,
     so the data CANNOT distinguish them (the '<2% ADE' band). Shades the v0 span
     whose ADE is within 2% of the profile minimum. ``ylabel`` overrides the axis
     label when the surface holds a non-ADE objective (the multi-objective sweeps).
+
+    ``cal_point`` overrides ONLY the drawn calibrated-v0 line and its label (the
+    canonical fold-mean for the pooled body figure); the profiled SLICE and the
+    2%-band are always taken from this surface's own fit, so the plotted curve is
+    unchanged. Left None the line marks this surface's own fitted v0.
     """
     gs, gv = surf["grid_sigma"], surf["grid_v0"]
     loss = surf["loss"]  # masked [S, V]
@@ -136,10 +170,11 @@ def plot_v0_profile(ax, surf: Dict[str, object],
                    label="within 2% of min (indistinguishable)")
         ax.axvspan(float(v[band].min()), float(v[band].max()),
                    color="orange", alpha=0.10)
-    ax.axvline(surf["v0"], color="black", ls="--", lw=1.2,
-               label=f"calibrated v0={surf['v0']:.2f}")
-    ax.axvline(AVEC_DEFAULT[1], color="red", ls=":", lw=1.5,
-               label=f"AVEC v0={AVEC_DEFAULT[1]}")
+    cal_v0 = cal_point[1] if cal_point is not None else surf["v0"]
+    ax.axvline(cal_v0, color="black", ls="--", lw=1.2,
+               label=f"calibrated v0={cal_v0:.{3 if cal_point is not None else 2}f}")
+    ax.axvline(HAND_TUNED[1], color="red", ls=":", lw=1.5,
+               label=f"hand-tuned v0={HAND_TUNED[1]}")
     ax.set_xlabel(r"$v_0$ [m/s$^2$]")
     ax.set_ylabel(ylabel)
     # Title kept verbatim from the pre-sigma-profile version so re-rendering the
@@ -150,13 +185,18 @@ def plot_v0_profile(ax, surf: Dict[str, object],
 
 
 def plot_sigma_profile(ax, surf: Dict[str, object],
-                       ylabel: str = "rollout ADE [m]") -> None:
+                       ylabel: str = "rollout ADE [m]",
+                       cal_point: Optional[tuple] = None) -> None:
     """1-D loss-vs-sigma profile at the grid v0 nearest the fitted optimum.
 
     The sigma-axis counterpart of :func:`plot_v0_profile` (review 1.2-2: the S2
     discriminating cell is driven by the repulsion RANGE sigma, so sigma-side
     identifiability must be shown, not only the v0 side). Shades the sigma span
     within ``BAND_REL`` of the profile minimum.
+
+    ``cal_point`` overrides ONLY the drawn calibrated-sigma line and its label;
+    the profiled SLICE and band always come from this surface's own fit (curve
+    unchanged). Left None the line marks this surface's own fitted sigma.
     """
     gs, gv = surf["grid_sigma"], surf["grid_v0"]
     loss = surf["loss"]  # masked [S, V]
@@ -177,10 +217,11 @@ def plot_sigma_profile(ax, surf: Dict[str, object],
                    label="within 2% of min (indistinguishable)")
         ax.axvspan(float(s[band].min()), float(s[band].max()),
                    color="orange", alpha=0.10)
-    ax.axvline(surf["sigma"], color="black", ls="--", lw=1.2,
-               label=f"calibrated sigma={surf['sigma']:.2f}")
-    ax.axvline(AVEC_DEFAULT[0], color="red", ls=":", lw=1.5,
-               label=f"AVEC sigma={AVEC_DEFAULT[0]}")
+    cal_sigma = cal_point[0] if cal_point is not None else surf["sigma"]
+    ax.axvline(cal_sigma, color="black", ls="--", lw=1.2,
+               label=f"calibrated sigma={cal_sigma:.{3 if cal_point is not None else 2}f}")
+    ax.axvline(HAND_TUNED[0], color="red", ls=":", lw=1.5,
+               label=f"hand-tuned sigma={HAND_TUNED[0]}")
     ax.set_xlabel(r"$\sigma$ [m]")
     ax.set_ylabel(ylabel)
     ax.set_title(rf"loss vs $\sigma$ at $v_0$={gv[vi]:.2f} (identifiability)")
@@ -294,7 +335,10 @@ def main():
     else:
         surf = load_surface(all_npz)
         fig, ax = plt.subplots(figsize=(6.5, 4.2))
-        mesh = plot_single(ax, surf, "RQ2 loss surface (pooled CITR)", use_log=args.log)
+        # Pooled body figure: annotate the canonical cross-validated calibrated
+        # point (not this full-data surface's own minimum) -- see CALIBRATED_REFINED.
+        mesh = plot_single(ax, surf, "RQ2 loss surface (pooled CITR)",
+                           use_log=args.log, cal_point=CALIBRATED_REFINED)
         if mesh is not None:
             fig.colorbar(mesh, ax=ax, label="rollout ADE [m]")
         ax.legend(loc="upper right", fontsize=8, framealpha=0.85)
@@ -305,7 +349,7 @@ def main():
 
         # --- (a2) v0 identifiability profile (review C2) ---
         fig2, ax2 = plt.subplots(figsize=(6.0, 4.0))
-        plot_v0_profile(ax2, surf)
+        plot_v0_profile(ax2, surf, cal_point=CALIBRATED_REFINED)
         out2 = out_dir / "rq2_v0_profile_all.png"
         fig2.savefig(out2, dpi=200, bbox_inches="tight")
         plt.close(fig2)
