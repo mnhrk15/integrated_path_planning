@@ -116,6 +116,42 @@ def test_predict_single_best_returns_the_medoid_not_a_draw(monkeypatch):
     assert any(np.array_equal(best, d) for d in draws)
 
 
+def test_predict_single_best_draw_returns_first_sample(monkeypatch):
+    """single_select='draw' (RQ3) returns the FIRST draw -- a true single
+    sample -- while still generating all num_samples draws (identical RNG
+    consumption to the medoid path) and returning the full distribution."""
+    predictor = TrajectoryPredictor(model_path=None, pred_len=3,
+                                    num_samples=5, device='cpu',
+                                    single_select='draw')
+    draws = [np.full((2, 3, 2), v, dtype=float) for v in (0.0, 10.0, 10.0, 10.0, 8.0)]
+    calls = iter(draws)
+    n_calls = 0
+
+    def scripted(*a, **k):
+        nonlocal n_calls
+        n_calls += 1
+        return next(calls)
+
+    monkeypatch.setattr(predictor, "predict", scripted)
+
+    best, dist = predictor.predict_single_best(None, None, None)
+
+    assert np.array_equal(best, draws[0])          # first draw, NOT the medoid
+    assert n_calls == 5                            # all draws still generated
+    assert dist.shape == (5, 2, 3, 2)
+
+
+def test_single_select_defaults_to_medoid_and_validates():
+    """Default stays medoid (bit-identity for every existing caller); bad
+    values fail fast."""
+    predictor = TrajectoryPredictor(model_path=None, pred_len=3,
+                                    num_samples=5, device='cpu')
+    assert predictor.single_select == 'medoid'
+    with pytest.raises(ValueError, match="single_select"):
+        TrajectoryPredictor(model_path=None, pred_len=3, num_samples=5,
+                            device='cpu', single_select='mean')
+
+
 def test_predict_single_best_single_sample_passthrough(monkeypatch):
     """num_samples=1 is a true single draw: passthrough, no distribution."""
     predictor = TrajectoryPredictor(model_path=None, pred_len=3,

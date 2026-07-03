@@ -19,7 +19,9 @@ class SimulationConfig:
         # Observation parameters
         obs_len: Number of observation time steps
         pred_len: Number of prediction time steps
-        
+        single_select: Representative pick from num_samples draws
+            ('medoid' default, 'draw' = true single sample)
+
         # Ego vehicle parameters
         ego_initial_state: Initial state [x, y, yaw, v, a]
         ego_target_speed: Target speed [m/s]
@@ -62,6 +64,10 @@ class SimulationConfig:
     obs_len: int = 8
     pred_len: int = 8
     num_samples: int = 1
+    # How predict_single_best picks the representative from num_samples draws:
+    # 'medoid' (default, sample closest to the mean) or 'draw' (first draw =
+    # a true single sample; review F4 / RQ3).
+    single_select: str = 'medoid'
     
     # Ego vehicle
     ego_initial_state: list = field(default_factory=lambda: [0.0, 0.0, 0.0, 5.0, 0.0])
@@ -217,7 +223,10 @@ def validate_config(config: SimulationConfig) -> None:
         errors.append(f"pred_len must be positive, got {config.pred_len}")
     if config.num_samples <= 0:
         errors.append(f"num_samples must be positive, got {config.num_samples}")
-    
+    if config.single_select not in ('medoid', 'draw'):
+        errors.append(
+            f"single_select must be one of ['medoid', 'draw'], got '{config.single_select}'")
+
     # Ego vehicle parameters
     if len(config.ego_initial_state) != 5:
         errors.append(f"ego_initial_state must have 5 elements [x, y, yaw, v, a], got {len(config.ego_initial_state)}")
@@ -522,6 +531,7 @@ def save_config(config: SimulationConfig, config_path: str):
         'obs_len': config.obs_len,
         'pred_len': config.pred_len,
         'num_samples': config.num_samples,
+        'single_select': config.single_select,
         'ego_initial_state': config.ego_initial_state,
         'ego_target_speed': config.ego_target_speed,
         'ego_max_speed': config.ego_max_speed,

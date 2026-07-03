@@ -85,6 +85,56 @@ class PedestrianObserver:
                 f"history length={len(self.history)}/{self.obs_len}"
             )
     
+    def seed(self, states):
+        """Replace the history with pre-computed observations (RQ3 warmup).
+
+        Unlike :meth:`update`, which subsamples a stream of simulator states
+        onto the sgan_dt grid, ``seed`` installs already-sampled frames
+        directly: each state becomes one history entry. Callers must therefore
+        provide states exactly ``sgan_dt`` apart (oldest first). The intended
+        contract is ``timestamps = -(obs_len-1)*sgan_dt .. 0.0`` so that the
+        subsequent run() samples land on the 0.4 s grid at t = sgan_dt,
+        2*sgan_dt, ... (the accumulated-time logic in :meth:`update` measures
+        elapsed time from the last ``seed``/``update`` call).
+
+        Args:
+            states: Sequence of PedestrianState, oldest first, strictly
+                increasing timestamps, length >= obs_len.
+
+        Raises:
+            ValueError: On too few states or non-increasing timestamps.
+        """
+        states = list(states)
+        if len(states) < self.obs_len:
+            raise ValueError(
+                f"observation seed needs >= obs_len={self.obs_len} states, "
+                f"got {len(states)}")
+        ts = [s.timestamp for s in states]
+        if any(b <= a for a, b in zip(ts, ts[1:])):
+            raise ValueError(
+                f"observation seed timestamps must be strictly increasing, got {ts}")
+        gaps = np.diff(np.asarray(ts, dtype=float))
+        if np.any(np.abs(gaps - self.sgan_dt) > 1e-6):
+            raise ValueError(
+                f"observation seed states must be exactly sgan_dt="
+                f"{self.sgan_dt}s apart (each becomes one history frame); "
+                f"got gaps {gaps.tolist()}")
+        if abs(ts[-1]) > 1e-6:
+            raise ValueError(
+                f"observation seed must end at timestamp 0.0 (= the state the "
+                f"run starts from), got {ts[-1]}")
+        self.reset()
+        for s in states:
+            self.history.append(s.positions.copy())
+            self.timestamps.append(s.timestamp)
+        self.n_peds = states[-1].n_peds
+        self._last_update_timestamp = states[-1].timestamp
+        self.accumulated_time = 0.0
+        logger.debug(
+            f"Observer seeded with {len(states)} states "
+            f"(t={ts[0]:.2f}..{ts[-1]:.2f}s, n_peds={self.n_peds})"
+        )
+
     @property
     def last_sample_time(self) -> Optional[float]:
         """Timestamp of the most recent sampled frame, or None if empty."""

@@ -18,35 +18,42 @@ family-wise / FDR 補正（alpha=0.05）。BH-FDR を primary、Holm-Bonferroni 
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w0.5_loco.json` — source=RQ2-distmatch-w0.5-loco, tests=3
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_id8_loco.json` — source=RQ2-distmatch-w1_id8-loco, tests=3
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_loco.json` — source=RQ2-distmatch-w1-loco, tests=3
+- `outputs/rq3_realloop/headline_tests.json` — source=rq3_realloop, tests=46
 
 ## 補正結果（canonical 研究横断 family）
 
 | test_id | family | p_value | family_size | family_bh_q | family_holm_p | overall_bh_q | overall_holm_p |
 |---|---|---|---|---|---|---|---|
-| rq1b.rand.fisher.avec.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.avec.scenario_02 | rq1b_claim2_fisher | 0.0078 | 18 | 0.1404 | 0.1404 | 0.0410 | 0.1404 |
-| rq1b.rand.fisher.avec.scenario_03 | rq1b_claim2_fisher | 0.2116 | 18 | 0.7714 | 1.0000 | 0.5772 | 1.0000 |
-| rq1b.rand.fisher.calib.scenario_01 | rq1b_claim2_fisher | 0.3576 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
+| rq1b.rand.fisher.avec.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.avec.scenario_02 | rq1b_claim2_fisher | 0.0078 | 18 | 0.1404 | 0.1404 | 0.0526 | 0.1872 |
+| rq1b.rand.fisher.avec.scenario_03 | rq1b_claim2_fisher | 0.2116 | 18 | 0.7714 | 1.0000 | 0.6597 | 1.0000 |
+| rq1b.rand.fisher.calib.scenario_01 | rq1b_claim2_fisher | 0.3576 | 18 | 0.7714 | 1.0000 | 0.8046 | 1.0000 |
 | rq1b.rand.fisher.calib.scenario_02 | rq1b_claim2_fisher | 1.0000 | 18 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| rq1b.rand.fisher.calib.scenario_03 | rq1b_claim2_fisher | 0.2199 | 18 | 0.7714 | 1.0000 | 0.5772 | 1.0000 |
-| rq1b.rand.fisher.calib_hi.scenario_01 | rq1b_claim2_fisher | 0.3551 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
+| rq1b.rand.fisher.calib.scenario_03 | rq1b_claim2_fisher | 0.2199 | 18 | 0.7714 | 1.0000 | 0.6597 | 1.0000 |
+| rq1b.rand.fisher.calib_hi.scenario_01 | rq1b_claim2_fisher | 0.3551 | 18 | 0.7714 | 1.0000 | 0.8046 | 1.0000 |
 | rq1b.rand.fisher.calib_hi.scenario_02 | rq1b_claim2_fisher | 1.0000 | 18 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| rq1b.rand.fisher.calib_hi.scenario_03 | rq1b_claim2_fisher | 0.4716 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.calib_lo.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.calib_lo.scenario_02 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.calib_lo.scenario_03 | rq1b_claim2_fisher | 0.0673 | 18 | 0.4038 | 1.0000 | 0.2355 | 1.0000 |
-| rq1b.rand.fisher.calib_loso_smin.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.calib_loso_smin.scenario_02 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq1b.rand.fisher.calib_loso_smin.scenario_03 | rq1b_claim2_fisher | 0.0673 | 18 | 0.4038 | 1.0000 | 0.2355 | 1.0000 |
+| rq1b.rand.fisher.calib_hi.scenario_03 | rq1b_claim2_fisher | 0.4716 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.calib_lo.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.calib_lo.scenario_02 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.calib_lo.scenario_03 | rq1b_claim2_fisher | 0.0673 | 18 | 0.4038 | 1.0000 | 0.2913 | 1.0000 |
+| rq1b.rand.fisher.calib_loso_smin.scenario_01 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.calib_loso_smin.scenario_02 | rq1b_claim2_fisher | 0.6000 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq1b.rand.fisher.calib_loso_smin.scenario_03 | rq1b_claim2_fisher | 0.0673 | 18 | 0.4038 | 1.0000 | 0.2913 | 1.0000 |
 | rq1b.rand.fisher.calib_loso_vmax.scenario_01 | rq1b_claim2_fisher | 1.0000 | 18 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
 | rq1b.rand.fisher.calib_loso_vmax.scenario_02 | rq1b_claim2_fisher | 1.0000 | 18 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| rq1b.rand.fisher.calib_loso_vmax.scenario_03 | rq1b_claim2_fisher | 0.4716 | 18 | 0.7714 | 1.0000 | 0.7412 | 1.0000 |
-| rq2.loco.closest_sign.calibrated | rq2_fidelity_paired_loco | 0.0000 | 3 | 0.0000 | 0.0000 | 0.0001 | 0.0002 |
+| rq1b.rand.fisher.calib_loso_vmax.scenario_03 | rq1b_claim2_fisher | 0.4716 | 18 | 0.7714 | 1.0000 | 0.8526 | 1.0000 |
+| rq2.loco.closest_sign.calibrated | rq2_fidelity_paired_loco | 0.0000 | 3 | 0.0000 | 0.0000 | 0.0001 | 0.0003 |
 | rq2.loco.closest_wilcoxon.calibrated | rq2_fidelity_paired_loco | 0.0000 | 3 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
 | rq2.loco.closest_sign.no_repulsion | rq2_fidelity_paired_loco | 0.0000 | 3 | 0.0000 | 0.0000 | 0.0000 | 0.0000 |
+| rq3.v1.reactivity_sign.calib.cv.single | rq3_v1_reactivity | 1.0000 | 6 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.calib.cv.robust | rq3_v1_reactivity | 1.0000 | 6 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.calib.lstm.single | rq3_v1_reactivity | 0.3269 | 6 | 0.9808 | 1.0000 | 0.8046 | 1.0000 |
+| rq3.v1.reactivity_sign.calib.lstm.robust | rq3_v1_reactivity | 0.0755 | 6 | 0.4531 | 0.4531 | 0.2913 | 1.0000 |
+| rq3.v1.reactivity_sign.calib.sgan.single | rq3_v1_reactivity | 0.8450 | 6 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.calib.sgan.robust | rq3_v1_reactivity | 0.8450 | 6 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
 
-- 研究横断 family size（overall）: **21** 検定
-- overall BH-FDR で生存（q<0.05）: **4** / Holm で生存: **3**
+- 研究横断 family size（overall）: **27** 検定
+- overall BH-FDR で生存（q<0.05）: **3** / Holm で生存: **3**
 
 > **overall の読み方**: overall は RQ2 忠実度と RQ1b 計画安全という*異なる問い*を1 family に束ねた最保守の境界（cross-suite 過剰補正）。適切な評価単位は各 family 内補正（上表 `family_bh_q`）と下の RQ1b family 定義感度。overall は『最悪でもこの程度』の sanity 上限として読む。
 
@@ -104,6 +111,46 @@ LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、�
 | rq2dm.loco.w1.closest_sign.calibrated | rq2_distmatch_loco | 0.0025 | 12 | 0.0027 | 0.0100 |
 | rq2dm.loco.w1.closest_sign.avec_default | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0001 |
 | rq2dm.loco.w1.closest_sign.no_repulsion | rq2_distmatch_loco | 0.0000 | 12 | 0.0000 | 0.0000 |
+| rq3.v1.collision_mcnemar.calib.cv.single | rq3_v1_collision_mcnemar | 0.0312 | 5 | 0.0521 | 0.1250 |
+| rq3.v1.collision_mcnemar.calib.lstm.single | rq3_v1_collision_mcnemar | 0.0156 | 5 | 0.0521 | 0.0781 |
+| rq3.v1.collision_mcnemar.calib.lstm.robust | rq3_v1_collision_mcnemar | 0.5000 | 5 | 0.5000 | 1.0000 |
+| rq3.v1.collision_mcnemar.calib.sgan.single | rq3_v1_collision_mcnemar | 0.0312 | 5 | 0.0521 | 0.1250 |
+| rq3.v1.collision_mcnemar.calib.sgan.robust | rq3_v1_collision_mcnemar | 0.5000 | 5 | 0.5000 | 1.0000 |
+| rq3.v1.reactivity_sign.avec.cv.single | rq3_v1_reactivity_ctrl | 1.0000 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.avec.cv.single | rq3_v1_collision_mcnemar_ctrl | 0.0156 | 14 | 0.0729 | 0.1875 |
+| rq3.v1.reactivity_sign.avec.cv.robust | rq3_v1_reactivity_ctrl | 1.0000 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.avec.lstm.single | rq3_v1_reactivity_ctrl | 0.3269 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.avec.lstm.single | rq3_v1_collision_mcnemar_ctrl | 0.0078 | 14 | 0.0547 | 0.1094 |
+| rq3.v1.reactivity_sign.avec.lstm.robust | rq3_v1_reactivity_ctrl | 0.1686 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.avec.lstm.robust | rq3_v1_collision_mcnemar_ctrl | 0.2500 | 14 | 0.3182 | 1.0000 |
+| rq3.v1.reactivity_sign.avec.sgan.single | rq3_v1_reactivity_ctrl | 0.5572 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.avec.sgan.single | rq3_v1_collision_mcnemar_ctrl | 0.0078 | 14 | 0.0547 | 0.1094 |
+| rq3.v1.reactivity_sign.avec.sgan.robust | rq3_v1_reactivity_ctrl | 0.8450 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.avec.sgan.robust | rq3_v1_collision_mcnemar_ctrl | 0.1250 | 14 | 0.1750 | 1.0000 |
+| rq3.v1.reactivity_sign.norep.cv.single | rq3_v1_reactivity_ctrl | 0.8450 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.norep.cv.single | rq3_v1_collision_mcnemar_ctrl | 0.0625 | 14 | 0.1750 | 0.6875 |
+| rq3.v1.reactivity_sign.norep.cv.robust | rq3_v1_reactivity_ctrl | 0.8450 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.norep.lstm.single | rq3_v1_reactivity_ctrl | 1.0000 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.norep.lstm.single | rq3_v1_collision_mcnemar_ctrl | 0.1250 | 14 | 0.1750 | 1.0000 |
+| rq3.v1.reactivity_sign.norep.lstm.robust | rq3_v1_reactivity_ctrl | 0.5572 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.norep.lstm.robust | rq3_v1_collision_mcnemar_ctrl | 1.0000 | 14 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.norep.sgan.single | rq3_v1_reactivity_ctrl | 0.8450 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.norep.sgan.single | rq3_v1_collision_mcnemar_ctrl | 0.1250 | 14 | 0.1750 | 1.0000 |
+| rq3.v1.reactivity_sign.norep.sgan.robust | rq3_v1_reactivity_ctrl | 0.1686 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.norep.sgan.robust | rq3_v1_collision_mcnemar_ctrl | 0.5000 | 14 | 0.5385 | 1.0000 |
+| rq3.v1.reactivity_sign.calib13x.cv.single | rq3_v1_reactivity_ctrl | 0.5572 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.calib13x.cv.single | rq3_v1_collision_mcnemar_ctrl | 0.0625 | 14 | 0.1750 | 0.6875 |
+| rq3.v1.reactivity_sign.calib13x.cv.robust | rq3_v1_reactivity_ctrl | 0.5572 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.calib13x.lstm.single | rq3_v1_reactivity_ctrl | 0.5572 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.calib13x.lstm.single | rq3_v1_collision_mcnemar_ctrl | 0.1250 | 14 | 0.1750 | 1.0000 |
+| rq3.v1.reactivity_sign.calib13x.lstm.robust | rq3_v1_reactivity_ctrl | 0.3269 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.reactivity_sign.calib13x.sgan.single | rq3_v1_reactivity_ctrl | 0.3269 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.calib13x.sgan.single | rq3_v1_collision_mcnemar_ctrl | 0.1250 | 14 | 0.1750 | 1.0000 |
+| rq3.v1.reactivity_sign.calib13x.sgan.robust | rq3_v1_reactivity_ctrl | 0.8450 | 18 | 1.0000 | 1.0000 |
+| rq3.v1.collision_mcnemar.calib13x.sgan.robust | rq3_v1_collision_mcnemar_ctrl | 0.5000 | 14 | 0.5385 | 1.0000 |
+| rq3.v3.robust_gain_sign.replay.cv | rq3_v3_robust_real | nan | 2 | nan | nan |
+| rq3.v3.robust_gain_sign.replay.lstm | rq3_v3_robust_real | 0.0005 | 2 | 0.0005 | 0.0010 |
+| rq3.v3.robust_gain_sign.replay.sgan | rq3_v3_robust_real | 0.0005 | 2 | 0.0005 | 0.0010 |
 
 ## RQ1b claim-(2) family 定義感度
 
@@ -117,6 +164,6 @@ LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、�
 
 ## 修論向け要約（データ駆動）
 
-- **RQ2 忠実度（per-encounter 対応検定, review F5）**: 較正 sim vs 実の最接近距離は同一遭遇の対標本＝符号検定が正当な見出し。real>sim が 24/26 遭遇・raw p=1.05e-05。**忠実度 family 内（m=3, Wilcoxon 併記）で BH q=1.05e-05＝明確に有意**＝sim が実 standoff を再現しきれない＝~0.68m の忠実度ギャップは統計的に実在（限界を補強する向きの所見）。研究横断プール（m=21）でも q=7.34e-05。旧見出しの pooled KS（p=0.007）は対標本に独立2標本検定を当てた仕様ミスで、診断（auxiliary）に降格。
+- **RQ2 忠実度（per-encounter 対応検定, review F5）**: 較正 sim vs 実の最接近距離は同一遭遇の対標本＝符号検定が正当な見出し。real>sim が 24/26 遭遇・raw p=1.05e-05。**忠実度 family 内（m=3, Wilcoxon 併記）で BH q=1.05e-05＝明確に有意**＝sim が実 standoff を再現しきれない＝~0.68m の忠実度ギャップは統計的に実在（限界を補強する向きの所見）。研究横断プール（m=27）でも q=9.44e-05。旧見出しの pooled KS（p=0.007）は対標本に独立2標本検定を当てた仕様ミスで、診断（auxiliary）に降格。
 - **RQ1b claim-(2)（分布なし計画は危険）**: 最有意セル S2/avec は raw p=0.0078（pseudo-replication で反保守的＝真の p の下界）。avec 条件付き family（m=3）では BH q=0.0234＝生存だが、弱パワー corner を含む全 GT×scenario 走査（m=18）では BH q=0.1404＝不成立。**＝claim-(2) の per-scenario 信号は family 定義に敏感な境界事例で、確定的ではなく示唆に留まる**（既存 REPORT の『示唆・反応モデル依存・外的妥当性ではない』枠組みと整合）。
 - **総括**: 強い結論は RQ1b claim-(1)（robust 利得は全 GT で頑健・`robust_gain_holds`、有意性検定を要さない決定的判定）と RQ2 の忠実度ギャップの実在。claim-(2) の CV 危険性は多重比較後は弱い示唆。多重比較補正は**既存の正直なフレーミングを覆さず追認する**。

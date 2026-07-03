@@ -34,6 +34,7 @@ class TrajectoryPredictor:
         sim_dt: float = 0.1,
         plan_horizon: float = 5.0,
         method: str = 'sgan',
+        single_select: str = 'medoid',
     ):
         self.pred_len = pred_len
         self.num_samples = num_samples
@@ -43,10 +44,17 @@ class TrajectoryPredictor:
         self.sim_dt = sim_dt
         self.plan_horizon = plan_horizon
         self.method = method.lower()
-        
+        self.single_select = single_select
+
         valid_methods = ['cv', 'lstm', 'sgan']
         if self.method not in valid_methods:
             raise ValueError(f"Invalid method '{method}'. Must be one of {valid_methods}")
+
+        valid_single_select = ['medoid', 'draw']
+        if self.single_select not in valid_single_select:
+            raise ValueError(
+                f"Invalid single_select '{single_select}'. "
+                f"Must be one of {valid_single_select}")
         
         # SGAN and LSTM require loading the model
         if self.method in ['sgan', 'lstm'] and model_path is not None:
@@ -322,11 +330,12 @@ class TrajectoryPredictor:
         """Predict trajectories, returning a representative sample and the
         full distribution.
 
-        NOTE (review F4): with num_samples > 1 the "best" trajectory is NOT a
-        single random draw -- it is the scene-level MEDOID of num_samples
-        draws: num_samples full predictions are generated and the one whose
-        summed distance to the sample mean is smallest is returned. Scenario
-        YAMLs set num_samples: 20, so every "single"-planning condition in the
+        NOTE (review F4): with num_samples > 1 and the default
+        ``single_select='medoid'``, the "best" trajectory is NOT a single
+        random draw -- it is the scene-level MEDOID of num_samples draws:
+        num_samples full predictions are generated and the one whose summed
+        distance to the sample mean is smallest is returned. Scenario YAMLs
+        set num_samples: 20, so every "single"-planning condition in the
         DA-PoC / RQ1b campaigns actually plans on a medoid-of-20
         representative (variance-suppressed, mode-seeking), not on one SGAN
         draw. For the deterministic CV predictor all draws coincide, so the
@@ -334,6 +343,14 @@ class TrajectoryPredictor:
         material for stochastic predictors (SGAN/LSTM). Downstream provenance
         records this as ``single_mode=medoid_of_{num_samples}``
         (examples/run_da_poc.py).
+
+        ``single_select='draw'`` (RQ3) returns the FIRST of the num_samples
+        draws instead -- a true single sample, seeded through the global torch
+        RNG like every other draw. All num_samples draws are still generated,
+        so the RNG consumption per call is identical to the medoid path: a
+        draw-mode run and a medoid/robust-mode run with the same seed see the
+        same sample sets until their planned trajectories diverge. Downstream
+        provenance records this as ``single_mode=draw1_of_{num_samples}``.
 
         Args:
             obs_traj: Observed trajectories [obs_len, n_peds, 2]
@@ -359,10 +376,15 @@ class TrajectoryPredictor:
             samples.append(pred)
         
         samples = np.stack(samples, axis=0)  # [num_samples, n_peds, pred_len, 2]
-        
+
+        if self.single_select == 'draw':
+            # True single sample (review F4): first draw, RNG consumption
+            # identical to the medoid path (see docstring).
+            return samples[0], samples
+
         # Select best sample (closest to mean)
         mean_traj = samples.mean(axis=0)
         distances = np.linalg.norm(samples - mean_traj[None, ...], axis=-1).sum(axis=(1, 2))
         best_idx = np.argmin(distances)
-        
+
         return samples[best_idx], samples
