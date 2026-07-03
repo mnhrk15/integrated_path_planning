@@ -63,6 +63,10 @@ outputs/rq1b/rand/
 outputs/rq1b_anim/
 outputs/rq1b_anim2/
 outputs/rq2_calibration/
+# RQ3: per-run JSON cache and the run-level table are regenerable
+# (--report-only); only the small aggregates/REPORT/sidecar are tracked.
+outputs/rq3_realloop/runs/
+outputs/rq3_realloop/all_runs.csv
 
 # Jupyter
 .ipynb_checkpoints/

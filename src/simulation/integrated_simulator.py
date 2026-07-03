@@ -276,7 +276,25 @@ class IntegratedSimulator:
         config: Simulation configuration
     """
     
-    def __init__(self, config: SimulationConfig):
+    def __init__(self, config: SimulationConfig, pedestrian_source=None,
+                 observation_seed=None):
+        """
+        Args:
+            config: Simulation configuration (the single source of truth).
+            pedestrian_source: Optional pre-built pedestrian source satisfying
+                the ``step(ego_state, n=1)`` / ``get_state() -> PedestrianState``
+                contract (e.g. ReplayPedestrianSource, or an externally
+                configured PedestrianSimulator). When given, it replaces the
+                internal SFM construction from ``config.ped_initial_states``.
+                Default None reproduces the original behaviour bit-for-bit.
+            observation_seed: Optional pre-computed observation history
+                (sequence of PedestrianState, oldest first, sgan_dt apart,
+                last timestamp = 0.0). When given, the observer is seeded
+                directly and the warmup loop is SKIPPED, so the pedestrian
+                source is not advanced before t=0 (RQ3: keeps t=0 anchored to
+                the recorded encounter frame 0). Default None keeps the
+                original warmup (source advanced obs_len*sgan_dt/dt steps).
+        """
         self.config = config
         self.time = 0.0
         self.step_count = 0
@@ -299,8 +317,10 @@ class IntegratedSimulator:
         self.obstacle_radius = getattr(config, "obstacle_radius", self.ped_radius)
         self.ego_footprint = footprint_from_config(config)  # None = legacy single circle
         
-        # 2. Initialize pedestrian simulator
-        if len(config.ped_initial_states) > 0:
+        # 2. Initialize pedestrian simulator (or adopt an injected source)
+        if pedestrian_source is not None:
+            self.pedestrian_sim = pedestrian_source
+        elif len(config.ped_initial_states) > 0:
             ped_states = np.array(config.ped_initial_states)
             self.pedestrian_sim = PedestrianSimulator(
                 initial_states=ped_states,
@@ -335,7 +355,8 @@ class IntegratedSimulator:
             sgan_dt=self.observer.sgan_dt,
             sim_dt=config.dt,
             plan_horizon=plan_horizon,
-            method=getattr(config, 'prediction_method', 'sgan')
+            method=getattr(config, 'prediction_method', 'sgan'),
+            single_select=getattr(config, 'single_select', 'medoid')
         )
         
         # 5. Initialize path planner
@@ -398,9 +419,23 @@ class IntegratedSimulator:
             config.static_obstacles, step=0.5
         )
         
+        if self.pedestrian_sim is None and observation_seed is not None:
+            raise ValueError(
+                "observation_seed was given but there is no pedestrian source "
+                "(no pedestrian_source argument and empty ped_initial_states) "
+                "-- the seed would be silently discarded")
         if self.pedestrian_sim is not None:
-            self.warmup()
-        
+            if observation_seed is not None:
+                # Seed the observer directly instead of advancing the source
+                # (RQ3: t=0 stays anchored to the recorded encounter frame 0,
+                # and no pre-avoidance of the stationary warmup ego occurs).
+                self.observer.seed(observation_seed)
+                logger.info(
+                    f"Observer seeded with {len(observation_seed)} external "
+                    "states; warmup loop skipped")
+            else:
+                self.warmup()
+
         logger.info("Integrated simulator initialization complete")
     
     def warmup(self):

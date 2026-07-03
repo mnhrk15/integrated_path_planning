@@ -107,3 +107,75 @@ class TestObserverSamplingInterval:
         drive(obs, dt=0.1, n_steps=32, t0=5.0)
         assert obs.is_ready
         np.testing.assert_allclose(np.diff(np.array(obs.timestamps)), 0.4, atol=1e-9)
+
+
+class TestObserverSeed:
+    """RQ3: observer.seed() installs a pre-computed history directly."""
+
+    def _seed_states(self, obs_len=8, sgan_dt=0.4):
+        # Backcast contract: timestamps -(obs_len-1)*sgan_dt .. 0.0
+        return [make_state(-(obs_len - 1 - k) * sgan_dt) for k in range(obs_len)]
+
+    def test_seed_makes_observer_ready(self):
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        obs.seed(self._seed_states())
+        assert obs.is_ready
+        assert obs.last_sample_time == 0.0
+        np.testing.assert_allclose(np.diff(np.array(obs.timestamps)), 0.4,
+                                   atol=1e-9)
+
+    def test_seed_then_run_samples_on_sgan_grid(self):
+        """After seeding to t=0, run-time sampling lands at 0.4, 0.8, ..."""
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        obs.seed(self._seed_states())
+        sampled = []
+        for k in range(1, 13):
+            t = k * 0.1
+            before = list(obs.timestamps)
+            obs.update(make_state(t))
+            if list(obs.timestamps) != before:
+                sampled.append(t)
+        np.testing.assert_allclose(sampled, [0.4, 0.8, 1.2], atol=1e-9)
+
+    def test_seed_too_short_raises(self):
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        with pytest.raises(ValueError, match="obs_len"):
+            obs.seed(self._seed_states()[:5])
+
+    def test_seed_non_increasing_timestamps_raise(self):
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        states = self._seed_states()
+        states[3] = make_state(states[2].timestamp)  # duplicate timestamp
+        with pytest.raises(ValueError, match="increasing"):
+            obs.seed(states)
+
+    def test_seed_replaces_prior_history(self):
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        drive(obs, dt=0.1, n_steps=100)  # arbitrary prior state
+        obs.seed(self._seed_states())
+        assert len(obs.history) == 8
+        assert obs.last_sample_time == 0.0
+        assert obs.accumulated_time == 0.0
+
+    def test_seed_positions_are_copies(self):
+        """Mutating the caller's arrays must not corrupt the history."""
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        states = self._seed_states()
+        obs.seed(states)
+        states[-1].positions[:] = 999.0
+        assert not np.allclose(obs.history[-1], 999.0)
+
+    def test_seed_wrong_spacing_raises(self):
+        """Seed states must be exactly sgan_dt apart (each is one history
+        frame); a 0.1s-spaced seed would silently corrupt CV velocity
+        estimates (review m4)."""
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        states = [make_state(-(8 - 1 - k) * 0.1) for k in range(8)]
+        with pytest.raises(ValueError, match="sgan_dt"):
+            obs.seed(states)
+
+    def test_seed_not_ending_at_zero_raises(self):
+        obs = PedestrianObserver(obs_len=8, dt=0.1, sgan_dt=0.4)
+        states = [make_state(0.4 * (k + 1)) for k in range(8)]  # ends at 3.2
+        with pytest.raises(ValueError, match="0.0"):
+            obs.seed(states)
