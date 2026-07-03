@@ -188,7 +188,7 @@ LSTM −0.10〜1.70 nats / SGAN 2.02〜9.20 nats。第2世代での結論（「�
 > 数値は本文の表に自己完結。再現が必要なら `examples/run_statistical_benchmark.py` 等で再生成する。一覧は提出時にどのキャンペーンが存在したかの記録として残置する。
 
 **第5世代（論文表の実体、単円構成）**:
-- ★1: `output/exp_margin_control_g5a2/{REPORT.md, welch_vs_baseline.csv, summary.csv, tradeoff_curve.png}`
+- ★1: `output/exp_margin_control_g5a2/{REPORT.md, welch_tests.csv, welch_vs_baseline.csv, summary.csv, tradeoff_curve.png}`（welch_tests.csv は `make_margin_report.py` が生成する実験A/B の Welch 検定表。2026-07-03 追記: 旧記載はこれを欠いていた）
 - comfort/rand: `output/{comfort,benchmark_rand}_s{1,2,3}_g5a2/{summary_stats.csv, all_runs.csv, latex_table.txt}`
 - proc: `output/exp_proc_planning_g5a2/{REPORT.md, results.json}`
 - robust×rand（rebuttal、§9）: `output/exp_robust_rand_g5a2/{REPORT.md, all_runs.csv, summary.csv}`
