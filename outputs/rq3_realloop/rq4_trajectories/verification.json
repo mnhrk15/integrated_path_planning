@@ -1,0 +1,98 @@
+[
+  {
+    "enc_id": "vci_back__back_interaction_02__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "single",
+    "seed": 0,
+    "min_dist_m": 1.9446660981928685,
+    "collision_count": 0,
+    "cached_min_dist_m": 1.9446660981928685,
+    "cached_collision_count": 0,
+    "match": true
+  },
+  {
+    "enc_id": "vci_back__back_interaction_02__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "robust",
+    "seed": 0,
+    "min_dist_m": 3.723150423998116,
+    "collision_count": 0,
+    "cached_min_dist_m": 3.723150423998116,
+    "cached_collision_count": 0,
+    "match": true
+  },
+  {
+    "enc_id": "vci_front__front_interaction_01__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "single",
+    "seed": 0,
+    "min_dist_m": 1.2779004357346115,
+    "collision_count": 1,
+    "cached_min_dist_m": 1.2779004357346115,
+    "cached_collision_count": 1,
+    "match": true
+  },
+  {
+    "enc_id": "vci_front__front_interaction_01__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "robust",
+    "seed": 0,
+    "min_dist_m": 1.2419774870119271,
+    "collision_count": 1,
+    "cached_min_dist_m": 1.2419774870119271,
+    "cached_collision_count": 1,
+    "match": true
+  },
+  {
+    "enc_id": "vci_lat_bi__bidirection_normal_driving_04__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "single",
+    "seed": 0,
+    "min_dist_m": 1.6271659867573338,
+    "collision_count": 0,
+    "cached_min_dist_m": 1.6271659867573338,
+    "cached_collision_count": 0,
+    "match": true
+  },
+  {
+    "enc_id": "vci_lat_bi__bidirection_normal_driving_04__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "robust",
+    "seed": 0,
+    "min_dist_m": 4.200637253450728,
+    "collision_count": 0,
+    "cached_min_dist_m": 4.200637253450728,
+    "cached_collision_count": 0,
+    "match": true
+  },
+  {
+    "enc_id": "vci_lat_uni__unidirection_normal_driving_03__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "single",
+    "seed": 0,
+    "min_dist_m": 1.260109822834984,
+    "collision_count": 1,
+    "cached_min_dist_m": 1.260109822834984,
+    "cached_collision_count": 1,
+    "match": true
+  },
+  {
+    "enc_id": "vci_lat_uni__unidirection_normal_driving_03__e00",
+    "ped_arm": "replay",
+    "pred": "sgan",
+    "plan": "robust",
+    "seed": 0,
+    "min_dist_m": 5.819902101080244,
+    "collision_count": 0,
+    "cached_min_dist_m": 5.819902101080244,
+    "cached_collision_count": 0,
+    "match": true
+  }
+]
