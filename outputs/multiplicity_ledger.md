@@ -9,6 +9,7 @@ family-wise / FDR 補正（alpha=0.05）。BH-FDR を primary、Holm-Bonferroni 
 - `outputs/rq1b/headline_tests.json` — source=RQ1b-rand, tests=30
 - `outputs/rq2_dut_validation/headline_tests_dut_multivehicle.json` — source=RQ2-DUT-multivehicle, tests=3
 - `outputs/rq2_dut_validation/headline_tests_dut_single.json` — source=RQ2-DUT-single, tests=3
+- `outputs/rq2_evaluation/headline_tests_ade_contrast.json` — source=RQ2-loco-ade-contrast, tests=2
 - `outputs/rq2_evaluation/headline_tests_loco.json` — source=RQ2-loco, tests=6
 - `outputs/rq2_evaluation/headline_tests_loso.json` — source=RQ2-loso, tests=6
 - `outputs/rq2_instrument_audit/cap/headline_tests_cap_closedloop_loco.json` — source=RQ2-cap-closedloop-loco, tests=3
@@ -18,7 +19,7 @@ family-wise / FDR 補正（alpha=0.05）。BH-FDR を primary、Holm-Bonferroni 
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w0.5_loco.json` — source=RQ2-distmatch-w0.5-loco, tests=3
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_id8_loco.json` — source=RQ2-distmatch-w1_id8-loco, tests=3
 - `outputs/rq2_instrument_audit/distmatch/headline_tests_dm_w1_loco.json` — source=RQ2-distmatch-w1-loco, tests=3
-- `outputs/rq3_realloop/headline_tests.json` — source=rq3_realloop, tests=46
+- `outputs/rq3_realloop/headline_tests.json` — source=rq3_realloop, tests=78
 
 ## 補正結果（canonical 研究横断 family）
 
@@ -81,6 +82,8 @@ LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、�
 | rq2.dut.single.closest_ks.calibrated | rq2_dut_fidelity_ks_single | 0.3517 | 3 | 0.3517 | 0.7034 |
 | rq2.dut.single.closest_ks.avec_default | rq2_dut_fidelity_ks_single | 0.3517 | 3 | 0.3517 | 0.7034 |
 | rq2.dut.single.closest_ks.no_repulsion | rq2_dut_fidelity_ks_single | 0.1259 | 3 | 0.3517 | 0.3776 |
+| rq2.loco.ade_sign.no_repulsion | rq2_ade_contrast_loco | 0.0025 | 2 | 0.0025 | 0.0025 |
+| rq2.loco.ade_wilcoxon.no_repulsion | rq2_ade_contrast_loco | 0.0002 | 2 | 0.0005 | 0.0005 |
 | rq2.loco.closest_ks.calibrated | rq2_fidelity_ks_loco_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
 | rq2.loco.closest_ks.avec_default | rq2_fidelity_ks_loco_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
 | rq2.loco.closest_ks.no_repulsion | rq2_fidelity_ks_loco_diagnostic | 0.0071 | 3 | 0.0071 | 0.0214 |
@@ -151,6 +154,38 @@ LOSO（LOCO と同じ忠実度の問いの再分割＝二重計上回避）、�
 | rq3.v3.robust_gain_sign.replay.cv | rq3_v3_robust_real | nan | 2 | nan | nan |
 | rq3.v3.robust_gain_sign.replay.lstm | rq3_v3_robust_real | 0.0005 | 2 | 0.0005 | 0.0010 |
 | rq3.v3.robust_gain_sign.replay.sgan | rq3_v3_robust_real | 0.0005 | 2 | 0.0005 | 0.0010 |
+| rq3.v3.robust_gain_sign.calib.cv | rq3_v3_robust_real_ctrl | nan | 8 | nan | nan |
+| rq3.v3.robust_gain_sign.calib.lstm | rq3_v3_robust_real_ctrl | 0.0000 | 8 | 0.0001 | 0.0003 |
+| rq3.v3.robust_gain_sign.calib.sgan | rq3_v3_robust_real_ctrl | 0.0009 | 8 | 0.0011 | 0.0026 |
+| rq3.v3.robust_gain_sign.avec.cv | rq3_v3_robust_real_ctrl | nan | 8 | nan | nan |
+| rq3.v3.robust_gain_sign.avec.lstm | rq3_v3_robust_real_ctrl | 0.0000 | 8 | 0.0001 | 0.0003 |
+| rq3.v3.robust_gain_sign.avec.sgan | rq3_v3_robust_real_ctrl | 0.0001 | 8 | 0.0002 | 0.0006 |
+| rq3.v3.robust_gain_sign.norep.cv | rq3_v3_robust_real_ctrl | nan | 8 | nan | nan |
+| rq3.v3.robust_gain_sign.norep.lstm | rq3_v3_robust_real_ctrl | 0.0015 | 8 | 0.0018 | 0.0031 |
+| rq3.v3.robust_gain_sign.norep.sgan | rq3_v3_robust_real_ctrl | 0.0000 | 8 | 0.0001 | 0.0001 |
+| rq3.v3.robust_gain_sign.calib13x.cv | rq3_v3_robust_real_ctrl | nan | 8 | nan | nan |
+| rq3.v3.robust_gain_sign.calib13x.lstm | rq3_v3_robust_real_ctrl | 0.0146 | 8 | 0.0146 | 0.0146 |
+| rq3.v3.robust_gain_sign.calib13x.sgan | rq3_v3_robust_real_ctrl | 0.0001 | 8 | 0.0002 | 0.0006 |
+| rq3.v3.robust_gain_wilcoxon.replay.lstm | rq3_v3_robust_wilcoxon | 0.0001 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.replay.sgan | rq3_v3_robust_wilcoxon | 0.0002 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.calib.lstm | rq3_v3_robust_wilcoxon | 0.0001 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.calib.sgan | rq3_v3_robust_wilcoxon | 0.0002 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.avec.lstm | rq3_v3_robust_wilcoxon | 0.0001 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.avec.sgan | rq3_v3_robust_wilcoxon | 0.0001 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.norep.lstm | rq3_v3_robust_wilcoxon | 0.0002 | 10 | 0.0002 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.norep.sgan | rq3_v3_robust_wilcoxon | 0.0001 | 10 | 0.0002 | 0.0009 |
+| rq3.v3.robust_gain_wilcoxon.calib13x.lstm | rq3_v3_robust_wilcoxon | 0.0004 | 10 | 0.0004 | 0.0011 |
+| rq3.v3.robust_gain_wilcoxon.calib13x.sgan | rq3_v3_robust_wilcoxon | 0.0002 | 10 | 0.0002 | 0.0011 |
+| rq3.v2.ranking_gap_wilcoxon.replay.single | rq3_v2_ranking_gates | 0.1350 | 10 | 0.1350 | 0.1350 |
+| rq3.v2.ranking_gap_wilcoxon.calib.single | rq3_v2_ranking_gates | 0.0078 | 10 | 0.0087 | 0.0268 |
+| rq3.v2.ranking_gap_wilcoxon.avec.single | rq3_v2_ranking_gates | 0.0071 | 10 | 0.0087 | 0.0268 |
+| rq3.v2.ranking_gap_wilcoxon.norep.single | rq3_v2_ranking_gates | 0.0067 | 10 | 0.0087 | 0.0268 |
+| rq3.v2.ranking_gap_wilcoxon.calib13x.single | rq3_v2_ranking_gates | 0.0024 | 10 | 0.0039 | 0.0118 |
+| rq3.v2.ranking_gap_wilcoxon.replay.robust | rq3_v2_ranking_gates | 0.0007 | 10 | 0.0013 | 0.0040 |
+| rq3.v2.ranking_gap_wilcoxon.calib.robust | rq3_v2_ranking_gates | 0.0001 | 10 | 0.0004 | 0.0012 |
+| rq3.v2.ranking_gap_wilcoxon.avec.robust | rq3_v2_ranking_gates | 0.0001 | 10 | 0.0004 | 0.0012 |
+| rq3.v2.ranking_gap_wilcoxon.norep.robust | rq3_v2_ranking_gates | 0.0001 | 10 | 0.0004 | 0.0012 |
+| rq3.v2.ranking_gap_wilcoxon.calib13x.robust | rq3_v2_ranking_gates | 0.0002 | 10 | 0.0004 | 0.0012 |
 
 ## RQ1b claim-(2) family 定義感度
 

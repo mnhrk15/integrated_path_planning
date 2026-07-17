@@ -1,16 +1,16 @@
-verdict_kind,pred_or_plan,ped_arm,value,significant,detail
-robust_gain_direction,cv,ALL,全アームで縮退（Δ=0・robust ≡ single）,,replay:0(縮退) calib:0(縮退) avec:0(縮退) norep:0(縮退) calib13x:0(縮退)
-robust_gain_direction,lstm,ALL,全アームで不変（反応性仮定に頑健）,,replay:+ calib:+ avec:+ norep:+ calib13x:+
-robust_gain_direction,sgan,ALL,全アームで不変（反応性仮定に頑健）,,replay:+ calib:+ avec:+ norep:+ calib13x:+
-most_dangerous_predictor,single,ALL,全アームで方向不変だが全アーム非有意（頑健・ただし検出力は限定的）,,replay:cv<sgan<lstm(n.s.) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<lstm<sgan(sig)
-predictor_ranking,single,replay,cv<sgan<lstm,False,cv=2.956 sgan=3.077 lstm=3.209
-predictor_ranking,single,calib,cv<sgan<lstm,True,cv=2.907 sgan=3.322 lstm=3.480
-predictor_ranking,single,avec,cv<sgan<lstm,True,cv=2.917 sgan=3.328 lstm=3.482
-predictor_ranking,single,norep,cv<sgan<lstm,True,cv=2.756 sgan=3.189 lstm=3.378
-predictor_ranking,single,calib13x,cv<lstm<sgan,True,cv=3.010 lstm=3.415 sgan=3.443
-most_dangerous_predictor,robust,ALL,全アームで不変（反応性仮定に頑健）,,replay:cv<sgan<lstm(sig) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<sgan<lstm(sig)
-predictor_ranking,robust,replay,cv<sgan<lstm,True,cv=2.956 sgan=3.858 lstm=4.071
-predictor_ranking,robust,calib,cv<sgan<lstm,True,cv=2.907 sgan=4.031 lstm=4.442
-predictor_ranking,robust,avec,cv<sgan<lstm,True,cv=2.917 sgan=4.024 lstm=4.418
-predictor_ranking,robust,norep,cv<sgan<lstm,True,cv=2.756 sgan=3.944 lstm=4.361
-predictor_ranking,robust,calib13x,cv<sgan<lstm,True,cv=3.010 sgan=3.991 lstm=4.406
+verdict_kind,pred_or_plan,ped_arm,value,significant,detail,gap_p
+robust_gain_direction,cv,ALL,全アームで縮退（Δ=0・robust ≡ single）,,replay:0(縮退) calib:0(縮退) avec:0(縮退) norep:0(縮退) calib13x:0(縮退),
+robust_gain_direction,lstm,ALL,全アームで不変（反応性仮定に頑健）,,replay:+ calib:+ avec:+ norep:+ calib13x:+,
+robust_gain_direction,sgan,ALL,全アームで不変（反応性仮定に頑健）,,replay:+ calib:+ avec:+ norep:+ calib13x:+,
+most_dangerous_predictor,single,ALL,全アームで方向不変だが全アーム非有意（頑健・ただし検出力は限定的）,,replay:cv<sgan<lstm(n.s.) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<lstm<sgan(sig),
+predictor_ranking,single,replay,cv<sgan<lstm,False,cv=2.956 sgan=3.077 lstm=3.209,0.13499489246614732
+predictor_ranking,single,calib,cv<sgan<lstm,True,cv=2.907 sgan=3.322 lstm=3.480,0.00783822165252078
+predictor_ranking,single,avec,cv<sgan<lstm,True,cv=2.917 sgan=3.328 lstm=3.482,0.007065994730893273
+predictor_ranking,single,norep,cv<sgan<lstm,True,cv=2.756 sgan=3.189 lstm=3.378,0.006710454387418815
+predictor_ranking,single,calib13x,cv<lstm<sgan,True,cv=3.010 lstm=3.415 sgan=3.443,0.002354062221981451
+most_dangerous_predictor,robust,ALL,全アームで不変（反応性仮定に頑健）,,replay:cv<sgan<lstm(sig) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<sgan<lstm(sig),
+predictor_ranking,robust,replay,cv<sgan<lstm,True,cv=2.956 sgan=3.858 lstm=4.071,0.0006738585313537617
+predictor_ranking,robust,calib,cv<sgan<lstm,True,cv=2.907 sgan=4.031 lstm=4.442,0.00011948540410104352
+predictor_ranking,robust,avec,cv<sgan<lstm,True,cv=2.917 sgan=4.024 lstm=4.418,0.00011948540410104352
+predictor_ranking,robust,norep,cv<sgan<lstm,True,cv=2.756 sgan=3.944 lstm=4.361,0.00012695899968328866
+predictor_ranking,robust,calib13x,cv<sgan<lstm,True,cv=3.010 sgan=3.991 lstm=4.406,0.00016229894900734117

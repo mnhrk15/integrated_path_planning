@@ -1,0 +1,36 @@
+{
+  "source": "RQ2-loco-ade-contrast",
+  "generated_by": "make_rq2_ade_contrast.py",
+  "tests": [
+    {
+      "test_id": "rq2.loco.ade_sign.no_repulsion",
+      "description": "Paired per-fold sign test: no_repulsion vs calibrated held-out rollout ADE (loco, n=26 folds)",
+      "family": "rq2_ade_contrast_loco",
+      "protocol": "loco",
+      "auxiliary": true,
+      "p_value": 0.002493917942047119,
+      "statistic": 21.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "n_norep_gt_calib": 21,
+      "n_norep_lt_calib": 5,
+      "mean_gap_ade": 0.031744941736076615,
+      "headline": false,
+      "note": "arm contrast for the ch06 held-out-ADE claim (thesis cross-cut review M3): per-arm-vs-real significance does not imply a significant ARM DIFFERENCE, so the difference is tested directly. LOCO folds share ~96% of training clips (refit overlap), so the fold pairs are not independent and the p reads anti-conservative."
+    },
+    {
+      "test_id": "rq2.loco.ade_wilcoxon.no_repulsion",
+      "description": "Paired per-fold Wilcoxon signed-rank: no_repulsion vs calibrated held-out rollout ADE (loco, n=26 folds)",
+      "family": "rq2_ade_contrast_loco",
+      "protocol": "loco",
+      "auxiliary": true,
+      "p_value": 0.0002480149269104004,
+      "statistic": 40.0,
+      "sidedness": "two-sided",
+      "n_pairs": 26,
+      "mean_gap_ade": 0.031744941736076615,
+      "headline": false,
+      "note": "magnitude-aware companion over the SAME per-fold differences (family convention of the paired RQ2 families); arm contrast for the ch06 held-out-ADE claim (thesis cross-cut review M3): per-arm-vs-real significance does not imply a significant ARM DIFFERENCE, so the difference is tested directly. LOCO folds share ~96% of training clips (refit overlap), so the fold pairs are not independent and the p reads anti-conservative."
+    }
+  ]
+}

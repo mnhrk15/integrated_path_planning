@@ -76,23 +76,23 @@
 
 replay アームの判定が headline 候補・SFM アームは感度幅。有意性ゲート（Wilcoxon p<0.05）を通らない不一致は『検出力限界』であり反転とは読まない（RQ1b の tristate 規律）。
 
-| verdict_kind | pred_or_plan | ped_arm | value | significant | detail |
-|---|---|---|---|---|---|
-| robust_gain_direction | cv | ALL | 全アームで縮退（Δ=0・robust ≡ single） |  | replay:0(縮退) calib:0(縮退) avec:0(縮退) norep:0(縮退) calib13x:0(縮退) |
-| robust_gain_direction | lstm | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:+ calib:+ avec:+ norep:+ calib13x:+ |
-| robust_gain_direction | sgan | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:+ calib:+ avec:+ norep:+ calib13x:+ |
-| most_dangerous_predictor | single | ALL | 全アームで方向不変だが全アーム非有意（頑健・ただし検出力は限定的） |  | replay:cv<sgan<lstm(n.s.) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<lstm<sgan(sig) |
-| predictor_ranking | single | replay | cv<sgan<lstm | False | cv=2.956 sgan=3.077 lstm=3.209 |
-| predictor_ranking | single | calib | cv<sgan<lstm | True | cv=2.907 sgan=3.322 lstm=3.480 |
-| predictor_ranking | single | avec | cv<sgan<lstm | True | cv=2.917 sgan=3.328 lstm=3.482 |
-| predictor_ranking | single | norep | cv<sgan<lstm | True | cv=2.756 sgan=3.189 lstm=3.378 |
-| predictor_ranking | single | calib13x | cv<lstm<sgan | True | cv=3.010 lstm=3.415 sgan=3.443 |
-| most_dangerous_predictor | robust | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:cv<sgan<lstm(sig) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<sgan<lstm(sig) |
-| predictor_ranking | robust | replay | cv<sgan<lstm | True | cv=2.956 sgan=3.858 lstm=4.071 |
-| predictor_ranking | robust | calib | cv<sgan<lstm | True | cv=2.907 sgan=4.031 lstm=4.442 |
-| predictor_ranking | robust | avec | cv<sgan<lstm | True | cv=2.917 sgan=4.024 lstm=4.418 |
-| predictor_ranking | robust | norep | cv<sgan<lstm | True | cv=2.756 sgan=3.944 lstm=4.361 |
-| predictor_ranking | robust | calib13x | cv<sgan<lstm | True | cv=3.010 sgan=3.991 lstm=4.406 |
+| verdict_kind | pred_or_plan | ped_arm | value | significant | detail | gap_p |
+|---|---|---|---|---|---|---|
+| robust_gain_direction | cv | ALL | 全アームで縮退（Δ=0・robust ≡ single） |  | replay:0(縮退) calib:0(縮退) avec:0(縮退) norep:0(縮退) calib13x:0(縮退) |  |
+| robust_gain_direction | lstm | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:+ calib:+ avec:+ norep:+ calib13x:+ |  |
+| robust_gain_direction | sgan | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:+ calib:+ avec:+ norep:+ calib13x:+ |  |
+| most_dangerous_predictor | single | ALL | 全アームで方向不変だが全アーム非有意（頑健・ただし検出力は限定的） |  | replay:cv<sgan<lstm(n.s.) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<lstm<sgan(sig) |  |
+| predictor_ranking | single | replay | cv<sgan<lstm | False | cv=2.956 sgan=3.077 lstm=3.209 | 0.135 |
+| predictor_ranking | single | calib | cv<sgan<lstm | True | cv=2.907 sgan=3.322 lstm=3.480 | 0.007838 |
+| predictor_ranking | single | avec | cv<sgan<lstm | True | cv=2.917 sgan=3.328 lstm=3.482 | 0.007066 |
+| predictor_ranking | single | norep | cv<sgan<lstm | True | cv=2.756 sgan=3.189 lstm=3.378 | 0.00671 |
+| predictor_ranking | single | calib13x | cv<lstm<sgan | True | cv=3.010 lstm=3.415 sgan=3.443 | 0.002354 |
+| most_dangerous_predictor | robust | ALL | 全アームで不変（反応性仮定に頑健） |  | replay:cv<sgan<lstm(sig) calib:cv<sgan<lstm(sig) avec:cv<sgan<lstm(sig) norep:cv<sgan<lstm(sig) calib13x:cv<sgan<lstm(sig) |  |
+| predictor_ranking | robust | replay | cv<sgan<lstm | True | cv=2.956 sgan=3.858 lstm=4.071 | 0.0006739 |
+| predictor_ranking | robust | calib | cv<sgan<lstm | True | cv=2.907 sgan=4.031 lstm=4.442 | 0.0001195 |
+| predictor_ranking | robust | avec | cv<sgan<lstm | True | cv=2.917 sgan=4.024 lstm=4.418 | 0.0001195 |
+| predictor_ranking | robust | norep | cv<sgan<lstm | True | cv=2.756 sgan=3.944 lstm=4.361 | 0.000127 |
+| predictor_ranking | robust | calib13x | cv<sgan<lstm | True | cv=3.010 sgan=3.991 lstm=4.406 | 0.0001623 |
 
 ## 4. V3: robust 利得の実ジオメトリ検証（replay 参照点つき・auxiliary）
 
@@ -137,6 +137,8 @@ medoid（predict_single_best 既定＝分散抑制代表値）と true-single dr
 
 ## 6. ledger 登載
 
-`headline_tests.json`（namespace rq3.*）: canonical = `rq3_v1_reactivity`（6 検定）、auxiliary = `rq3_v1_reactivity_ctrl` / `rq3_v1_collision_mcnemar`（calib）/ `rq3_v1_collision_mcnemar_ctrl`（制御アーム） / `rq3_v3_robust_real`。cv/robust の McNemar はビット同一縮退のため未登載（cv/single の note 参照）。`examples/make_multiplicity_ledger.py` の再実行で台帳へ自動編入。
+`headline_tests.json`（namespace rq3.*）: canonical = `rq3_v1_reactivity`（6 検定）、auxiliary = `rq3_v1_reactivity_ctrl` / `rq3_v1_collision_mcnemar`（calib）/ `rq3_v1_collision_mcnemar_ctrl`（制御アーム） / `rq3_v3_robust_real` / `rq3_v3_robust_real_ctrl`（非 replay アームの V3 符号検定・cv は p 未定義で縮退開示） / `rq3_v3_robust_wilcoxon`（V3 全アームの Wilcoxon 併記） / `rq3_v2_ranking_gates`（V2 最危険予測器判定の有意性ゲート）。cv/robust の McNemar はビット同一縮退のため未登載（cv/single の note 参照）。V1 の Wilcoxon 併記は符号検定レコードの passthrough フィールドに記録し別仮説として数えない（canonical 6 検定設計）。`examples/make_multiplicity_ledger.py` の再実行で台帳へ自動編入。
 
 **台帳への意図差分の開示**（静的記録: 2026-07-03 の台帳再生成時に機械検証した監査結果の転記であり、本 REPORT の再生成では再計算されない）: canonical family の追加により study-wide 補正（overall_* 列）は全既存行で再計算される（canonical 21→27 検定）。既存行の within-family 列は全行バイト不変を機械検証済み。overall 層の判定反転は 4 件・全て True→False（保守化方向・新規の主張は発生しない）: `rq1b.rand.fisher.avec.scenario_02`（既知の境界セル、within-family q=0.023 生存は不変）、`rq1b.rand.fisher_aggregate.avec.lstm`・`rq2.dut.multivehicle.closest_ks.avec_default`・`rq2cap.loco.closedloop.closest_sign.no_repulsion`（いずれも auxiliary 層）。
+
+**追加登載の開示（静的記録: 2026-07-16、修論横断レビュー M2a 対応）**: 本文（修論 表8.2/8.3）に掲載していた p 値のうち台帳外だったもの（非 replay アームの V3 符号検定・V3 全アーム Wilcoxon・V2 判定ゲート Wilcoxon）を auxiliary family 3 つ（計 32 行・うち cv 縮退 4 行は p 未定義）として末尾追加。auxiliary は canonical の study-wide 補正プールに入らないため、canonical 27 行・研究横断生存 3 件・既存全行の within-family 列は不変（追加後の台帳再生成で機械検証済み。auxiliary 行の overall_* 列のみ aux プール内補正の再計算で変わるが、REPORT・修論とも非使用）。全新規 family は family 内 BH で `rq3_v2_ranking_gates` の replay/single ゲート（p=0.135・V2 の検出力限界開示と整合）を除き生存＝既存結論への影響なし。方向つき開示の規律に従い1点付記する: 非使用の auxiliary プール内 overall 層では、有限 p の拡大（87→117）で既存行 `rq2.dut.multivehicle.closest_ks.avec_default` の判定が1件だけ 非有意→有意（q 0.0575→0.0428）へ動く。この検定は KS 診断（p 非主張・付録Bで overall 列を掲載しないと宣言済み）であり、どの主張にも使われない。上の 2026-07-03 静的記録にある同 ID の True→False は canonical 21→27 拡大時の overall 層の別事象である。

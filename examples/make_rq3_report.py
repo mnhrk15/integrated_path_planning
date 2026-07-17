@@ -18,7 +18,10 @@ and derives everything downstream as pure functions of those tables:
   mirroring run_rq1b_sensitivity._sensitivity_status: a non-significant
   disagreement is NOT a reversal.
 * **V3 robust gain on real geometry** (auxiliary): robust - single paired
-  within the replay arm.
+  within the replay arm; non-replay arms and the Wilcoxon companions are
+  emitted as auxiliary control families, and the V2 ranking gates' Wilcoxon
+  p is persisted (v2_verdicts.csv ``gap_p`` + sidecar family
+  ``rq3_v2_ranking_gates``) -- thesis cross-cut review M2a.
 
 All REPORT prose is generated from the computed tables (never hand-written
 claims), thresholds are module constants quoted verbatim, and the outputs are
@@ -66,7 +69,7 @@ V3_COLUMNS = [
 ]
 V2_COLUMNS = [
     "verdict_kind", "pred_or_plan", "ped_arm", "value", "significant",
-    "detail",
+    "detail", "gap_p",
 ]
 
 STATUS_INVARIANT = "全アームで不変（反応性仮定に頑健）"
@@ -216,6 +219,9 @@ def robust_gain_rows(em: pd.DataFrame, arms: List[str],
                 "mean_delta_m": round(float(s["mean_gap"]), 4),
                 "sign_p": s["sign_p"],
                 "wilcoxon_p": s["wilcoxon_p"],
+                # not in V3_COLUMNS (the CSV stays byte-identical); carried for
+                # the ledger sidecar's wilcoxon family (thesis review M2a)
+                "wilcoxon_stat": s["wilcoxon_stat"],
                 "single_coll_encs": int((s_cell.loc[common, "collision_rate"]
                                          > 0).sum()),
                 "robust_coll_encs": int((r_cell.loc[common, "collision_rate"]
@@ -322,12 +328,15 @@ def _ranking_for(em: pd.DataFrame, arm: str, plan: str,
     d = (cells[runner].loc[common, PRIMARY_METRIC]
          - cells[bottom].loc[common, PRIMARY_METRIC]).to_numpy()
     if len(d) and np.any(d != 0):
-        wp = float(stats.wilcoxon(d).pvalue)
+        w = stats.wilcoxon(d)
+        wp, wstat = float(w.pvalue), float(w.statistic)
     else:
-        wp = float("nan")
+        wp, wstat = float("nan"), float("nan")
     return {
         "order": order, "means": means, "most_dangerous": bottom,
-        "gap_p": wp, "significant": (not np.isnan(wp)) and wp < ALPHA,
+        "runner": runner, "gap_n_pairs": int(len(d)),
+        "gap_p": wp, "gap_stat": wstat,
+        "significant": (not np.isnan(wp)) and wp < ALPHA,
     }
 
 
@@ -375,6 +384,13 @@ def v2_ranking_preservation(em: pd.DataFrame, arms: List[str],
                 "ped_arm": arm,
                 "value": "<".join(r["order"]),
                 "significant": bool(r["significant"]),
+                "gap_p": r["gap_p"],
+                # not in V2_COLUMNS; carried for the ledger sidecar's
+                # ranking-gate family (thesis review M2a)
+                "gap_stat": r["gap_stat"],
+                "gap_n_pairs": r["gap_n_pairs"],
+                "most_dangerous": r["most_dangerous"],
+                "runner": r["runner"],
                 "detail": " ".join(f"{p}={r['means'][p]:.3f}"
                                    for p in r["order"]),
             })
@@ -385,7 +401,19 @@ def v2_ranking_preservation(em: pd.DataFrame, arms: List[str],
 # Ledger sidecar (rq3.* namespace)
 # ---------------------------------------------------------------------------
 
-def headline_tests(v1: List[Dict], v3: List[Dict]) -> List[Dict]:
+def headline_tests(v1: List[Dict], gains: List[Dict],
+                   v2: Optional[List[Dict]] = None) -> List[Dict]:
+    """Ledger records: V1 (sign + McNemar), V3 (sign + Wilcoxon), V2 gates.
+
+    Emission order is append-only relative to the pre-M2a sidecar: the first
+    46 records (V1 sign/McNemar + replay V3 sign) are byte-identical to the
+    frozen layout; the thesis cross-cut review M2a families
+    (``rq3_v3_robust_real_ctrl`` / ``rq3_v3_robust_wilcoxon`` /
+    ``rq3_v2_ranking_gates``) follow at the end, all auxiliary. The V1
+    Wilcoxon companions stay passthrough fields of the sign records (the
+    user-approved canonical design counts sign tests only); the V3 Wilcoxon
+    companions ARE emitted because the thesis table quotes their p values.
+    """
     tests: List[Dict] = []
     for r in v1:
         canonical = r["ped_arm"] == CANONICAL_ARM
@@ -458,7 +486,7 @@ def headline_tests(v1: List[Dict], v3: List[Dict]) -> List[Dict]:
                 "headline": False,
                 "note": note,
             })
-    for r in v3:
+    for r in gains:
         if r["ped_arm"] != REFERENCE_ARM:
             continue
         tests.append({
@@ -481,6 +509,102 @@ def headline_tests(v1: List[Dict], v3: List[Dict]) -> List[Dict]:
                      "design (RQ1b claim-1 is the canonical robust-gain "
                      "family)"),
         })
+    # --- thesis cross-cut review M2a: the remaining thesis-quoted p values ---
+    # Non-replay V3 sign tests (thesis table 8.3 quotes them). The cv cells
+    # are degenerate (deterministic predictor => robust == single bit-for-bit,
+    # no direction): emitted with a null p so the ledger discloses the
+    # degeneracy per arm, mirroring the replay.cv convention; NaN p's are not
+    # counted in the family size (multiplicity.adjust drops them).
+    for r in gains:
+        if r["ped_arm"] == REFERENCE_ARM:
+            continue
+        rec = {
+            "test_id": (f"rq3.v3.robust_gain_sign.{r['ped_arm']}."
+                        f"{r['pred']}"),
+            "description": (
+                f"Paired per-encounter sign test: robust vs true-single min "
+                f"separation within the {r['ped_arm']} SFM arm ({r['pred']}, "
+                f"n={r['n_pairs']})"),
+            "family": "rq3_v3_robust_real_ctrl",
+            "protocol": "paired_encounters",
+            "auxiliary": True,
+            "p_value": _json_float(r["sign_p"]),
+            "statistic": float(r["n_robust_gt_single"]),
+            "sidedness": "two-sided",
+            "n_pairs": r["n_pairs"],
+            "mean_gap_m": _json_float(r["mean_delta_m"]),
+            "headline": False,
+            "note": ("robust gain under an SFM control arm (reactivity "
+                     "sensitivity companion to rq3_v3_robust_real; ledger "
+                     "registration of a thesis-quoted p, review M2a)"),
+        }
+        if _json_float(r["sign_p"]) is None:
+            rec["note"] += ("; p undefined: degenerate cell -- every paired "
+                            "difference is exactly zero (here the "
+                            "deterministic CV predictor collapses to "
+                            "robust == single bit-for-bit)")
+        tests.append(rec)
+    # V3 Wilcoxon companions over the SAME paired differences, all arms
+    # (thesis table 8.3 quotes all 10 finite cells). Degenerate cv cells have
+    # no Wilcoxon (all-zero d) and are not emitted -- the sign families carry
+    # the degeneracy disclosure (mirrors the McNemar NaN-skip convention).
+    for r in gains:
+        wp = _json_float(r["wilcoxon_p"])
+        if wp is None:
+            continue
+        tests.append({
+            "test_id": (f"rq3.v3.robust_gain_wilcoxon.{r['ped_arm']}."
+                        f"{r['pred']}"),
+            "description": (
+                f"Paired per-encounter Wilcoxon signed-rank: robust vs "
+                f"true-single min separation within the {r['ped_arm']} arm "
+                f"({r['pred']}, n={r['n_pairs']})"),
+            "family": "rq3_v3_robust_wilcoxon",
+            "protocol": "paired_encounters",
+            "auxiliary": True,
+            "p_value": wp,
+            "statistic": _json_float(r.get("wilcoxon_stat")),
+            "sidedness": "two-sided",
+            "n_pairs": r["n_pairs"],
+            "mean_gap_m": _json_float(r["mean_delta_m"]),
+            "headline": False,
+            "note": ("magnitude-aware companion over the SAME paired "
+                     "differences as the V3 sign tests; ledger registration "
+                     "of a thesis-quoted p (review M2a)"),
+        })
+    # V2 most-dangerous-predictor gates: the significance gate behind each
+    # predictor_ranking verdict (previously only the significant boolean was
+    # persisted in v2_verdicts.csv; the thesis table 8.2 relies on the gate).
+    for r in (v2 or []):
+        if r["verdict_kind"] != "predictor_ranking":
+            continue
+        rec = {
+            "test_id": (f"rq3.v2.ranking_gap_wilcoxon.{r['ped_arm']}."
+                        f"{r['pred_or_plan']}"),
+            "description": (
+                f"Paired per-encounter Wilcoxon signed-rank: bottom-two "
+                f"predictor gap ({r['most_dangerous']} vs {r['runner']}) in "
+                f"min separation, {r['ped_arm']} arm / {r['pred_or_plan']} "
+                f"plan (n={r['gap_n_pairs']})"),
+            "family": "rq3_v2_ranking_gates",
+            "protocol": "paired_encounters",
+            "auxiliary": True,
+            "p_value": _json_float(r["gap_p"]),
+            "statistic": _json_float(r.get("gap_stat")),
+            "sidedness": "two-sided",
+            "n_pairs": r["gap_n_pairs"],
+            "headline": False,
+            "note": ("significance gate of the V2 most-dangerous-predictor "
+                     "verdict (tri-state input); a non-significant gate "
+                     "reads as detection-power limit, not invariance "
+                     "evidence. Ledger registration of a thesis-quoted "
+                     "gate (review M2a)"),
+        }
+        if rec["p_value"] is None:
+            rec["note"] += ("; p undefined: degenerate gap -- every paired "
+                            "difference between the bottom-two predictors "
+                            "is exactly zero")
+        tests.append(rec)
     return tests
 
 
@@ -766,8 +890,14 @@ def write_report(runs: pd.DataFrame, census: pd.DataFrame,
              "`rq3_v1_reactivity`（6 検定）、auxiliary = "
              "`rq3_v1_reactivity_ctrl` / `rq3_v1_collision_mcnemar`（calib）"
              "/ `rq3_v1_collision_mcnemar_ctrl`（制御アーム） / "
-             "`rq3_v3_robust_real`。cv/robust の McNemar はビット同一縮退の"
-             "ため未登載（cv/single の note 参照）。"
+             "`rq3_v3_robust_real` / `rq3_v3_robust_real_ctrl`"
+             "（非 replay アームの V3 符号検定・cv は p 未定義で縮退開示） / "
+             "`rq3_v3_robust_wilcoxon`（V3 全アームの Wilcoxon 併記） / "
+             "`rq3_v2_ranking_gates`（V2 最危険予測器判定の有意性ゲート）。"
+             "cv/robust の McNemar はビット同一縮退の"
+             "ため未登載（cv/single の note 参照）。V1 の Wilcoxon 併記は"
+             "符号検定レコードの passthrough フィールドに記録し別仮説として"
+             "数えない（canonical 6 検定設計）。"
              "`examples/make_multiplicity_ledger.py` の再実行で台帳へ自動編入。")
     L.append("")
     L.append("**台帳への意図差分の開示**（静的記録: 2026-07-03 の台帳再生成時に"
@@ -783,6 +913,26 @@ def write_report(runs: pd.DataFrame, census: pd.DataFrame,
              "`rq2.dut.multivehicle.closest_ks.avec_default`・"
              "`rq2cap.loco.closedloop.closest_sign.no_repulsion`"
              "（いずれも auxiliary 層）。")
+    L.append("")
+    L.append("**追加登載の開示（静的記録: 2026-07-16、修論横断レビュー M2a 対応）**: "
+             "本文（修論 表8.2/8.3）に掲載していた p 値のうち台帳外だったもの"
+             "（非 replay アームの V3 符号検定・V3 全アーム Wilcoxon・V2 判定"
+             "ゲート Wilcoxon）を auxiliary family 3 つ（計 32 行・うち cv 縮退 "
+             "4 行は p 未定義）として末尾追加。auxiliary は canonical の "
+             "study-wide 補正プールに入らないため、canonical 27 行・研究横断"
+             "生存 3 件・既存全行の within-family 列は不変（追加後の台帳再生成で"
+             "機械検証済み。auxiliary 行の overall_* 列のみ aux プール内補正の"
+             "再計算で変わるが、REPORT・修論とも非使用）。全新規 family は "
+             "family 内 BH で `rq3_v2_ranking_gates` の replay/single ゲート"
+             "（p=0.135・V2 の検出力限界開示と整合）を除き生存＝既存結論への"
+             "影響なし。方向つき開示の規律に従い1点付記する: 非使用の "
+             "auxiliary プール内 overall 層では、有限 p の拡大（87→117）で"
+             "既存行 `rq2.dut.multivehicle.closest_ks.avec_default` の判定が"
+             "1件だけ 非有意→有意（q 0.0575→0.0428）へ動く。この検定は KS "
+             "診断（p 非主張・付録Bで overall 列を掲載しないと宣言済み）で"
+             "あり、どの主張にも使われない。上の 2026-07-03 静的記録にある"
+             "同 ID の True→False は canonical 21→27 拡大時の overall 層の"
+             "別事象である。")
     L.append("")
     return "\n".join(L)
 
@@ -823,7 +973,7 @@ def main():
     sidecar = {
         "source": "rq3_realloop",
         "generated_by": "make_rq3_report.py",
-        "tests": headline_tests(v1, v3),
+        "tests": headline_tests(v1, gains, v2),
     }
     with open(root / "headline_tests.json", "w") as f:
         json.dump(sidecar, f, indent=1)

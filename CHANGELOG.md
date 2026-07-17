@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - 2026-07-16（修論横断レビュー M2a/M3: 台帳への追加登載）
+
+- **`examples/make_rq2_ade_contrast.py`（新規）**: LOCO 26 fold の held-out ADE アーム間対比（no_repulsion − calibrated）の符号検定＋Wilcoxon を新規 sidecar `headline_tests_ade_contrast.json` に登載（auxiliary family `rq2_ade_contrast_loco`）。folds_loco.csv（git 追跡済み）のみに依存し fresh clone で再実行可能。結果: 21/26 fold で悪化・sign p=2.49e-3・Wilcoxon p=2.48e-4。
+- **`examples/make_rq3_report.py`**: 修論本文に掲載済みだった台帳外 p 値を auxiliary 3 family として登載 — `rq3_v3_robust_real_ctrl`（非 replay アームの V3 符号検定 12 行・cv 縮退 4 行は p 未定義）、`rq3_v3_robust_wilcoxon`（V3 全アーム Wilcoxon 併記 10 行）、`rq3_v2_ranking_gates`（V2 最危険予測器判定ゲート 10 行・従来は significant 真偽のみ永続化）。`v2_verdicts.csv` に `gap_p` 列を追加。既存 sidecar 46 件のプレフィックスはバイト同一・canonical 27／研究横断生存 3 は不変（機械検証済み）。
+- **テスト**: `tests/test_rq2_ade_contrast.py`（コミット済み folds への回帰ピン含む）、`tests/test_ledger_freeze.py`（コミット済み sidecar 群から canonical/aux family 構成・生存 3 件を凍結する恒久ガード＝2026-06-23 全体監査の指摘解消）、`tests/test_rq3_report.py` に M2a family の検証を追加。多角コードレビュー後の防御的修正（列欠損ガード・縮退セルの null 正規化と開示 note・auxiliary プール overall 層の判定反転 1 件の REPORT 開示）と回帰テストを含め、全 535 テスト green（513→535）。
+
 ### Added - 2026-01-05 (v3.7)
 
 #### Full Vectorization (v3.7)

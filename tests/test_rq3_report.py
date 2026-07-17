@@ -22,6 +22,7 @@ from examples.make_rq3_report import (
     robust_gain_rows,
     tristate,
     v1_rows,
+    v2_ranking_preservation,
     v2_robust_gain_preservation,
     write_report,
 )
@@ -242,6 +243,11 @@ class TestSidecar:
         ctrl = [t for t in tests if t["family"] == "rq3_v1_reactivity_ctrl"]
         assert all(t["auxiliary"] is True for t in ctrl)
         assert all(".avec." in t["test_id"] for t in ctrl)
+        # Guard (review M2a): every NON-auxiliary emission must stay in the
+        # user-approved canonical family -- the M2a additions are all
+        # auxiliary and must never grow the study-wide pool.
+        non_aux = [t for t in tests if not t.get("auxiliary")]
+        assert {t["family"] for t in non_aux} == {"rq3_v1_reactivity"}
 
     def test_no_duplicate_test_ids(self):
         em = self._v1()
@@ -288,6 +294,113 @@ class TestSidecar:
         assert len(mc) == 1
         assert mc[0]["family"] == "rq3_v1_collision_mcnemar_ctrl"
         assert mc[0]["auxiliary"] is True
+
+
+class TestSidecarM2aFamilies:
+    """Ledger registration of the thesis-quoted V3/V2 p values (review M2a)."""
+
+    def _em_two_arms(self, degenerate_arm=None):
+        rows = []
+        for arm in ("replay", "calib"):
+            single = [1.0, 1.2, 1.4, 1.1, 1.3, 1.5]
+            if arm == degenerate_arm:
+                robust = single  # exact tie: robust == single bit-for-bit
+            else:
+                robust = [v + 0.5 for v in single]
+            rows += _runs(arm, "cv", "single", single)
+            rows += _runs(arm, "cv", "robust", robust)
+        return encounter_means(_frame(rows))
+
+    def test_nonreplay_sign_goes_to_ctrl_family(self):
+        em = self._em_two_arms()
+        gains = robust_gain_rows(em, ["replay", "calib"], ["cv"])
+        tests = headline_tests([], gains)
+        real = [t for t in tests if t["family"] == "rq3_v3_robust_real"]
+        ctrl = [t for t in tests if t["family"] == "rq3_v3_robust_real_ctrl"]
+        assert len(real) == 1 and len(ctrl) == 1
+        # replay family/test_id unchanged by the M2a addition
+        assert real[0]["test_id"] == "rq3.v3.robust_gain_sign.replay.cv"
+        assert ctrl[0]["test_id"] == "rq3.v3.robust_gain_sign.calib.cv"
+        assert ctrl[0]["auxiliary"] is True
+
+    def test_degenerate_cell_emits_null_p_in_ctrl_family(self):
+        em = self._em_two_arms(degenerate_arm="calib")
+        gains = robust_gain_rows(em, ["replay", "calib"], ["cv"])
+        tests = headline_tests([], gains)
+        ctrl = [t for t in tests if t["family"] == "rq3_v3_robust_real_ctrl"]
+        assert len(ctrl) == 1
+        assert ctrl[0]["p_value"] is None
+        assert "degenerate" in ctrl[0]["note"]
+
+    def test_wilcoxon_family_skips_degenerate_cells(self):
+        em = self._em_two_arms(degenerate_arm="calib")
+        gains = robust_gain_rows(em, ["replay", "calib"], ["cv"])
+        tests = headline_tests([], gains)
+        wil = [t for t in tests if t["family"] == "rq3_v3_robust_wilcoxon"]
+        # only the non-degenerate replay cell has a finite Wilcoxon p
+        assert [t["test_id"] for t in wil] \
+            == ["rq3.v3.robust_gain_wilcoxon.replay.cv"]
+        assert wil[0]["auxiliary"] is True
+        assert wil[0]["p_value"] is not None
+        assert wil[0]["statistic"] is not None
+
+    def test_ranking_gates_map_one_to_one_with_v2_rows(self):
+        rows = []
+        for pred, base in (("cv", 1.0), ("lstm", 2.0)):
+            rows += _runs("replay", pred, "single",
+                          [base, base + 0.2, base + 0.4,
+                           base + 0.1, base + 0.3, base + 0.5])
+        em = encounter_means(_frame(rows))
+        v2 = v2_ranking_preservation(em, ["replay"], ["cv", "lstm"],
+                                     ["single"])
+        ranking = [r for r in v2 if r["verdict_kind"] == "predictor_ranking"]
+        assert len(ranking) == 1
+        tests = headline_tests([], [], v2)
+        gates = [t for t in tests if t["family"] == "rq3_v2_ranking_gates"]
+        assert len(gates) == len(ranking) == 1
+        g, r = gates[0], ranking[0]
+        assert g["test_id"] == "rq3.v2.ranking_gap_wilcoxon.replay.single"
+        assert g["p_value"] == pytest.approx(r["gap_p"])
+        assert g["auxiliary"] is True
+        # the bottom-two predictors are named in the description
+        assert r["most_dangerous"] in g["description"]
+        assert r["runner"] in g["description"]
+
+    def test_degenerate_gate_emits_null_p_with_disclosure(self):
+        """A gates row with NaN gap_p must disclose the degeneracy."""
+        v2 = [{"verdict_kind": "predictor_ranking", "pred_or_plan": "single",
+               "ped_arm": "replay", "gap_p": float("nan"),
+               "gap_stat": float("nan"), "gap_n_pairs": 6,
+               "most_dangerous": "cv", "runner": "lstm"}]
+        tests = headline_tests([], [], v2)
+        assert len(tests) == 1
+        assert tests[0]["p_value"] is None
+        assert "degenerate" in tests[0]["note"]
+
+    def test_nonsignificant_gate_still_emitted_as_auxiliary(self):
+        v2 = [{"verdict_kind": "predictor_ranking", "pred_or_plan": "single",
+               "ped_arm": "replay", "gap_p": 0.135, "gap_stat": 100.0,
+               "gap_n_pairs": 26, "most_dangerous": "cv", "runner": "sgan"}]
+        tests = headline_tests([], [], v2)
+        assert len(tests) == 1  # n.s. gates are disclosed, not dropped
+        assert tests[0]["p_value"] == pytest.approx(0.135)
+        assert tests[0]["auxiliary"] is True
+        assert tests[0]["headline"] is False
+
+    def test_v2_verdict_rows_carry_gap_p(self):
+        rows = []
+        for pred, base in (("cv", 1.0), ("lstm", 2.0)):
+            rows += _runs("replay", pred, "single",
+                          [base, base + 0.2, base + 0.4,
+                           base + 0.1, base + 0.3, base + 0.5])
+        em = encounter_means(_frame(rows))
+        v2 = v2_ranking_preservation(em, ["replay"], ["cv", "lstm"],
+                                     ["single"])
+        r = [x for x in v2 if x["verdict_kind"] == "predictor_ranking"][0]
+        assert np.isfinite(r["gap_p"])
+        assert np.isfinite(r["gap_stat"])
+        assert r["gap_n_pairs"] == 6
+        assert r["most_dangerous"] == "cv" and r["runner"] == "lstm"
 
 
 class TestMcnemarFamilyBH:
@@ -357,11 +470,14 @@ class TestReportDeterminism:
             em = encounter_means(runs)
             v1 = v1_rows(em, ["calib"], ["cv"], ["single", "robust"])
             gains = robust_gain_rows(em, ["replay", "calib"], ["cv"])
-            v2 = v2_robust_gain_preservation(gains, ["replay", "calib"],
-                                             ["cv"])
+            v2 = (v2_robust_gain_preservation(gains, ["replay", "calib"],
+                                              ["cv"])
+                  + v2_ranking_preservation(em, ["replay", "calib"], ["cv"],
+                                            ["single", "robust"]))
             v3 = [r for r in gains if r["ped_arm"] == "replay"]
             report = write_report(runs, census, v1, v2, v3, gains, em)
-            sidecar = json.dumps({"tests": headline_tests(v1, v3)}, indent=1)
+            sidecar = json.dumps({"tests": headline_tests(v1, gains, v2)},
+                                 indent=1)
             return report, sidecar
 
         r1, s1 = build()
