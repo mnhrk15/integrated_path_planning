@@ -94,7 +94,6 @@ def main():
     print_section("New Features Implementation")
     new_files = [
         'scripts/download_sgan_models.py',
-        'scripts/download_sgan_models.sh',
         'src/visualization/animator.py',
         'examples/demo_animation.py',
     ]
@@ -107,9 +106,7 @@ def main():
     print_section("Documentation")
     doc_files = [
         'README.md',
-        'QUICKSTART.md',
         'CHANGELOG.md',
-        'docs/ADDITIONAL_FEATURES.md',
     ]
     
     for filepath in doc_files:
@@ -160,18 +157,16 @@ def main():
     print("  • PySocialForce Integration: ✅ Implemented")
     print("  • Animation System: ✅ Implemented")
     print("\nNext Steps:")
-    print("  1. Install optional dependencies (if needed):")
-    print("     pip install pysocialforce pillow ffmpeg-python tqdm")
+    print("  1. Install dependencies:")
+    print("     pip install -r requirements.txt")
     print("  2. Download SGAN models:")
-    print("     python scripts/download_sgan_models.py")
+    print("     python scripts/download_sgan_models.py --pooling")
     print("  3. Run tests:")
     print("     pytest tests/ -v")
     print("  4. Try demo:")
     print("     python examples/demo_animation.py")
     print("\nFor more information, see:")
     print("  - README.md")
-    print("  - QUICKSTART.md")
-    print("  - docs/ADDITIONAL_FEATURES.md")
     print()
 
 
