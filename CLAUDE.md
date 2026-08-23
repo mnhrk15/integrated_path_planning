@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 環境とコマンド
 
-仮想環境は `.venv`（Python 3.12、pysocialforce / torch インストール済み）。README には `venv` と書かれているが実体は `.venv`。
+仮想環境は `.venv`（Python 3.12、pysocialforce / torch インストール済み）。
 
 ```bash
 # テスト（pytest 9.x）

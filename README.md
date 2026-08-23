@@ -1,340 +1,240 @@
 # Integrated Path Planning with Pedestrian Trajectory Prediction
 
-統合経路計画システム - Social ForceモデルとSocial-GANによる歩行者軌道予測、Frenet座標系を用いた自動運転車の安全な経路計画を実現するシミュレーション環境
+歩行者軌道予測（Social-GAN）と Frenet 座標系経路計画を統合した自動運転シミュレーション環境。以下の3コンポーネントを統合しています:
 
-## 概要
+1. **Social Force Model**（pysocialforce）: 歩行者挙動のシミュレーション。Ego 車両を斥力源として歩行者が能動的に回避する相互作用を含む
+2. **Social-GAN**: 社会的相互作用を考慮した歩行者軌道予測（`cv` / `lstm` / `sgan` の3モード切替）
+3. **Frenet Optimal Trajectory**: 参照経路に沿った候補経路のベクトル化生成と、予測歩行者を回避する衝突フリー経路の選択
 
-このプロジェクトは、以下の3つのコンポーネントを統合します：
+## アーキテクチャ
 
-1. **Social Force Model**: 歩行者の動きをシミュレート（Ground Truth生成）
-
-### 予測と可視化
-- **Social-GAN**: 歩行者の社会的相互作用を考慮した軌道予測
-- **不確実性の可視化**: 予測分布（複数サンプル）を半透明の軌道「雲」として描画し、モデルの確信度を表現
-   - `num_samples > 1` (推奨: 20) に設定することで有効化されます（アニメーションのみ。静的ダッシュボードは視認性のため予測雲を非表示にしています）
-- **Frenet Optimal Trajectory**: 道路形状に沿った滑らかな経路生成と、予測された歩行者を回避する安全な経路を計画
-
-## システムアーキテクチャ
+1ステップのデータフロー（統合点は `src/simulation/integrated_simulator.py` の `IntegratedSimulator.step()`）:
 
 ```
-[Social Force Simulator] → [Pedestrian Observer] → [Social-GAN Predictor]
-                                                            ↓
-                                                    [Predicted Trajectories] (Multi-Sample)
-                                                            ↓
-[Ego Vehicle State] ← [Frenet Planner] ← [Coordinate Converter]
+PedestrianSimulator (pysocialforce; Ego車両を斥力源として歩行者が回避)
+  → PedestrianObserver (シミュレーション dt に依らず SGAN 想定の 0.4s 間隔で観測履歴を保持)
+  → TrajectoryPredictor (Social-GAN; 12ステップ@0.4s の軌道を予測)
+  → 予測後処理 (プランナ dt=0.1s へ線形補間し、計画ホライゾン max_t まで等速外挿)
+  → FrenetPlanner (cubic spline 参照経路上で quintic polynomial 候補を生成、コスト最小の衝突フリー経路を選択)
+  → FailSafeStateMachine (NORMAL→CAUTION→EMERGENCY で制約を段階的に緩和、最終的に緊急停止)
 ```
 
-### 時間整合性と衝突判定の挙動
-- 観測はシミュレーション `dt` に依らず SGAN の想定サンプリング 0.4s 間隔でダウンサンプリングされます。
-- SGAN 出力はプランナ/シミュレーション `dt`（デフォルト 0.1s）に線形補間され、設定可能な計画ホライゾン（デフォルト: `max_t`=5.0s）まで等速外挿して時間幅を揃えます。
-- 衝突判定は動的障害物の「同時刻位置」のみを評価し、将来軌道を平坦化しません（過剰な停止・回避を防止）。
-- **予測失敗時のフォールバック (v3.6 Update)**: Social-GAN予測が失敗した場合、等速直線運動モデルで計画ホライゾン分の軌道を自動生成し、適切な時間次元を保持します。これにより予測失敗時でも安全な衝突判定が可能です。
-- **緊急回避 (v1.7 Update)**: 通常の経路計画が解を見つけられない場合、一時的に加速度や曲率の制約を緩和して衝突回避経路を探索するフォールバック機能を搭載しています。
-- **Fail-Safe State Machine (v1.9 Update)**: アドホックな条件分岐を廃止し、`NORMAL` -> `CAUTION` -> `EMERGENCY` の状態遷移による堅牢なフェイルセーフ機構を導入しました。計画失敗時に自動的に制約を緩和し、最終的には安全に停止します。
-- **設定可能な状態マシン (v3.4 Update)**: 状態マシンの安全距離や制約緩和係数をYAML設定で調整可能になりました。シナリオごとに最適な挙動を設定できます。
-- **再計画の試行回数制限 (v3.6 Update)**: 状態マシンによる再計画処理に試行回数の上限（デフォルト: 3回/ステップ）を設け、無限ループを防止しました。最大試行回数に達した場合は緊急停止に移行します。
-- **設定可能なプランナ時間ホライゾン (v3.4 Update)**: プランナーの予測時間範囲（`min_t`, `max_t`）や速度サンプリングパラメータを設定ファイルで制御可能になりました。
-- **設定値の自動検証 (v3.5 Update)**: 設定ファイル読み込み時に自動的に設定値の検証が実行され、不正な設定を早期に検出できます。詳細なエラーメッセージで問題箇所を特定しやすくなりました。
+設計上の要点:
 
-### パフォーマンスとロバスト性 (v1.1 & v3.6 Update)
-- **高速化**: 衝突判定のベクトル化（NumPy Broadcasting）により、数百の障害物が存在しても 0.06ms 程度で判定可能です。
-- **高速化**: Frenetプランナのポリノミアル生成をベクトル化し、候補軌道の生成をバッチ処理化しました（時間配列・係数計算を再利用）。
-- **高速化**: 衝突判定にAABB前段フィルタを追加し、不要な距離計算を削減しました（静的/動的障害物ともに対象）。
-- **効率化**: 参照経路上の座標探索にキャッシュ付き局所探索を導入し、計算コストを O(1) に削減しました。
-- **最適化**: 経路検証処理でジェネレータ式を使用することで、早期終了によるメモリ使用量とCPU時間を削減しました。
-- **安定化**: SGANの予測が途切れた後（12ステップ以降）の外挿処理に速度制限（max 2.5m/s）を設け、非現実的な挙動を抑制しました。
-- **予測失敗時のフォールバック (v3.6 Update)**: Social-GAN予測が失敗した場合、等速直線運動モデルで計画ホライゾン分の軌道を自動生成し、適切な時間次元を保持します。これにより予測失敗時でも安全な衝突判定が可能です。
-- **堅牢なエラーハンドリング (v3.6 Update)**: 座標変換やメトリクス計算での境界条件チェックを強化し、`IndexError`や`None`参照エラーを防止しました。
-- **完全なベクトル化 (v3.7 Update)**: 経路生成ポリノミアル、座標変換、グローバルパス計算を完全にベクトル化し、ループ処理を排除することで計算効率を飛躍的に向上させました。
-- **ロバストなNaN処理 (v3.7 Update)**: スプライン境界外参照時のNaN値を適切に検出し、不正な経路セグメントを自動的に除外するロジックを実装しました。
+- **時間整合**: 観測はシミュレーション `dt` に依らず 0.4s 間隔にダウンサンプリングされ、予測出力はプランナ `dt`（0.1s）へ線形補間・`max_t`（デフォルト 5.0s）まで等速外挿されます。
+- **衝突判定は「同時刻位置」のみ評価**します（将来軌道を平坦化しない）。予測失敗時のフォールバックも必ず計画ホライゾン分の時系列を生成します。
+- **予測失敗時のフォールバック**: Social-GAN 予測が失敗した場合は等速直線モデルの軌道で継続します（5回連続で失敗すると `RuntimeError` で停止）。
+- **フェイルセーフ**: 計画失敗時は状態マシンが加速度等の制約を段階的に緩和しながら同一ステップ内で再計画し、それでも経路が見つからなければ安全に緊急停止します。
+- **分布対応計画（オプション）**: `distribution_aware_planning: true` で SGAN の全 `num_samples` サンプルに対する chance-constrained 衝突判定に切替わります（`chance_epsilon` = 許容衝突サンプル割合、0.0 = worst-case）。デフォルトは単一代表サンプルです。
+- **ウォームアップ**: t=0 で観測履歴をプリロール生成するため、開始直後から SGAN 予測が有効です。ゴール 2m 以内に到達すると `total_time` を待たず自動終了します。
 
-### シミュレーションエンジン (v1.2 Update)
-- **PySocialForce統合**: 簡易的な等速直線運動モデルを廃止し、`pysocialforce` による Social Force Model を標準採用しました。歩行者同士の回避行動に加え、**Ego車両を動的な障害物として認識することで、歩行者が車両を能動的に回避する相互作用**を実装しました。Ego車両から歩行者への斥力は `ego_repulsion.sigma`, `ego_repulsion.v0`, `ego_radius` で明示的に設定できます。
-- **自動終了機能 (v3.1 Update)**: 車両が参照経路のゴール地点（2m以内）に到達すると、設定された `total_time` を待たずにシミュレーションを自動終了し、効率的な評価が可能になりました。
-- **予測ウォームアップ機能 (v3.2 Update)**: シミュレーション開始時 ($t=0$) に自動的に過去の観測データを生成（プリロール）する初期化フェーズを導入しました。これにより、**開始直後からSocial-GANによる有効な軌道予測が可能**となり、初期のラグが解消されました。
+## セットアップ
 
-### 評価と可視化 (v1.3 & v2.1 Update)
-- **拡張メトリクス**: 従来の安全性指標に加え、**ADE/FDE** (予測精度), **Jerk** (乗り心地), **TTC** (衝突リスク) を評価指標に追加しました。
-- **Dashboard**: シミュレーション結果を包括的に可視化する静的ダッシュボード生成機能 (`dashboard.png`) を実装しました。
-- **Map Visualization**: 道路境界線、レーン、横断歩道などの地図情報をアニメーションとダッシュボードに描画し、状況把握を容易にしました。
-- **Uncertainty Visualization (v2.1)**: Social-GANの確率的推論を活用し、複数サンプルの予測軌道をアニメーション上に描画することで、予測の不確実性を直感的に把握可能にしました。
-- **Enhanced Animation (v3.3)**: 
-    - 車両を**長方形** (4.5m x 2.0m) で描画し、Yaw角（向き）を明確化。
-    - **凡例 (Legend)** を追加し、Ego車両、歩行者、予測軌道、計画経路を識別しやすく改善。
-- **Headless対応**: `visualization_enabled` フラグにより、可視化処理を完全にスキップして高速実行やサーバーサイド実行が可能になりました。
-
-### 比較研究機能 (v1.4 Update - Prediction Modes)
-- **予測モード比較**: 歩行者予測の影響を検証するために、3つのモードを切り替え可能です。
-  - `cv`: 等速直線運動（Constant Velocity） - ベースライン
-  - `lstm`: 相互作用を考慮しない単純なLSTM予測（SGAN w/o Pooling）
-  - `sgan`: 相互作用を考慮したSocial-GAN予測（推奨）
-- **ベンチマーク**: シナリオごとの安全性・効率性を一括比較するスクリプトを提供します。
-
-## インストール
+Python 3.12 で動作確認済み。
 
 ```bash
-# リポジトリのクローン
-git clone <repository-url>
+git clone https://github.com/mnhrk15/integrated_path_planning.git
 cd integrated_path_planning
 
-# 仮想環境の作成と有効化
-python3 -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+python3 -m venv .venv
+source .venv/bin/activate
 
-# 依存関係のインストール
-pip install -r requirements.txt
-
-# パッケージのインストール（開発モード）
+pip install -r requirements.txt   # pysocialforce・torch 等の必須依存を含む
 pip install -e .
 ```
 
-## 学習済みモデルのダウンロード（必須）
+MP4 アニメーションを生成する場合のみ ffmpeg バイナリが必要です（macOS: `brew install ffmpeg` / Ubuntu: `sudo apt-get install ffmpeg`。GIF のみなら不要）。
 
-Social-GAN 予測には学習済みモデルが必須です（定速フォールバックはありません）。以下で入手してください：
+### 学習済みモデルのダウンロード（必須）
 
-### 方法1: Pythonスクリプト（推奨）
+`lstm` / `sgan` モードには学習済み Social-GAN モデルが必須です。`--pooling` 付きで両モデル群を取得してください:
 
 ```bash
-# 基本モデルのみダウンロード
-python scripts/download_sgan_models.py
-
-# プーリングモデルも含めてダウンロード
 python scripts/download_sgan_models.py --pooling
 ```
 
-### 方法2: Bashスクリプト
+- `models/sgan-models/` — Pooling なし（`--method lstm` 用）
+- `models/sgan-p-models/` — Pooling あり（`--method sgan` 用）
+
+各ディレクトリに `{eth,hotel,univ,zara1,zara2}_{8,12}_model.pt` の10ファイル（各 5〜10MB）が入ります。使用モデルはシナリオ YAML の `sgan_model_path` で指定します。未指定・パス不在の場合は設定読み込み時に `ConfigValidationError` で停止します。
+
+## 使い方
+
+### シミュレーション実行
 
 ```bash
-bash scripts/download_sgan_models.sh
-```
-
-ダウンロードされるモデル例：
-- `models/sgan-models/eth_12_model.pt` / `*_12_model.pt`
-- `models/sgan-models/hotel_12.pt`
-- `models/sgan-models/univ_12.pt`
-- `models/sgan-models/zara1_12.pt`
-- `models/sgan-models/zara2_12.pt`
-
-モデルサイズ: 各モデル約5-10MB（合計数十MB）
-
-## 使用方法
-
-### 基本的な使い方
-
-```python
-from src.simulation.integrated_simulator import IntegratedSimulator
-from src.config import load_config
-
-# 設定ファイルの読み込み
-config = load_config('scenarios/scenario_01.yaml')
-
-# シミュレータの初期化
-simulator = IntegratedSimulator(config)
-
-# シミュレーションの実行
-results = simulator.run(n_steps=100)
-
-# 結果の保存と可視化（自動的にdashboard.pngが生成されます）
-simulator.save_results()
-```
-
-### コマンドラインからの実行
-
-#### 基本実行
-```bash
-python examples/run_simulation.py --scenario scenarios/scenario_01.yaml
-```
-
-#### 予測モードの切り替え (v1.4 Update)
-```bash
-# 等速直線運動 (ベースライン)
-python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method cv
-
-# 単純LSTM (相互作用なし)
-python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method lstm
-
-# Social-GAN (デフォルト)
 python examples/run_simulation.py --scenario scenarios/scenario_01.yaml --method sgan
 ```
 
-#### アニメーション生成（NEW! 🆕）
-```bash
-# GIFアニメーション生成
-python examples/run_simulation.py \
-    --scenario scenarios/scenario_01.yaml \
-    --animate \
-    --animation-format gif \
-    --fps 10
+| オプション | 既定値 | 説明 |
+|---|---|---|
+| `--scenario` | `scenarios/scenario_01.yaml` | シナリオ設定ファイル |
+| `--method` | YAML の `prediction_method` | 予測モード `cv` / `lstm` / `sgan`（モデルディレクトリも自動切替） |
+| `--steps` | YAML の `total_time / dt` | シミュレーションステップ数の上書き |
+| `--output` | YAML の `output_path` | 出力ディレクトリの上書き |
+| `--seed` | なし | 乱数シード（再現性のため `metrics_report.txt` / `metrics_summary.csv` に記録） |
+| `--animate` | off | アニメーション（GIF/MP4）を生成 |
+| `--animation-format` | `gif` | `gif` または `mp4` |
+| `--fps` | `10` | アニメーションのフレームレート |
+| `--log-level` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
 
-# MP4アニメーション生成（高品質）
-python examples/run_simulation.py \
-    --scenario scenarios/scenario_02.yaml \
-    --animate \
-    --animation-format mp4 \
-    --fps 20
+### 予測モード
+
+| モード | モデル | 説明 |
+|---|---|---|
+| `cv` | 不要 | 等速直線運動（ベースライン） |
+| `lstm` | `models/sgan-models/` | 相互作用を考慮しない予測（SGAN w/o Pooling） |
+| `sgan` | `models/sgan-p-models/` | 相互作用を考慮した Social-GAN 予測 |
+
+`--method` を指定すると `sgan_model_path` のファイル名を保ったままディレクトリが自動で切り替わります（切替先が存在しない場合は `FileNotFoundError`）。
+
+### アニメーション生成
+
+```bash
+python examples/run_simulation.py --scenario scenarios/scenario_01.yaml \
+    --animate --animation-format gif --fps 10
 ```
 
-#### アニメーションデモ
-```bash
-# 両フォーマット（GIF + MP4）を生成するデモ
-python examples/demo_animation.py
-```
+`simulation.{gif,mp4}`（メトリクス付き）と `simulation_simple.{gif,mp4}`（マップのみ）の2本が出力されます。予測の不確実性は `num_samples > 1`（推奨: 20）のとき複数サンプルの予測軌道が半透明の「雲」として描画されます（アニメーションのみ。静的ダッシュボードでは非表示）。
 
-### Pythonコードでアニメーション作成
+### Python API
 
 ```python
-from src.simulation.integrated_simulator import IntegratedSimulator
-from src.visualization import create_simple_animation
 from src.config import load_config
+from src.simulation.integrated_simulator import IntegratedSimulator
 
-# シミュレーション実行
 config = load_config('scenarios/scenario_01.yaml')
 simulator = IntegratedSimulator(config)
-results = simulator.run(n_steps=150)
-
-# アニメーション作成
-create_simple_animation(
-    results=results,
-    output_path='output/my_animation.gif',
-    show=True,  # 表示する
-    show_predictions=True,  # 予測軌道を表示
-    show_metrics=True,  # メトリクスを表示
-    fps=10
-)
+results = simulator.run()          # n_steps を渡さなければ total_time / dt 分実行
+simulator.save_results()           # config.output_path に成果物一式を保存
 ```
 
-### 予測モデルのベンチマーク (v1.4 Update)
-
-3つの予測モード（CV, LSTM, SGAN）を同一シナリオで実行し、安全性指標（最小距離、衝突回数、TTC）と効率性指標を比較します。
+### ベンチマーク
 
 ```bash
+# 3手法（cv/lstm/sgan）を同一シナリオ・同一シードで比較
 python examples/benchmark_prediction.py --scenario scenarios/scenario_01.yaml
+# → output/benchmark/<シナリオ名>/benchmark_report.md
+
+# 複数シードの統計比較（mean±std、乗り心地指標含む）
+python examples/run_statistical_benchmark.py
+# → output/statistical_benchmark/{all_runs.csv, summary_stats.csv, latex_table.txt}
 ```
 
-レポートは `output/benchmark/benchmark_report.md` に保存されます。
+### テスト
 
-### 学習済みモデルの指定（必須）
+```bash
+.venv/bin/python -m pytest tests/
+```
 
-シナリオYAMLでモデルパスを指定してください。未指定のまま実行すると `RuntimeError` で停止します。
+`tests/manual_test_headless.py` と `tests/benchmark_collision.py` は pytest 対象外の手動実行スクリプトです。
+
+## シナリオ
+
+| ファイル | 内容 |
+|---|---|
+| `scenarios/scenario_01.yaml` | 歩行者との交差（横断歩道） |
+| `scenarios/scenario_02.yaml` | 狭い通路でのすれ違い |
+| `scenarios/scenario_03.yaml` | 交差点での右折（Yielding） |
+
+各シナリオには `_cv` / `_lstm` サフィックスの派生版があります（base との差分は `prediction_method` と `output_path` のみ。base 自体が `sgan`）。`scenarios/rq1b/` は研究用スクリプトが使う機械生成コピーです。
+
+## 主要設定（YAML）
+
+全設定項目とデフォルト値の**単一情報源は `src/config/__init__.py` の `SimulationConfig` dataclass** です。読み込み時に `validate_config()` が自動検証し、不正な値や未知のキーはエラーになります。主要カテゴリ:
+
+- **時間・予測**: `dt`（0.1）、`total_time`、`obs_len`（8）、`pred_len`（8。同梱シナリオは 12）、`num_samples`、`single_select`（`medoid` / `draw`）
+- **Ego 車両**: `ego_initial_state`（`[x, y, yaw, v, a]`）、`ego_target_speed`、`ego_max_speed`、`ego_max_accel`、`ego_max_curvature`（0.2）、`ego_footprint`（`circle` / `multi_circle`）、`vehicle_length` / `vehicle_width`
+- **安全半径**: `ego_radius`、`ped_radius`（プランナ用マージン）、`obstacle_radius`
+- **経路・環境**: `reference_waypoints_x` / `reference_waypoints_y`（2点以上）、`ped_initial_states`（`[x, y, vx, vy, gx, gy]`）、`ped_groups`、`static_obstacles`（矩形 `[x_min, x_max, y_min, y_max]`）、`map_config`
+- **プランナ**: 横方向サンプリング `d_road_w` / `max_road_width`、時間ホライゾン `min_t` / `max_t`、速度サンプリング `d_t_s` / `n_s_sample`、コスト重み `k_j` / `k_t` / `k_d` / `k_s_dot` / `k_lat` / `k_lon`
+- **分布対応計画**: `distribution_aware_planning`、`chance_epsilon`、`collision_margin_inflation`
+- **状態マシン**: 予防トリガ `state_machine_trigger_clearance_caution` / `state_machine_trigger_time_headway`、復帰ゲート `state_machine_recover_clearance_{caution,emergency}`、速度エンベロープ `state_machine_envelope_decel` / `state_machine_envelope_standoff`、制約緩和倍率 `state_machine_{caution,emergency}_accel_multiplier` / `state_machine_caution_speed_multiplier` / `state_machine_emergency_lat_accel_multiplier`
+- **Social Force**: `social_force_params`（ドット記法の辞書）。主要キーは `ego_repulsion.sigma`（Ego→歩行者斥力の減衰距離）、`ego_repulsion.v0`（同・強度）、`agent_radius`。その他のキーは pysocialforce の設定にそのまま渡されます
+- **予測・実行**: `prediction_method`、`sgan_model_path`（`lstm`/`sgan` で必須）、`device`（`cpu` / `cuda` / `mps`）、`visualization_enabled`、`output_path`
+
+## 出力ファイル
+
+`save_results()` は `output_path`（例: `output/scenario_01/`）に以下を保存します:
+
+| ファイル | 条件 | 内容 |
+|---|---|---|
+| `trajectory.npz` | 常時 | 時系列データ（Ego 状態・歩行者位置・予測・計画経路・安全指標）。object 配列を含むため読み込みは `np.load(..., allow_pickle=True)` |
+| `metrics_summary.csv` | 常時 | メトリクス集計 1 行（実行ごとに上書き） |
+| `metrics_report.txt` | 常時 | 全設定値と詳細メトリクスの可読レポート |
+| `dashboard.png` / `simulation.png` | `visualization_enabled: true` | 統合ダッシュボード / 軌跡静止画 |
+| `simulation.{gif,mp4}` / `simulation_simple.{gif,mp4}` | `--animate` | アニメーション2種 |
+
+ベンチマーク実行時は `visualization_enabled: false` でヘッドレス実行するのが前提です（`src/visualization/` を完全スキップ）。
+
+主な評価指標: 安全性（最小距離・衝突・TTC）、予測精度（標準 ADE/FDE = 0.4s 間隔のシーン単位 best-of-N、計画用 `planning_ade`/`planning_fde` = プランナ入力軌道のローリング評価）、効率性（到達時間・平均速度）、快適性（最大加速度・ジャーク）。
+
+## カスタムシナリオ
+
+最小構成の例:
 
 ```yaml
-# scenarios/my_scenario.yaml
-sgan_model_path: "models/sgan-p-models/zara1_12_model.pt"
+# my_scenario.yaml
+dt: 0.1
+total_time: 20.0
+pred_len: 12
+num_samples: 20
+
+ego_initial_state: [0.0, 0.0, 0.0, 5.0, 0.0]   # [x, y, yaw, v, a]
+ego_target_speed: 6.0
+ego_max_speed: 10.0
+
+reference_waypoints_x: [0.0, 20.0, 40.0, 60.0]
+reference_waypoints_y: [0.0, 5.0, 5.0, 0.0]
+
+ped_initial_states:
+  - [30.0, 3.0, -0.5, 0.0, 30.0, -3.0]          # [x, y, vx, vy, gx, gy]
+ped_groups: [[0]]
+
+social_force_params:
+  ego_repulsion.sigma: 0.7
+  ego_repulsion.v0: 3.5
+
+sgan_model_path: models/sgan-p-models/zara1_12_model.pt
+output_path: output/my_scenario
 ```
+
+未指定のキーは `SimulationConfig` のデフォルトが使われます。不正な値（負の `dt`、`min_t >= max_t` など）や未知のキーは読み込み時に `ConfigValidationError` / `ValueError` になり、問題箇所がメッセージに列挙されます。
+
+## トラブルシューティング
+
+- **`ConfigValidationError` が出る**: メッセージに列挙された項目を修正してください（例: `sgan_model_path is required when prediction_method is 'sgan'` → モデルをダウンロードしてパスを設定）。
+- **モデルファイルがない**: `python scripts/download_sgan_models.py --pooling` を実行。`--method lstm` は `models/sgan-models/`、`--method sgan` は `models/sgan-p-models/` を参照します。
+- **MP4 生成に失敗する**: ffmpeg バイナリをインストールするか、`--animation-format gif` を使用してください（GIF は pillow のみで生成可）。
+- **GPU を使いたい**: YAML で `device: "cuda"`（NVIDIA）または `device: "mps"`（Apple Silicon）を指定。デフォルトは `cpu`。
+- **ログに "Prediction failed" が出る**: 等速直線モデルに自動フォールバックして継続します。頻発する場合は `sgan_model_path` と `obs_len` の設定を確認してください。
+- **再計画が頻発する**: 状態マシンが制約を緩和して再計画している状態です。`d_road_w` を小さくする・`max_road_width` を大きくする・状態マシンの倍率パラメータを調整するなどで探索を広げられます。
 
 ## プロジェクト構成
 
 ```
 integrated_path_planning/
 ├── src/
-│   ├── config/          # 設定管理
-│   ├── core/            # 基本データ構造と座標変換
-│   ├── pedestrian/      # Social Force統合と観測
-│   ├── prediction/      # Social-GAN統合
-│   ├── planning/        # Frenet経路計画
-│   ├── simulation/      # 統合シミュレータ
-│   └── visualization/   # 可視化
+│   ├── config/          # 設定管理（SimulationConfig = 設定の単一情報源）
+│   ├── core/            # 基本データ構造・座標変換・状態マシン
+│   ├── pedestrian/      # 観測履歴の管理（PedestrianObserver）
+│   ├── prediction/      # Social-GAN 統合（本体は sgan_vendor/ にベンダリング）
+│   ├── planning/        # Frenet 経路計画
+│   ├── simulation/      # 統合シミュレータ・歩行者シミュレータ
+│   ├── visualization/   # 可視化（ダッシュボード・アニメーション）
+│   ├── calibration/     # SFM パラメータ較正（研究用）
+│   └── datasets/        # 実データローダ ETH/UCY・VCI（研究用）
 ├── scenarios/           # シミュレーションシナリオ
-├── models/              # 学習済みモデル
-├── tests/               # ユニットテスト
-└── examples/            # 使用例
+├── models/              # 学習済み Social-GAN モデル（ダウンロードで取得）
+├── examples/            # 実行スクリプト（run_rq* / plot_* 等は修論研究用）
+├── scripts/             # モデル・データ取得等のユーティリティ
+├── tests/               # pytest テストスイート
+└── docs/                # 研究記録・レビュー文書
 ```
-
-## シナリオ
-
-複数のシナリオが用意されています：
-
-1. **scenario_01.yaml**: 歩行者との交差シナリオ
-2. **scenario_02.yaml**: 狭い通路でのすれ違いシナリオ
-3. **scenario_03.yaml**: 交差点での右折（Yielding）シナリオ
-
-
-## 主な設定項目（YAML）
-
-### 基本パラメータ
-- **時間**: `dt`, `total_time`, 観測/予測長 `obs_len`, `pred_len` (default=12), `num_samples` (SGAN予測サンプル数, 推奨: 20)
-- **Ego車両**: `ego_initial_state`, `ego_target_speed`, `ego_max_speed`, `ego_max_accel`, `ego_max_curvature` (default=1.0)
-- **安全パラメータ**: `ego_radius` (自車半径), `ped_radius` (プランナ用マージン), `obstacle_radius`
-  - `social_force_params.agent_radius`: 歩行者シミュレータ内での歩行者の物理半径
-  - `social_force_params.ego_repulsion.sigma`: Ego車両から歩行者への斥力の減衰距離
-  - `social_force_params.ego_repulsion.v0`: Ego車両から歩行者への斥力の強度
-- **経路**: `reference_waypoints_x`, `reference_waypoints_y`
-- **歩行者**: `ped_initial_states`, `ped_groups`
-- **障害物**: `static_obstacles`（矩形: `[x_min, x_max, y_min, y_max]`）
-- **予測モデル**: `sgan_model_path`（必須。未設定の場合はエラー）
-- **デバイス/出力**: `device`, `output_path`, `visualization_enabled`
-
-### プランナパラメータ
-- **横方向サンプリング**: `d_road_w` (横方向サンプリング間隔, default=0.3), `max_road_width` (最大横探索幅)
-- **時間ホライゾン**: `min_t` (最小予測時間 [s], default=4.0), `max_t` (最大予測時間 [s], default=5.0)
-- **速度サンプリング**: `d_t_s` (目標速度サンプリング幅 [m/s], default=1.39), `n_s_sample` (サンプリング数, default=1)
-- **コスト重み（任意上書き）**: 
-  - `k_lat`: 横方向偏差の重み（低いと障害物回避で大きく避けるようになる）
-  - `k_j`: ジャークの重み（低いとキビキビ動く）
-  - `k_t`, `k_d`, `k_s_dot`, `k_lon`
-
-### 状態マシンパラメータ（v3.4 Update）
-- **安全距離**: 
-  - `state_machine_safe_distance_caution` (CAUTION→NORMAL遷移の安全距離 [m], default=0.5)
-  - `state_machine_safe_distance_emergency` (EMERGENCY→CAUTION遷移の安全距離 [m], default=1.0)
-- **CAUTION状態の制約緩和**: 
-  - `state_machine_caution_accel_multiplier` (加速度倍率, default=1.5)
-  - `state_machine_caution_curvature_multiplier` (曲率倍率, default=1.2)
-  - `state_machine_caution_speed_multiplier` (速度倍率, default=0.8)
-- **EMERGENCY状態の制約緩和**: 
-  - `state_machine_emergency_accel_multiplier` (加速度倍率, default=3.0)
-  - `state_machine_emergency_curvature_multiplier` (曲率倍率, default=2.0)
-
-これらのパラメータにより、シナリオごとに状態マシンとプランナーの挙動を細かく調整できます。
-
-### 設定値の検証 (v3.5 Update)
-- **自動検証**: 設定ファイル読み込み時に自動的に設定値の検証が実行されます
-- **検証項目**:
-  - 値の範囲チェック（正の値、非負の値など）
-  - 整合性チェック（`min_t < max_t`, `ego_max_speed >= ego_target_speed`など）
-  - 形式チェック（配列の長さ、ファイルの存在確認など）
-- **エラーメッセージ**: 検証失敗時は詳細なエラーメッセージが表示され、問題箇所を特定しやすくなります
-- **例**: 不正な設定を読み込もうとすると`ConfigValidationError`が発生し、具体的な問題点がリストアップされます
-
-## 保存される出力
- 
- `simulator.save_results()` は以下を保存します:
- 
- 1. **`trajectory.npz`**: 時系列データ（NumPy形式）
-    - Ego: `ego_x`, `ego_y`, `ego_v`, `ego_jerk`, `ego_state`
-    - Safety: `min_distances`, `ttc`
-    - Pedestrians: `ped_positions`, `ped_velocities`, `ped_goals`
-    - Prediction: `predicted_trajectories`
-    - Plan: `planned_path` 詳細
- 
- 2. **`metrics_summary.csv`**: メトリクス集計（CSV形式）
-    - **上書きモード**: 実行ごとにファイルが上書きされます（最新の結果のみ保持）
-    - 内容: シナリオ設定（モデル、メソッド）、標準 ADE/FDE、計画用 ADE/FDE、安全性指標（最小距離、衝突有無）、効率性指標
- 
- 3. **`metrics_report.txt`**: レポート（テキスト形式）
-    - 人間が読みやすい形式の実行サマリ
-    - 内容: 全設定値と詳細メトリクス
- 
- 4. **`dashboard.png`** (visualization_enabled=True時):
-    - 統合ダッシュボード画像
-
-## テスト
-
-```bash
-pytest tests/
-```
-
-## 評価指標
-
-- **安全性**: 最小距離（歩行者との最短距離）、衝突回数、TTC（Time to Collision）
-- **標準予測精度**: `ade`, `fde`。SGAN 標準に合わせ、完全な予測区間のみを対象に、0.4 秒間隔・固定ホライズンでシーン単位 best-of-N ADE/FDE を計算
-- **計画用予測精度**: `planning_ade`, `planning_fde`。プランナへ実際に入力した単一の高密度軌道について、利用可能な未来区間でローリング ADE/FDE を計算
-- **効率性**: 目標到達時間、平均速度
-- **快適性**: 最大加速度、最大ジャーク、平均ジャーク
 
 ## ライセンス
 
-MIT License
+MIT License（[LICENSE](LICENSE) を参照）。`src/prediction/sgan_vendor/` は [Social-GAN](https://github.com/agrimgupta92/sgan)（MIT License）のベンダリングです。
 
 ## 参考文献
 
